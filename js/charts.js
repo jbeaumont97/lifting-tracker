@@ -164,7 +164,9 @@ export function progressionChart(stats, settings, { width = 340, height = 210, s
       class: 'area',
     }));
   }
-  svg.append(svgEl('path', { d: linePath, class: 'line', fill: 'none' }));
+  // pathLength normalises the dash maths to 1 whatever the real length is, so
+  // the draw-in animation is a plain 1 -> 0 dashoffset in CSS.
+  svg.append(svgEl('path', { d: linePath, class: 'line', fill: 'none', pathLength: 1 }));
 
   // --- the next-session target: a ringed marker, directly labelled ---
   let targetPos = null;
@@ -180,10 +182,20 @@ export function progressionChart(stats, settings, { width = 340, height = 210, s
     }
   }
 
-  // --- session dots, each with a 2px surface ring ---
+  // --- session dots, each with a 2px surface ring; PRs wear a ring of their own ---
+  const stagger = Math.min(40, 420 / Math.max(1, sessions.length));
+  let anyPR = false;
   for (const [i, s] of sessions.entries()) {
     const isLast = i === sessions.length - 1;
-    svg.append(svgEl('circle', { cx: x(s.day), cy: y(s.best.adj), r: isLast ? 5 : 3.6, class: isLast ? 'dot dot-last' : 'dot' }));
+    const delay = `animation-delay:${Math.round(220 + i * stagger)}ms`;
+    if (s.best.isPR) {
+      anyPR = true;
+      svg.append(svgEl('circle', { cx: x(s.day), cy: y(s.best.adj), r: isLast ? 8 : 6.5, class: 'dot-pr', style: delay }));
+    }
+    svg.append(svgEl('circle', {
+      cx: x(s.day), cy: y(s.best.adj), r: isLast ? 5 : 3.6,
+      class: isLast ? 'dot dot-last' : 'dot', style: delay,
+    }));
   }
   // Last value, directly labelled — the one number the chart is about.
   const lp = pts[pts.length - 1];
@@ -261,6 +273,7 @@ export function progressionChart(stats, settings, { width = 340, height = 210, s
     stats.trendPerDay != null ? keyItem('trend', `Trend ${fmt(stats.trendPerWeek, 2)} kg/wk`) : null,
     horizon ? keyItem('proj', `Projection, +${Math.round(horizon / 7)} wks`) : null,
     Number.isFinite(stats.nextTarget) ? keyItem('target', `Next target ${fmt(stats.nextTarget, 1)}`) : null,
+    anyPR ? keyItem('pr', 'Personal best') : null,
   ]);
   fig.append(key);
   return fig;
@@ -373,6 +386,7 @@ export function weeklySetsChart(stats, { width = 340, height = 130, weeks = 8, t
       svg.append(svgEl('path', {
         d: roundedTop(bx, top, barW, h, 4),
         class: i === buckets.length - 1 ? 'bar bar-current' : 'bar',
+        style: `animation-delay:${i * 45}ms`,
       }));
     }
     if ((buckets.length - 1 - i) % 2 === 0) {

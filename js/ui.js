@@ -47,18 +47,102 @@ export function stepper({ label, value, step = 1, min = 0, max = 9999, dp = 1, s
   field.addEventListener('blur', commit);
   field.addEventListener('focus', () => field.select());
 
+  const down = el('button', { type: 'button', class: 'stepper-btn', 'aria-label': `Decrease ${label}` }, ['−']);
+  const up = el('button', { type: 'button', class: 'stepper-btn', 'aria-label': `Increase ${label}` }, ['+']);
+  holdToRepeat(down, () => nudge(-1));
+  holdToRepeat(up, () => nudge(1));
+
   const wrap = el('div', { class: 'stepper' }, [
     el('label', { class: 'stepper-label', for: id, text: label }),
     el('div', { class: 'stepper-row' }, [
-      el('button', { type: 'button', class: 'stepper-btn', 'aria-label': `Decrease ${label}`, onclick: () => nudge(-1) }, ['−']),
+      down,
       el('div', { class: 'stepper-field' }, [field, suffix ? el('span', { class: 'stepper-suffix', text: suffix }) : null]),
-      el('button', { type: 'button', class: 'stepper-btn', 'aria-label': `Increase ${label}`, onclick: () => nudge(1) }, ['+']),
+      up,
     ]),
   ]);
   wrap.setValue = (v) => { field.value = format(v); };
   wrap.getValue = () => Number(field.value);
   wrap.input = field;
   return wrap;
+}
+
+/**
+ * Tap once to step; hold to repeat, accelerating. 60 -> 100 kg becomes a few
+ * seconds of holding rather than sixteen taps.
+ *
+ * The trailing click after a hold is swallowed, otherwise the release would add
+ * one more step than the finger asked for.
+ */
+export function holdToRepeat(btn, fn, { delay = 420, rate = 110, fast = 45 } = {}) {
+  let start = null, repeat = null, repeated = false, fired = 0;
+  const stop = () => {
+    clearTimeout(start); clearInterval(repeat);
+    start = repeat = null;
+  };
+  btn.addEventListener('pointerdown', (e) => {
+    if (e.button > 0) return;
+    repeated = false; fired = 0;
+    start = setTimeout(() => {
+      repeated = true;
+      fn(); tap();
+      repeat = setInterval(() => {
+        fn();
+        // After a second of holding, speed up — long journeys are the point.
+        if (++fired === 8) { clearInterval(repeat); repeat = setInterval(fn, fast); }
+      }, rate);
+    }, delay);
+  });
+  for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) btn.addEventListener(ev, stop);
+  btn.addEventListener('click', () => {
+    stop();
+    if (repeated) { repeated = false; return; }
+    fn(); tap();
+  });
+}
+
+/**
+ * A hint of haptic feedback where the platform offers one. iOS Safari does not
+ * implement the Vibration API, so this is simply a no-op there.
+ */
+export function tap(pattern = 8) {
+  try { navigator.vibrate?.(pattern); } catch { /* not supported */ }
+}
+
+/** A chevron that CSS can rotate — a glyph swap cannot animate. */
+export function chevron(className = 'card-chevron') {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('class', className);
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('focusable', 'false');
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('d', 'M6 9.5 12 15.5 18 9.5');
+  svg.append(path);
+  return svg;
+}
+
+/* --------------------------------------------------------------- identity */
+
+const ACCENTS = 8;
+
+/** A stable colour slot per lift, derived from its id so nothing is stored. */
+export function accentIndex(id) {
+  let h = 0;
+  for (const ch of String(id)) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return h % ACCENTS;
+}
+
+/** The small coloured dot that gives a lift an identity across the app. */
+export function accentDot(id) {
+  return el('span', { class: `accent-dot accent-${accentIndex(id)}`, 'aria-hidden': 'true' });
+}
+
+/** Marks a set that was a personal best at the moment it was logged. */
+export function prBadge({ compact = false } = {}) {
+  return el('span', { class: 'pr-badge', title: 'Personal best when it was logged' }, [
+    el('span', { class: 'pr-glyph', 'aria-hidden': 'true', text: '🏆' }),
+    compact ? null : el('span', { text: 'PR' }),
+  ]);
 }
 
 /** Horizontal single-choice chips — faster and clearer than a <select>. */
@@ -80,7 +164,7 @@ export function chipGroup({ label, options, value, onChange, allowNull = false, 
 function chip(label, selected, onClick, sub) {
   return el('button', {
     type: 'button', class: `chip${selected ? ' is-selected' : ''}`, role: 'radio',
-    'aria-checked': selected ? 'true' : 'false', onclick: onClick,
+    'aria-checked': selected ? 'true' : 'false', onclick: () => { tap(); onClick(); },
   }, [el('span', { text: label }), sub ? el('small', { text: sub }) : null]);
 }
 
@@ -144,11 +228,56 @@ export function toast(message, { action, actionLabel, duration = 4200 } = {}) {
   return dismiss;
 }
 
+/* ------------------------------------------------------------- celebration */
+
+/**
+ * A short burst for a personal best. Purely decorative, so it is skipped
+ * outright when the reader has asked for reduced motion.
+ */
+export function celebrate({ count = 18 } = {}) {
+  if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+  const host = el('div', { class: 'confetti-host', 'aria-hidden': 'true' });
+  for (let i = 0; i < count; i++) {
+    const piece = el('i', { class: `confetti confetti-${i % 4}` });
+    piece.style.left = `${6 + Math.random() * 88}%`;
+    piece.style.animationDelay = `${Math.round(Math.random() * 220)}ms`;
+    piece.style.setProperty('--drift', `${Math.round((Math.random() * 2 - 1) * 70)}px`);
+    piece.style.setProperty('--spin', `${Math.round(Math.random() * 620 - 310)}deg`);
+    host.append(piece);
+  }
+  document.body.append(host);
+  setTimeout(() => host.remove(), 2400);
+}
+
 /* ------------------------------------------------------------------ sheet */
 
-/** A bottom sheet — used for confirmations and the entry editor. */
+let openSheets = 0;
+
+const FOCUSABLE = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+
+/**
+ * A bottom sheet — used for confirmations and the entry editor.
+ *
+ * Focus is trapped inside the panel while it is up and handed back to whatever
+ * opened it on close, and the key handler is torn down however the sheet goes
+ * away — not only when it is dismissed with Escape.
+ */
 export function sheet({ title, body, actions = [], onClose }) {
-  const close = () => { wrap.remove(); document.body.classList.remove('has-sheet'); onClose?.(); };
+  const opener = document.activeElement;
+  let closed = false;
+
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    document.removeEventListener('keydown', onKey, true);
+    wrap.classList.add('is-leaving');
+    wrap.classList.remove('is-in');
+    setTimeout(() => wrap.remove(), 200);
+    if (--openSheets <= 0) { openSheets = 0; document.body.classList.remove('has-sheet'); }
+    if (opener?.isConnected) opener.focus?.({ preventScroll: true });
+    onClose?.();
+  };
+
   const panel = el('div', { class: 'sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': title }, [
     el('div', { class: 'sheet-grip', 'aria-hidden': 'true' }),
     el('h2', { class: 'sheet-title', text: title }),
@@ -159,13 +288,28 @@ export function sheet({ title, body, actions = [], onClose }) {
     }, [a.label]))),
   ]);
   const wrap = el('div', { class: 'sheet-wrap', onclick: (e) => { if (e.target === wrap) close(); } }, [panel]);
+
+  // A sheet opened from a sheet (confirm-on-top-of-edit) owns the keyboard
+  // until it goes; the one underneath must not react to Escape or Tab.
+  function onKey(e) {
+    const live = document.querySelectorAll('.sheet-wrap:not(.is-leaving)');
+    if (live[live.length - 1] !== wrap) return;
+    if (e.key === 'Escape') { e.preventDefault(); close(); return; }
+    if (e.key !== 'Tab') return;
+    const items = [...panel.querySelectorAll(FOCUSABLE)].filter((n) => !n.disabled && !n.hidden);
+    if (!items.length) return;
+    const first = items[0], last = items[items.length - 1];
+    const inside = panel.contains(document.activeElement);
+    if (e.shiftKey && (!inside || document.activeElement === first)) { last.focus(); e.preventDefault(); }
+    else if (!e.shiftKey && (!inside || document.activeElement === last)) { first.focus(); e.preventDefault(); }
+  }
+
   document.body.append(wrap);
+  openSheets++;
   document.body.classList.add('has-sheet');
+  document.addEventListener('keydown', onKey, true);
   requestAnimationFrame(() => wrap.classList.add('is-in'));
-  document.addEventListener('keydown', function esc(e) {
-    if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc); }
-  });
-  panel.querySelector('button, input, select')?.focus?.();
+  panel.querySelector(FOCUSABLE)?.focus?.({ preventScroll: true });
   return { close, panel };
 }
 
