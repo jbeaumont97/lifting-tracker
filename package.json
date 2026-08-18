@@ -1,0 +1,12 @@
+{
+  "name": "lifting-tracker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Offline-first PWA that replaces the Lifting Tracker spreadsheet.",
+  "type": "module",
+  "scripts": {
+    "start": "python3 -m http.server 8080",
+    "test": "node tools/test.mjs",
+    "seed": "python3 tools/seed_from_xlsx.py"
+  }
+}

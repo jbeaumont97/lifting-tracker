@@ -1,0 +1,203 @@
+{
+  "dashboard": [
+    {
+      "name": "Squat",
+      "lastAdj": 100.8440436,
+      "bestAdj": 100.8440436,
+      "trendPerWeek": 5.562323459,
+      "nextTarget": 101.6003739,
+      "volume7": 3200,
+      "lastReps": 5,
+      "lastSets": 5,
+      "sets7": 8,
+      "setStatus": "under"
+    },
+    {
+      "name": "Bench Press",
+      "lastAdj": 81.93578542,
+      "bestAdj": 81.93578542,
+      "trendPerWeek": 2.961300879,
+      "nextTarget": 82.34546435,
+      "volume7": 2925,
+      "lastReps": 5,
+      "lastSets": 5,
+      "sets7": 9,
+      "setStatus": "under"
+    },
+    {
+      "name": "Deadlift",
+      "lastAdj": 135.446531,
+      "bestAdj": 135.446531,
+      "trendPerWeek": 4.251301737,
+      "nextTarget": 136.4623799,
+      "volume7": 5600,
+      "lastReps": 8,
+      "lastSets": 4,
+      "sets7": 7,
+      "setStatus": "under"
+    },
+    {
+      "name": "Overhead Press",
+      "lastAdj": 36.92257151,
+      "bestAdj": 36.92257151,
+      "trendPerWeek": 2.483473787,
+      "nextTarget": 37.10718436,
+      "volume7": 750,
+      "lastReps": 5,
+      "lastSets": 3,
+      "sets7": 5,
+      "setStatus": "under"
+    },
+    {
+      "name": "Seated row",
+      "lastAdj": 79.91345326,
+      "bestAdj": 79.91345326,
+      "trendPerWeek": null,
+      "nextTarget": 80.39293398,
+      "volume7": 1888,
+      "lastReps": 8,
+      "lastSets": 4,
+      "sets7": 4,
+      "setStatus": "under"
+    },
+    {
+      "name": "Lat pulldown",
+      "lastAdj": 88.19219937,
+      "bestAdj": 88.19219937,
+      "trendPerWeek": null,
+      "nextTarget": 88.63316036,
+      "volume7": 1584,
+      "lastReps": 8,
+      "lastSets": 3,
+      "sets7": 3,
+      "setStatus": "under"
+    },
+    {
+      "name": "Bicep curl",
+      "lastAdj": 38.89829065,
+      "bestAdj": 42.75985424,
+      "trendPerWeek": -13.51547255,
+      "nextTarget": 39.09278211,
+      "volume7": 1524,
+      "lastReps": 4,
+      "lastSets": 6,
+      "sets7": 9,
+      "setStatus": "under"
+    }
+  ],
+  "plan": {
+    "exercise": "Squat",
+    "target": 101.6003739,
+    "step": 2.5,
+    "bestAdj": 100.8440436,
+    "lastReps": 5,
+    "lastSets": 5,
+    "repsUsed": 5,
+    "setsUsed": 5,
+    "weight": 82.5,
+    "score": 103.99542,
+    "verdict": "Stretch",
+    "weightGrid": [
+      [
+        92.5,
+        90,
+        90,
+        87.5,
+        87.5
+      ],
+      [
+        90,
+        87.5,
+        85,
+        85,
+        85
+      ],
+      [
+        87.5,
+        85,
+        85,
+        82.5,
+        82.5
+      ],
+      [
+        85,
+        82.5,
+        82.5,
+        80,
+        80
+      ],
+      [
+        82.5,
+        80,
+        77.5,
+        77.5,
+        75
+      ],
+      [
+        77.5,
+        75,
+        72.5,
+        72.5,
+        72.5
+      ],
+      [
+        75,
+        72.5,
+        70,
+        70,
+        67.5
+      ]
+    ],
+    "scoreGrid": [
+      [
+        101.75,
+        102.4310785,
+        104.4381308,
+        102.9215416,
+        103.99542
+      ],
+      [
+        102,
+        102.6035214,
+        101.6249825,
+        103.0106512,
+        104.0854593
+      ],
+      [
+        102.0833333,
+        102.6035214,
+        104.6139526,
+        102.9215416,
+        103.99542
+      ],
+      [
+        102,
+        102.4310785,
+        104.4381308,
+        102.6542129,
+        103.725302
+      ],
+      [
+        104.5,
+        104.845279,
+        103.559022,
+        104.9710615,
+        102.6448301
+      ],
+      [
+        103.3333333,
+        103.4657359,
+        101.9766261,
+        103.3670894,
+        104.4456166
+      ],
+      [
+        105,
+        105.0177219,
+        103.3832002,
+        104.7928424,
+        102.1045941
+      ]
+    ]
+  }
+}
