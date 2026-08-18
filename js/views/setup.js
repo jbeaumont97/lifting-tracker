@@ -1,8 +1,9 @@
 // views/setup.js — the Exercises and Settings sheets, plus backup/restore.
 // Everything here is stored on this device only; nothing is ever sent anywhere.
 
-import { el, stepper, chipGroup, segmented, toast, sheet, confirmSheet, details } from '../ui.js';
+import { el, stepper, chipGroup, segmented, toast, sheet, confirmSheet, details, chevron, accentDot } from '../ui.js';
 import * as store from '../store.js';
+import { showWelcome } from './welcome.js';
 import { fmt, setBonus } from '../metrics.js';
 
 export function renderSetup(ctx) {
@@ -11,6 +12,25 @@ export function renderSetup(ctx) {
   root.append(el('header', { class: 'view-head' }, [
     el('h1', { text: 'Setup' }),
     el('p', { class: 'view-sub', text: 'Your lifts, the maths behind the numbers, and your backups. All of it stays on this iPhone.' }),
+  ]));
+
+  /* ------------------------------------------------------- how much detail */
+  root.append(el('h2', { class: 'section-title', text: 'How much to show' }));
+  root.append(el('div', { class: 'card card-pad' }, [
+    el('div', { class: 'field-block' }, [
+      el('span', { class: 'field-label', text: 'Detail level' }),
+      segmented({
+        label: 'Detail level', value: settings.detailLevel === 'detailed' ? 'detailed' : 'simple',
+        options: [{ value: 'simple', label: 'Simple' }, { value: 'detailed', label: 'Detailed' }],
+        onChange: (v) => { store.updateSettings({ detailLevel: v }); ctx.refresh({ transition: true }); },
+      }),
+      el('p', { class: 'field-hint', text: 'Simple gives you the prescription and how big a step it is, in plain words. Detailed adds the e1RM maths, the target every suggestion is measured against, the sets-against-weight grid and the projections. Nothing is calculated differently — it is only what gets shown.' }),
+    ]),
+    el('div', { class: 'lever-row lever-row-half' }, [
+      stepper({ label: 'Rest timer (seconds)', value: settings.restSeconds, step: 15, min: 0, max: 900, dp: 0, id: 'set-rest',
+        onChange: (v) => { store.updateSettings({ restSeconds: v }); ctx.refresh(); } }),
+    ]),
+    el('p', { class: 'field-hint', text: 'Saving a set dated today starts a rest clock above the tab bar; it keeps counting past the target rather than stopping. Set it to 0 to turn the timer off.' }),
   ]));
 
   /* ---------------------------------------------------------- exercises */
@@ -33,7 +53,7 @@ export function renderSetup(ctx) {
   /* ----------------------------------------------------------- settings */
   root.append(el('h2', { class: 'section-title', text: 'The maths' }));
   const s = settings;
-  root.append(el('div', { class: 'card card-pad' }, [
+  const mathsCard = el('div', { class: 'card card-pad' }, [
     el('div', { class: 'field-block' }, [
       el('span', { class: 'field-label', text: 'e1RM formula' }),
       chipGroup({
@@ -63,7 +83,10 @@ export function renderSetup(ctx) {
       stepper({ label: 'Default gain (%/week)', value: s.defaultGainPerWeek * 100, step: 0.05, min: 0, max: 5, dp: 2, id: 'set-gain',
         onChange: (v) => { store.updateSettings({ defaultGainPerWeek: v / 100 }); ctx.refresh(); } }),
     ]),
-  ]));
+  ]);
+  // In the simple view these dials are still all here — just folded away, so
+  // the page is not a wall of coefficients on first read.
+  root.append(ctx.simple ? details('Tune the formulas', [mathsCard]) : mathsCard);
 
   root.append(el('div', { class: 'field-block' }, [
     el('span', { class: 'field-label', text: 'Appearance' }),
@@ -112,6 +135,11 @@ export function renderSetup(ctx) {
       el('p', { text: 'Open it from the Home Screen icon after that, rather than from a Safari tab.' }),
     ]));
   }
+
+  root.append(el('button', {
+    type: 'button', class: 'btn btn-ghost btn-block',
+    onclick: () => showWelcome({ onDone: () => ctx.refresh({ transition: true }) }),
+  }, ['Show the welcome tour again']));
 
   root.append(el('p', { class: 'foot-note', text: 'Lifting Tracker · built from your spreadsheet · works offline · no accounts, no network, no tracking.' }));
   return root;
@@ -173,14 +201,15 @@ function exerciseCard(ex, index, total, ctx) {
   return el('article', { class: `card${isOpen ? ' is-open' : ''}` }, [
     el('button', {
       type: 'button', class: 'card-head', 'aria-expanded': isOpen ? 'true' : 'false',
-      onclick: () => { openExerciseId = isOpen ? null : ex.id; ctx.refresh(); },
+      onclick: () => { openExerciseId = isOpen ? null : ex.id; ctx.refresh({ transition: true }); },
     }, [
+      accentDot(ex.id),
       el('div', { class: 'card-head-main' }, [
         el('h3', { class: 'card-title', text: ex.name }),
         el('p', { class: 'card-meta', text: (ex.base > 0 ? `from ${fmt(ex.base, 1).replace('.0', '')} kg · ` : '')
           + `${fmt(ex.step, 1).replace('.0', '')} kg steps · ${(ex.gainPerWeek * 100).toFixed(2)}%/wk · ${ex.setsPerSession} sets/session · ${ex.setsPerWeek}/week` }),
       ]),
-      el('span', { class: 'card-chevron', 'aria-hidden': 'true', text: isOpen ? '⌃' : '⌄' }),
+      chevron(),
     ]),
     isOpen ? body : null,
   ]);

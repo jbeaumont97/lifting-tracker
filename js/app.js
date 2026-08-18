@@ -3,14 +3,20 @@
 // The whole UI is a pure function of the stored document: any mutation calls
 // refresh(), which rebuilds the active view. Views keep their own tiny bits of
 // local state (which card is open, what is half-typed) in module scope.
+//
+// Because every render replaces the DOM, no CSS transition can survive one — so
+// motion between states is done with the View Transitions API, which snapshots
+// the old and new trees and animates between them. Where it is unsupported (or
+// unwanted, per prefers-reduced-motion) the app simply cuts, exactly as before.
 
 import * as store from './store.js';
 import { allStats, isoToday } from './metrics.js';
 import { el, toast } from './ui.js';
 import { renderPlan, openCard } from './views/plan.js';
 import { renderLog, setPrefill } from './views/log.js';
-import { renderProgress, openExercise, clearSelection } from './views/progress.js';
+import { renderProgress, openExercise, clearSelection, hasSelection } from './views/progress.js';
 import { renderSetup } from './views/setup.js';
+import { showWelcome } from './views/welcome.js';
 
 const TABS = [
   { id: 'plan', label: 'Next', icon: 'M4 12h3l3-7 4 14 3-7h3' },
@@ -24,14 +30,23 @@ let today = isoToday();
 const scrollTop = new Map();
 let resizeHandlers = [];
 let raf = null;
+let pendingTransition = false;
 
 const main = document.getElementById('main');
 const tabbar = document.getElementById('tabbar');
+const fabHost = el('div', { class: 'fab-host' });
+document.body.append(fabHost);
+
+const reducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
 
 function ctx() {
+  const settings = store.getSettings();
   return {
-    settings: store.getSettings(),
-    stats: allStats(store.getExercises(), store.getEntries(), store.getSettings(), today),
+    settings,
+    // One flag, read everywhere: the simple view shows the prescription, the
+    // detailed view shows the maths behind it.
+    simple: settings.detailLevel !== 'detailed',
+    stats: allStats(store.getExercises(), store.getEntries(), settings, today),
     today,
     route,
     refresh,
@@ -47,15 +62,34 @@ function goTo(next, payload = {}) {
   if (next === 'progress' && payload.exerciseId) openExercise(payload.exerciseId);
   if (next === 'progress' && !payload.exerciseId && payload.list) clearSelection();
   if (next === 'plan' && payload.openExercise) openCard(payload.openExercise);
-  render({ restore: true });
+  render({ restore: true, transition: true });
 }
 
-function refresh() {
+/**
+ * `transition: true` asks for an animated swap. Callers that merely repaint
+ * after a keystroke leave it off, so typing never animates.
+ */
+function refresh({ transition = false } = {}) {
+  if (transition) pendingTransition = true;
   if (raf) cancelAnimationFrame(raf);
-  raf = requestAnimationFrame(() => { raf = null; render({ keepScroll: true }); });
+  raf = requestAnimationFrame(() => {
+    raf = null;
+    const t = pendingTransition;
+    pendingTransition = false;
+    render({ keepScroll: true, transition: t });
+  });
 }
 
-function render({ restore = false, keepScroll = false } = {}) {
+function render(opts = {}) {
+  const paint = () => draw(opts);
+  if (!opts.transition || reducedMotion() || typeof document.startViewTransition !== 'function') {
+    paint();
+    return;
+  }
+  document.startViewTransition(paint);
+}
+
+function draw({ restore = false, keepScroll = false } = {}) {
   const y = window.scrollY;
   resizeHandlers = [];
   const c = ctx();
@@ -75,6 +109,7 @@ function render({ restore = false, keepScroll = false } = {}) {
   }
   main.replaceChildren(view);
   paintTabs();
+  paintFab();
 
   if (keepScroll) window.scrollTo(0, y);
   else if (restore) window.scrollTo(0, scrollTop.get(route) || 0);
@@ -93,16 +128,66 @@ function paintTabs() {
     return el('button', {
       type: 'button', class: `tab${route === t.id ? ' is-active' : ''}`,
       'aria-current': route === t.id ? 'page' : null,
-      onclick: () => { if (route === t.id && t.id === 'progress') clearSelection(); goTo(t.id, t.id === 'progress' ? { list: true } : {}); },
+      onclick: () => {
+        // Tapping the tab you are already on takes you back to the top of it —
+        // and out of a drilled-in lift, which is what "Progress" now means.
+        if (route === t.id) {
+          if (t.id === 'progress' && hasSelection()) { clearSelection(); render({ transition: true }); return; }
+          window.scrollTo({ top: 0, behavior: reducedMotion() ? 'auto' : 'smooth' });
+          return;
+        }
+        goTo(t.id, t.id === 'progress' ? { list: true } : {});
+      },
     }, [svg, el('span', { class: 'tab-label', text: t.label })]);
   }));
 }
+
+/** One always-available primary action: log a set, from wherever you are. */
+function paintFab() {
+  if (route === 'log' || !store.getExercises().length) { fabHost.replaceChildren(); return; }
+  fabHost.replaceChildren(el('button', {
+    type: 'button', class: 'fab', 'aria-label': 'Log a set',
+    onclick: () => goTo('log', {}),
+  }, [
+    el('span', { class: 'fab-plus', 'aria-hidden': 'true', text: '+' }),
+    el('span', { class: 'fab-label', text: 'Log' }),
+  ]));
+}
+
+/* ------------------------------------------------------------ swipe between */
+
+// Horizontal drags move between tabs. Anything that scrolls sideways, or that
+// interprets a drag itself, opts out — otherwise reading the trade-off grid
+// would keep throwing you into another tab.
+const NO_SWIPE = '.grid-scroll, .table-scroll, .chart-plot, .chips, .segmented, .swipe-row, input, textarea, select';
+let swipe = null;
+
+main.addEventListener('pointerdown', (e) => {
+  if (e.pointerType === 'mouse' || e.target.closest?.(NO_SWIPE)) { swipe = null; return; }
+  swipe = { x: e.clientX, y: e.clientY };
+});
+main.addEventListener('pointerup', (e) => {
+  const s = swipe;
+  swipe = null;
+  if (!s) return;
+  const dx = e.clientX - s.x;
+  const dy = e.clientY - s.y;
+  if (Math.abs(dx) < 72 || Math.abs(dy) > 46) return;
+  // Inside a lift's detail, a swipe right is "back to all lifts" first.
+  if (dx > 0 && route === 'progress' && hasSelection()) { clearSelection(); render({ transition: true }); return; }
+  const i = TABS.findIndex((t) => t.id === route);
+  const next = TABS[dx < 0 ? i + 1 : i - 1];
+  if (next) goTo(next.id, next.id === 'progress' ? { list: true } : {});
+});
+main.addEventListener('pointercancel', () => { swipe = null; });
 
 /* ------------------------------------------------------------------ boot */
 
 store.applyTheme();
 store.load();
 render();
+
+if (!store.isOnboarded()) showWelcome({ onDone: () => render({ transition: true }) });
 
 let resizeTimer = null;
 window.addEventListener('resize', () => {

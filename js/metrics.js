@@ -44,6 +44,18 @@ export function formatDateShort(iso, now = new Date()) {
   return d.toLocaleDateString(undefined, opts);
 }
 
+/** "Tuesday" — the weekday on its own, for the session header. */
+export function weekdayName(iso) {
+  return new Date(iso + 'T00:00:00Z')
+    .toLocaleDateString(undefined, { weekday: 'long', timeZone: 'UTC' });
+}
+
+/** Whole days from `iso` to today. Negative for future dates. */
+export function daysSince(iso, todayIso = isoToday()) {
+  if (!iso) return null;
+  return dayNumber(todayIso) - dayNumber(iso);
+}
+
 /** "Today", "Yesterday", "3 days ago", else the short date. */
 export function relativeDate(iso, todayIso = isoToday()) {
   const diff = dayNumber(todayIso) - dayNumber(iso);
@@ -147,6 +159,7 @@ export function exerciseStats(exercise, entries, settings, todayIso = isoToday()
     entryCount: mine.length,
     sessionCount: new Set(mine.map((e) => e.date)).size,
     lastDate: null, lastAdj: null, lastReps: null, lastSets: null,
+    daysSince: null, prCount: 0,
     bestAdj: null, bestEntry: null,
     trendPerWeek: null, trendPerDay: null, trendReliable: false,
     trendWindowCount: 0, trendWindowDays: 0, proj4: null, proj12: null, nextTarget: null,
@@ -157,6 +170,15 @@ export function exerciseStats(exercise, entries, settings, todayIso = isoToday()
     base: Number(exercise.base) > 0 ? Number(exercise.base) : 0,
   };
   if (!mine.length) return stats;
+
+  // Mark the sets that were a personal best at the moment they were logged.
+  // The first entry is not a PR — there was nothing to beat.
+  let running = -Infinity;
+  for (const [i, e] of mine.entries()) {
+    e.isPR = i > 0 && Number.isFinite(e.adj) && e.adj > running + 1e-9;
+    if (e.isPR) stats.prCount++;
+    if (Number.isFinite(e.adj)) running = Math.max(running, e.adj);
+  }
 
   // One point per session date, carrying that day's best set — this is what
   // gets charted, and what "last session" means.
@@ -173,6 +195,7 @@ export function exerciseStats(exercise, entries, settings, todayIso = isoToday()
 
   const last = stats.sessions[stats.sessions.length - 1];
   stats.lastDate = last.date;
+  stats.daysSince = todayDay - last.day;
   stats.lastAdj = last.best.adj;
   stats.lastReps = last.best.reps;
   stats.lastSets = last.best.sets;
@@ -227,6 +250,29 @@ export const BANDS = {
   stretch: { key: 'stretch', label: 'Stretch',        glyph: '▲', hint: 'Ambitious but usually doable' },
   toobig:  { key: 'toobig',  label: 'Too big a jump', glyph: '!', hint: 'You will probably miss reps' },
 };
+
+/**
+ * The same verdict a band carries, said in plain words. This is what the
+ * simple view shows in place of "scores 102.3 against a target of 100.1".
+ */
+export function plainVerdict(band, deltaKg) {
+  if (!band) return '';
+  const move = !Number.isFinite(deltaKg) || Math.abs(deltaKg) < 1e-9
+    ? null
+    : `${fmtSigned(deltaKg, 1).replace(/\.0$/, '')} kg on last time`;
+  switch (band.key) {
+    case 'ideal':
+      return move ? `A small step up — ${move}.` : 'A small step up on last time.';
+    case 'stretch':
+      return move ? `A big step up — ${move}. Ambitious, but usually doable.`
+        : 'A big step up — ambitious, but usually doable.';
+    case 'toobig':
+      return move ? `A large jump — ${move}. You will probably miss reps.`
+        : 'A large jump — you will probably miss reps.';
+    default:
+      return 'Lighter than a session you have already done — not progression yet.';
+  }
+}
 
 /** Which band a candidate score falls in, given the target and current best. */
 export function bandFor(score, target, bestAdj, settings) {

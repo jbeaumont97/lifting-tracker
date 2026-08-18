@@ -18,8 +18,12 @@ export const DEFAULT_SETTINGS = {
   defaultGainPerWeek: 0.0075,
   idealBand: 0.01,         // <= target x (1+this)  -> ideal
   stretchBand: 0.03,       // <= target x (1+this)  -> stretch, above -> too big
+  detailLevel: 'simple',   // 'simple' shows the prescription, 'detailed' the maths
+  restSeconds: 150,        // rest timer target; 0 turns the timer off
   unit: 'kg',
 };
+
+const STRING_SETTINGS = new Set(['formula', 'unit', 'detailLevel']);
 
 let doc = null;
 const listeners = new Set();
@@ -34,6 +38,11 @@ function blank() {
 function normalise(raw) {
   const d = { ...blank(), ...raw };
   d.settings = { ...DEFAULT_SETTINGS, ...(raw.settings || {}) };
+  // A document written before the simple/detailed split keeps everything it used
+  // to show: hiding half the app under someone who was already using it is worse
+  // than starting a newcomer one level too deep.
+  if (raw.settings && raw.settings.detailLevel === undefined) d.settings.detailLevel = 'detailed';
+  if (d.settings.detailLevel !== 'detailed') d.settings.detailLevel = 'simple';
   d.exercises = (raw.exercises || []).map((e, i) => ({
     id: String(e.id ?? `ex-${i}`),
     name: String(e.name ?? 'Exercise'),
@@ -73,7 +82,9 @@ export function seedDoc() {
   return normalise({
     exercises: SEED.exercises,
     entries: SEED.entries,
-    settings: { ...DEFAULT_SETTINGS, ...SEED.settings },
+    // detailLevel is stated explicitly so normalise() reads this as a new
+    // document rather than an upgrade from before the simple/detailed split.
+    settings: { detailLevel: 'simple', ...DEFAULT_SETTINGS, ...SEED.settings },
   });
 }
 
@@ -85,8 +96,12 @@ export function load() {
   } catch { raw = null; }
   if (raw && (raw.exercises || raw.entries)) {
     doc = normalise(raw);
+    // An install that predates the welcome tour has already been "onboarded" by
+    // simply having been used — do not greet a returning user with a tour.
+    if (doc.onboarded === undefined) doc.onboarded = true;
   } else {
     doc = seedDoc();          // first run: carry the spreadsheet's data across
+    doc.onboarded = false;
     persist();
   }
   return doc;
@@ -262,7 +277,7 @@ export function updateSettings(patch) {
   commit((d) => {
     for (const [k, v] of Object.entries(patch)) {
       if (!(k in DEFAULT_SETTINGS)) continue;
-      d.settings[k] = k === 'formula' || k === 'unit' ? String(v) : num(v, d.settings[k]);
+      d.settings[k] = STRING_SETTINGS.has(k) ? String(v) : num(v, d.settings[k]);
     }
   }, { undoable: true, label: 'settings changed' });
 }
@@ -332,6 +347,19 @@ export function resetToSeed() {
     d.settings = s.settings;
     d.seq = s.seq;
   }, { undoable: true, label: 'reset to spreadsheet data' });
+}
+
+/* ------------------------------------------------------------ onboarding */
+
+export const isOnboarded = () => load().onboarded === true;
+
+export function setOnboarded(value = true) {
+  commit((d) => { d.onboarded = value !== false; }, { label: 'welcome tour' });
+}
+
+/** Keep the standard lifts, drop the sample sessions — "this is my log now". */
+export function startFresh() {
+  commit((d) => { d.entries = []; d.onboarded = true; }, { undoable: true, label: 'started fresh' });
 }
 
 export function clearAll() {

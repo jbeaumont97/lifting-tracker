@@ -33,6 +33,11 @@
   --radius-sm: 10px;
   --tap: 44px;
 
+  /* Identity only — a lift's dot. Never the sole carrier of meaning, so these
+     are chosen to stay distinguishable rather than to hit text contrast. */
+  --accent-0: #2a78d6;  --accent-1: #d4622a;  --accent-2: #1f9e6e;  --accent-3: #9457c9;
+  --accent-4: #d03b6b;  --accent-5: #c79a12;  --accent-6: #2f9fbd;  --accent-7: #7a879a;
+
   --font: system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
@@ -96,7 +101,9 @@ html { -webkit-text-size-adjust: 100%; }
 
 body {
   margin: 0;
-  padding: 0 0 calc(74px + env(safe-area-inset-bottom));
+  /* Room for the tab bar, plus the rest timer when it is up, so the last card
+     never hides behind either. */
+  padding: 0 0 calc(74px + var(--dock-h, 0px) + env(safe-area-inset-bottom));
   background: var(--plane);
   color: var(--text-primary);
   font: 16px/1.45 var(--font);
@@ -168,7 +175,13 @@ button { font: inherit; color: inherit; }
 .card-head-main { flex: 1; min-width: 0; }
 .card-title { font-size: 17px; }
 .card-meta { margin-top: 2px; color: var(--text-secondary); font-size: 12.5px; }
-.card-chevron { color: var(--muted); font-size: 18px; flex: none; }
+.card-chevron {
+  flex: none; width: 20px; height: 20px; color: var(--muted);
+  fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+  transition: transform 0.18s ease, color 0.18s ease;
+}
+.card.is-open > .card-head .card-chevron { transform: rotate(180deg); color: var(--text-primary); }
+.card-chevron.is-right { transform: rotate(-90deg); }
 .card-body { padding: 0 14px 14px; display: flex; flex-direction: column; gap: 12px; }
 .card-note { color: var(--text-secondary); font-size: 13.5px; }
 /* For cards whose content is not wrapped in .card-body — settings panels and
@@ -484,7 +497,7 @@ table.grid td.cell.is-beaten  .cell-glyph { color: var(--neutral-ink); }
   display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; width: 100%;
   padding: 9px 14px; background: none; border: 0; text-align: left; cursor: pointer; min-height: var(--tap);
 }
-.row-name { font-size: 14.5px; font-weight: 600; }
+.row-name { display: flex; align-items: center; gap: 6px; font-size: 14.5px; font-weight: 600; min-width: 0; }
 .row-set { font-size: 14px; font-variant-numeric: tabular-nums; text-align: right; }
 .row-adj { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .row-rir { font-size: 11.5px; color: var(--muted); text-align: right; }
@@ -633,7 +646,7 @@ table.grid td.cell.is-beaten  .cell-glyph { color: var(--neutral-ink); }
 /* ---------------------------------------------------------------- toast */
 
 .toast-host {
-  position: fixed; left: 0; right: 0; bottom: calc(78px + env(safe-area-inset-bottom));
+  position: fixed; left: 0; right: 0; bottom: calc(78px + env(safe-area-inset-bottom) + var(--dock-h, 0px));
   z-index: 40; display: flex; flex-direction: column; align-items: center; gap: 6px;
   padding: 0 14px; pointer-events: none;
 }
@@ -682,4 +695,289 @@ table.grid td.cell.is-beaten  .cell-glyph { color: var(--neutral-ink); }
 @media (min-width: 480px) {
   .kpi-row { grid-template-columns: repeat(4, 1fr); }
   .kpi-row-2 { grid-template-columns: 1fr 1fr; }
+}
+
+/* ==========================================================================
+   Motion, identity and the gym-side furniture
+   Everything below is additive: without it the app is exactly what it was, so
+   a browser that supports none of it still gets the whole application.
+   ========================================================================== */
+
+/* ------------------------------------------------------- view transitions */
+
+/* Every render replaces the DOM, so nothing here can be a CSS transition. The
+   View Transitions API snapshots the old and new trees instead and animates
+   between them; cards carry their own name, so they morph individually while
+   the rest of the page cross-fades. */
+::view-transition-old(root),
+::view-transition-new(root) { animation-duration: 200ms; }
+
+::view-transition-group(*) {
+  animation-duration: 260ms;
+  animation-timing-function: cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+/* Fixed furniture is named so it is lifted out of the page snapshot and stays
+   put during a transition rather than cross-fading with the content. */
+.tabbar { view-transition-name: tabbar; }
+.dock { view-transition-name: dock; }
+.fab-host { view-transition-name: fab; }
+
+/* The panel a card opens: it cannot transition (it is a brand new node), but it
+   can arrive rather than appear. */
+@keyframes detail-in {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: none; }
+}
+.card-detail { animation: detail-in 220ms cubic-bezier(0.2, 0.7, 0.3, 1) both; }
+
+/* ------------------------------------------------------------- identity */
+
+.accent-dot {
+  flex: none; width: 9px; height: 9px; border-radius: 50%;
+  background: var(--accent-0); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-0) 18%, transparent);
+}
+.accent-1 { background: var(--accent-1); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-1) 18%, transparent); }
+.accent-2 { background: var(--accent-2); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-2) 18%, transparent); }
+.accent-3 { background: var(--accent-3); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-3) 18%, transparent); }
+.accent-4 { background: var(--accent-4); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-4) 18%, transparent); }
+.accent-5 { background: var(--accent-5); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-5) 18%, transparent); }
+.accent-6 { background: var(--accent-6); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-6) 18%, transparent); }
+.accent-7 { background: var(--accent-7); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-7) 18%, transparent); }
+
+h1 .accent-dot { width: 11px; height: 11px; margin-right: 9px; vertical-align: middle; display: inline-block; }
+.chip .accent-dot { box-shadow: none; width: 8px; height: 8px; }
+.chip.is-selected .accent-dot { background: currentColor; }
+
+.card-title-row { display: flex; align-items: center; gap: 7px; min-width: 0; flex-wrap: wrap; }
+
+.pr-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px 2px 6px; border-radius: 999px;
+  background: var(--good-tint); color: var(--good-ink);
+  font-size: 11px; font-weight: 700; letter-spacing: 0.02em; white-space: nowrap;
+}
+.pr-glyph { font-size: 10px; line-height: 1; }
+.data-table tbody tr.is-pr td, .data-table tbody tr.is-pr th { background: color-mix(in srgb, var(--good) 8%, transparent); }
+.data-table td .pr-badge { margin-left: 6px; }
+
+/* --------------------------------------------------------- readiness UI */
+
+.day-strip {
+  display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
+  padding: 10px 13px; border-radius: var(--radius-sm);
+  background: var(--series-wash); font-size: 13px; color: var(--text-secondary);
+}
+.day-strip-day { font-weight: 680; color: var(--text-primary); }
+.day-strip-sep { color: var(--muted); }
+.day-strip-fact { font-variant-numeric: tabular-nums; }
+
+.group-head { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.group-count {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px;
+  background: var(--neutral-tint); color: var(--text-secondary);
+  font-size: 11.5px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.group-hint { margin-top: -6px; font-size: 12px; color: var(--muted); }
+
+.stale-chip {
+  padding: 2px 8px; border-radius: 999px; white-space: nowrap;
+  background: var(--warn-tint); color: var(--warn-ink);
+  font-size: 11px; font-weight: 650; font-variant-numeric: tabular-nums;
+}
+
+/* ---------------------------------------------------------- chart motion */
+
+@keyframes draw-line {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: 0; }
+}
+@keyframes mark-in {
+  from { opacity: 0; transform: scale(0.4); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes wash-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes bar-grow {
+  from { transform: scaleY(0); }
+  to { transform: scaleY(1); }
+}
+
+/* pathLength="1" on the path makes this a plain 1 -> 0 sweep whatever the
+   real length of the line is. */
+.chart-svg .line { stroke-dasharray: 1; animation: draw-line 620ms cubic-bezier(0.3, 0.8, 0.4, 1) both; }
+.chart-svg .area { animation: wash-in 500ms ease-out 200ms both; }
+.chart-svg .dot, .chart-svg .dot-last, .chart-svg .dot-pr {
+  transform-box: fill-box; transform-origin: center;
+  animation: mark-in 260ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+.chart-svg .trend, .chart-svg .trend-proj, .chart-svg .proj-dot,
+.chart-svg .target-ring, .chart-svg .target-dot,
+.chart-svg .label-last, .chart-svg .label-target, .chart-svg .label-proj {
+  animation: wash-in 400ms ease-out 420ms both;
+}
+.chart-svg .bar {
+  transform-box: fill-box; transform-origin: 50% 100%;
+  animation: bar-grow 420ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+
+.chart-svg .dot-pr { fill: none; stroke: var(--good); stroke-width: 2; }
+.key-mark.key-pr { width: 10px; height: 10px; border-radius: 50%; background: none; border: 2px solid var(--good); }
+
+/* ------------------------------------------------------------- celebration */
+
+.confetti-host {
+  position: fixed; inset: 0; z-index: 60; pointer-events: none; overflow: hidden;
+}
+.confetti {
+  position: absolute; top: -14px; width: 7px; height: 12px; border-radius: 2px;
+  background: var(--series-1);
+  animation: confetti-fall 1600ms cubic-bezier(0.3, 0.5, 0.6, 1) both;
+}
+.confetti-1 { background: var(--good); width: 9px; height: 9px; border-radius: 50%; }
+.confetti-2 { background: var(--warning); }
+.confetti-3 { background: var(--accent-3); width: 6px; height: 14px; }
+@keyframes confetti-fall {
+  from { transform: translate3d(0, 0, 0) rotate(0); opacity: 1; }
+  to { transform: translate3d(var(--drift, 0), 78vh, 0) rotate(var(--spin, 360deg)); opacity: 0; }
+}
+
+/* --------------------------------------------------------- the rest timer */
+
+.dock {
+  position: fixed; z-index: 25;
+  left: max(10px, env(safe-area-inset-left)); right: max(10px, env(safe-area-inset-right));
+  bottom: calc(70px + env(safe-area-inset-bottom));
+  display: flex; justify-content: center; pointer-events: none;
+}
+.dock:empty { display: none; }
+
+.rest {
+  position: relative; overflow: hidden; pointer-events: auto;
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; max-width: 540px; min-height: 48px; padding: 8px 10px 8px 13px;
+  border-radius: var(--radius); border: 1px solid var(--border-strong);
+  background: var(--surface-1); box-shadow: 0 6px 22px rgba(0, 0, 0, 0.16);
+  opacity: 0; transform: translateY(10px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.rest.is-in { opacity: 1; transform: none; }
+.rest.is-leaving { opacity: 0; transform: translateY(8px); }
+
+.rest-fill {
+  position: absolute; left: 0; top: 0; bottom: 0; width: 0;
+  background: var(--series-wash); transition: width 0.5s linear;
+}
+.rest.is-done .rest-fill { background: var(--good-tint); }
+.rest-main { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.rest-label {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--muted); font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.rest.is-done .rest-label { color: var(--good-ink); }
+.rest-time { font-size: 19px; font-weight: 680; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.rest-btn {
+  position: relative; flex: none; min-height: 36px; padding: 0 11px;
+  border: 1px solid var(--border-strong); border-radius: 999px; background: var(--surface-1);
+  font-size: 13px; font-weight: 650; cursor: pointer; touch-action: manipulation;
+}
+.rest-close { background: var(--surface-2); border-color: transparent; }
+
+/* ------------------------------------------------------- the action button */
+
+.fab-host {
+  position: fixed; z-index: 24;
+  right: max(14px, env(safe-area-inset-right));
+  bottom: calc(74px + env(safe-area-inset-bottom) + var(--dock-h, 0px));
+  transition: bottom 0.2s ease;
+}
+.has-sheet .fab-host { display: none; }
+.fab {
+  display: inline-flex; align-items: center; gap: 6px;
+  min-height: 48px; padding: 0 17px 0 14px; border: 0; border-radius: 999px;
+  background: var(--series-1); color: #fff; font-size: 14.5px; font-weight: 680;
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--series-1) 34%, transparent);
+  cursor: pointer; touch-action: manipulation;
+  transition: transform 0.1s ease;
+}
+.fab:active { transform: scale(0.96); }
+.fab-plus { font-size: 21px; font-weight: 500; line-height: 1; margin-top: -2px; }
+
+/* -------------------------------------------------------- swipe to delete */
+
+.swipe-row { position: relative; overflow: hidden; }
+.swipe-row .row-btn {
+  position: relative; z-index: 1; background: var(--surface-1);
+  touch-action: pan-y; will-change: transform;
+}
+.swipe-action {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: flex-end;
+  padding-right: 16px; background: var(--crit-tint); color: var(--crit-ink);
+  font-size: 13px; font-weight: 700;
+}
+.swipe-row.is-armed .swipe-action { background: var(--critical); color: #fff; }
+
+/* --------------------------------------------------------- welcome tour */
+
+.welcome-wrap {
+  position: fixed; inset: 0; z-index: 55;
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+  background: color-mix(in srgb, var(--plane) 92%, transparent);
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+  opacity: 0; transition: opacity 0.22s ease;
+}
+.welcome-wrap.is-in { opacity: 1; }
+.welcome {
+  width: 100%; max-width: 420px;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 12px;
+  padding: 22px 20px calc(20px + env(safe-area-inset-bottom));
+  background: var(--surface-1); border: 1px solid var(--border);
+  border-radius: 18px; box-shadow: 0 18px 50px rgba(0, 0, 0, 0.22);
+}
+.welcome.is-stepping { animation: detail-in 260ms cubic-bezier(0.2, 0.7, 0.3, 1) both; }
+.welcome-art {
+  display: flex; align-items: center; justify-content: center;
+  width: 54px; height: 54px; border-radius: 16px;
+  background: var(--series-wash); font-size: 27px; line-height: 1;
+}
+.welcome-title { font-size: 22px; line-height: 1.2; }
+.welcome-body { font-size: 14.5px; line-height: 1.55; color: var(--text-secondary); }
+.welcome-dots { display: flex; gap: 6px; padding: 2px 0 4px; }
+.welcome-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--border-strong); }
+.welcome-dot.is-on { background: var(--series-1); }
+.welcome-actions { display: flex; align-items: center; gap: 8px; width: 100%; }
+.welcome-actions .btn { flex: 1; }
+.welcome-actions-end { flex-direction: column; align-items: stretch; }
+.welcome-skip { flex: none; margin-left: auto; }
+.welcome-note { font-size: 12px; color: var(--muted); line-height: 1.5; }
+
+/* ------------------------------------------------------------- odds and ends */
+
+/* A settings card folded inside an explainer should read as part of it. */
+.note-body .card { border: 0; box-shadow: none; background: none; padding: 0; }
+.note-body .card-pad { padding: 0; }
+
+.sheet-wrap.is-leaving { opacity: 0; }
+.sheet-wrap.is-leaving .sheet { transform: translateY(14px); }
+
+/* --------------------------------------------------------------- desktop */
+
+/* On a wide screen the single 560px column is a lot of empty room. The list
+   becomes two columns and the open card spans both, which is the same
+   master-detail idea without a second scroll container to keep in sync. */
+@media (min-width: 900px) {
+  main { max-width: 940px; }
+  .view-plan .card-list,
+  .view-progress .card-list {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: start;
+  }
+  .view-plan .card.is-open { grid-column: 1 / -1; }
+  .view-setup .card-list { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: start; }
+  .view-setup .card.is-open { grid-column: 1 / -1; }
+  .kpi-row-2 { grid-template-columns: repeat(4, 1fr); }
+  .presc-hero .presc-weight { font-size: 60px; }
+  .fab { min-height: 52px; }
 }
