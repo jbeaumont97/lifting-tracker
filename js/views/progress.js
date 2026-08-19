@@ -2,7 +2,7 @@
 // phone could never give you. The list is the overview; tap a lift for its
 // progression chart, weekly work, and full session history.
 
-import { el, statTile, segmented, details, emptyState, chevron, accentDot, prBadge, tap } from '../ui.js';
+import { el, statTile, segmented, details, disclose, emptyState, chevron, accentDot, prBadge, tap } from '../ui.js';
 import { progressionChart, sparkline, setsMeter, weeklySetsChart } from '../charts.js';
 import { fmt, fmtWeight, fmtSigned, fmtCompact, relativeDate, formatDate, isoToday } from '../metrics.js';
 import * as ui from '../core/uistate.js';
@@ -35,9 +35,7 @@ function listView(ctx) {
   const root = el('section', { class: 'view view-progress' });
   root.append(el('header', { class: 'view-head' }, [
     el('h1', { text: 'Progress' }),
-    el('p', { class: 'view-sub', text: ctx.simple
-      ? 'One number per lift, and which way it is going. Tap a lift for its chart and history.'
-      : 'Adjusted e1RM is the single number to watch. Trend is kilos per week fitted over your recent sessions.' }),
+    el('p', { class: 'view-sub', text: 'One number per lift, and which way it is going. Tap a lift for its chart and history.' }),
   ]));
 
   const trained = stats.filter((s) => s.entryCount > 0);
@@ -62,16 +60,16 @@ function listView(ctx) {
 
   root.append(el('div', { class: 'section-head' }, [
     el('h2', { class: 'section-title', text: 'Your lifts' }),
-    // The wide dashboard table is a detailed-view tool; the cards say the same
-    // thing in the shape a phone can actually read.
-    ctx.simple ? null : segmented({
+    // Cards are the shape a phone can read; the table is the whole Dashboard
+    // sheet for when you want to compare lifts side by side.
+    segmented({
       label: 'View', value: listMode(),
       options: [{ value: 'cards', label: 'Cards' }, { value: 'table', label: 'Table' }],
       onChange: (v) => { ui.set(MODE, v); ctx.refresh({ transition: true }); },
     }),
   ]));
 
-  if (listMode() === 'table' && !ctx.simple) {
+  if (listMode() === 'table') {
     root.append(dashboardTable(stats));
     root.append(el('p', { class: 'field-hint', text: 'Swipe the table sideways for trend, projections and weekly sets.' }));
   } else {
@@ -80,15 +78,15 @@ function listView(ctx) {
     root.append(list);
   }
 
-  root.append(details('What these numbers mean', ctx.simple ? [
+  root.append(details('What these numbers mean', [
     el('p', { text: 'Every lift is boiled down to one number — an estimate of the most you could lift once, adjusted for how many sets you did. It lets 8 reps at 60 kg and 5 reps at 70 kg be compared honestly, so the line goes up when you get stronger rather than when you simply do more reps.' }),
     el('p', { text: 'The trend is that number fitted against time over your recent sessions, in kilos per week. Two sessions is not a trend — give it a few.' }),
     el('p', { text: 'Weekly sets is a plain count of working sets. Roughly 10–20 hard sets per muscle per week is the usual recommendation, spread across every lift that trains it.' }),
-    el('p', { text: 'Switch to the detailed view in Setup for the formulas, the projections and the full dashboard table.' }),
-  ] : [
-    el('p', { text: 'e1RM (Epley) = weight × (1 + reps/30). It puts 8 reps at 60 kg and 5 reps at 70 kg on the same scale. Adjusted e1RM multiplies that by (1 + k × ln(sets)) — extra sets earn credit with diminishing returns: +3.5% for 2 sets, +5.5% for 3, +8.0% for 5 at the default k of 0.05.' }),
-    el('p', { text: 'Volume (weight × reps × sets) is tracked separately because it measures a different thing. Weekly sets is a plain count of working sets, because sets per week is the unit training is actually prescribed in — commonly 10–20 per muscle per week, spread across every lift that trains it.' }),
-    el('p', { text: 'Trend is a least-squares fit of adjusted e1RM against date over the lookback window. Projections extend that straight line; real progress decelerates, so treat +12 weeks as an optimistic ceiling rather than a forecast.' }),
+    disclose('Show the formulas', [
+      el('p', { text: 'e1RM (Epley) = weight × (1 + reps/30). It puts 8 reps at 60 kg and 5 reps at 70 kg on the same scale. Adjusted e1RM multiplies that by (1 + k × ln(sets)) — extra sets earn credit with diminishing returns: +3.5% for 2 sets, +5.5% for 3, +8.0% for 5 at the default k of 0.05.' }),
+      el('p', { text: 'Volume (weight × reps × sets) is tracked separately because it measures a different thing. Weekly sets is a plain count of working sets, because sets per week is the unit training is actually prescribed in — commonly 10–20 per muscle per week, spread across every lift that trains it.' }),
+      el('p', { text: 'Trend is a least-squares fit of adjusted e1RM against date over the lookback window. Projections extend that straight line; real progress decelerates, so treat +12 weeks as an optimistic ceiling rather than a forecast.' }),
+    ], { open: ctx.numbersOpen }),
   ]));
   return root;
 }
@@ -98,10 +96,6 @@ const FLAT = 0.01;   // kg/week below which a trend is a plateau, not a directio
 function trendClass(st) {
   if (!st.trendReliable || st.trendPerWeek == null || Math.abs(st.trendPerWeek) < FLAT) return '';
   return st.trendPerWeek > 0 ? ' is-good' : ' is-bad';
-}
-
-function trendWords(perWeek) {
-  return Math.abs(perWeek) < FLAT ? 'flat' : `${fmtSigned(perWeek, 2)} kg/week`;
 }
 
 function exerciseRow(st, ctx) {
@@ -166,9 +160,9 @@ function detailView(st, ctx) {
 
   // --- the hero number: where this lift stands right now ---
   root.append(el('div', { class: 'hero' }, [
-    el('span', { class: 'hero-label', text: ctx.simple ? 'Where this lift stands' : 'Adjusted e1RM, last session' }),
+    el('span', { class: 'hero-label', text: 'Where this lift stands' }),
     el('span', { class: 'hero-value' }, [fmt(st.lastAdj, 1), el('small', { text: ' kg' })]),
-    el('span', { class: `hero-delta${trendClass(st)}`, text: heroTrendText(st, ctx.simple) }),
+    el('span', { class: `hero-delta${trendClass(st)}`, text: heroTrendText(st) }),
   ]));
 
   const chartHost = el('div', { class: 'chart-card' });
@@ -180,18 +174,26 @@ function detailView(st, ctx) {
   requestAnimationFrame(paintChart);
   ctx.onResize(paintChart);
 
-  root.append(el('div', { class: ctx.simple ? 'kpi-row kpi-row-2' : 'kpi-row' }, [
+  root.append(el('div', { class: 'kpi-row kpi-row-2' }, [
     statTile({ label: 'Best ever', value: fmt(st.bestAdj, 1), unit: 'kg',
       delta: st.prCount ? `${st.prCount} PR${st.prCount === 1 ? '' : 's'} so far` : null }),
     statTile({ label: 'Next target', value: fmt(st.nextTarget, 1), unit: 'kg',
       delta: targetDelta(st), deltaLabel: targetDeltaLabel(st) }),
-    // Straight-line projections are a detailed-view idea: shown too early they
-    // read as promises rather than as the extrapolation they are.
-    ctx.simple ? null : statTile({ label: 'Projected +4 wks', value: st.proj4 != null ? fmt(st.proj4, 1) : '—', unit: st.proj4 != null ? 'kg' : '',
-      delta: st.proj4 == null ? 'needs 3 sessions over 2 weeks' : null }),
-    ctx.simple ? null : statTile({ label: 'Projected +12 wks', value: st.proj12 != null ? fmt(st.proj12, 1) : '—', unit: st.proj12 != null ? 'kg' : '',
-      delta: 'a ceiling, not a forecast' }),
   ]));
+
+  // Straight-line projections read as promises if you put them next to the
+  // numbers you have actually lifted, so they sit behind a label that says what
+  // they are rather than behind a setting that hides them.
+  root.append(disclose('Where this is heading', [
+    el('div', { class: 'kpi-row kpi-row-2' }, [
+      statTile({ label: 'Projected +4 wks', value: st.proj4 != null ? fmt(st.proj4, 1) : '—', unit: st.proj4 != null ? 'kg' : '',
+        delta: st.proj4 == null ? 'needs 3 sessions over 2 weeks' : null }),
+      statTile({ label: 'Projected +12 wks', value: st.proj12 != null ? fmt(st.proj12, 1) : '—', unit: st.proj12 != null ? 'kg' : '',
+        delta: 'a ceiling, not a forecast' }),
+    ]),
+    el('p', { text: 'Both numbers extend today’s straight-line trend. Real progress '
+      + 'decelerates, so treat them as the best case rather than the plan.' }),
+  ], { open: ctx.numbersOpen }));
 
   const volHost = el('div', { class: 'chart-card' }, [setsMeter(st)]);
   const paintVol = () => {
@@ -282,18 +284,12 @@ function dashboardTable(stats) {
 }
 
 /** The trend, said either as a fitted slope or as plain direction. */
-function heroTrendText(st, simple) {
+function heroTrendText(st) {
   if (st.trendPerWeek == null) return 'trend needs two sessions in the window';
-  const flat = Math.abs(st.trendPerWeek) < FLAT;
-  if (simple) {
-    if (flat) return 'holding steady over your recent sessions';
-    const dir = st.trendPerWeek > 0 ? 'going up' : 'drifting down';
-    return `${dir} about ${Math.abs(st.trendPerWeek).toFixed(2)} kg a week`
-      + (st.trendReliable ? '' : ' — early days, so treat it lightly');
-  }
-  return st.trendReliable
-    ? `${trendWords(st.trendPerWeek)}, fitted over ${st.trendWindowCount} entries`
-    : `${trendWords(st.trendPerWeek)} — provisional, only ${st.trendWindowCount} entries across ${st.trendWindowDays} days`;
+  if (Math.abs(st.trendPerWeek) < FLAT) return 'holding steady over your recent sessions';
+  const dir = st.trendPerWeek > 0 ? 'going up' : 'drifting down';
+  return `${dir} about ${Math.abs(st.trendPerWeek).toFixed(2)} kg a week`
+    + (st.trendReliable ? '' : ' — early days, so treat it lightly');
 }
 
 /** Exercise ids are user data; a view-transition-name has to be an identifier. */

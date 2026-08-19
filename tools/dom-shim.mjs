@@ -275,6 +275,51 @@ export function installDom({ reducedMotion = false } = {}) {
   return { document, window: win, drainTimers: () => new Promise((r) => setTimeout(r, 5)) };
 }
 
+const VOID = new Set(['area','base','br','col','embed','hr','img','input','link','meta','source','track','wbr']);
+
+function escapeText(v) {
+  return String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function escapeAttr(v) {
+  return escapeText(v).replace(/"/g, '&quot;');
+}
+
+/**
+ * Serialise a rendered tree back to HTML.
+ *
+ * Used by tools/preview.mjs to put the real views in front of a real browser:
+ * the app builds its DOM imperatively, so without this there is no way to see
+ * what a view produces short of running the whole app.
+ */
+export function serialize(node, indent = 0) {
+  if (!node) return '';
+  if (node.nodeType === 3) return escapeText(node.textContent);
+  if (node.nodeType !== 1) return '';
+
+  const pad = '  '.repeat(indent);
+  const attrs = [];
+  if (node.className) attrs.push(`class="${escapeAttr(node.className)}"`);
+  for (const [k, v] of node.attributes) {
+    if (k === 'class') continue;
+    attrs.push(v === '' ? k : `${k}="${escapeAttr(v)}"`);
+  }
+  for (const [k, v] of Object.entries(node.dataset)) attrs.push(`data-${k}="${escapeAttr(v)}"`);
+  for (const [k, v] of node.style._props) attrs.push(`style="${escapeAttr(`${k}:${v}`)}"`);
+
+  const tag = node.namespaceURI === SVG_NS ? node.localName : node.localName;
+  const open = `${pad}<${tag}${attrs.length ? ' ' + attrs.join(' ') : ''}>`;
+  if (VOID.has(tag)) return open;
+
+  const kids = node.childNodes;
+  const onlyText = kids.length && kids.every((k) => k.nodeType === 3);
+  if (!kids.length) return `${open}</${tag}>`;
+  if (onlyText) return `${open}${escapeText(node.textContent)}</${tag}>`;
+  const inner = kids.map((k) => (k.nodeType === 3
+    ? (k.textContent.trim() ? `${'  '.repeat(indent + 1)}${escapeText(k.textContent)}` : '')
+    : serialize(k, indent + 1))).filter(Boolean).join('\n');
+  return `${open}\n${inner}\n${pad}</${tag}>`;
+}
+
 /** Every element in a tree, for assertions. */
 export function walk(node) { return node.nodeType === 1 ? [node, ...node._walk()] : []; }
 

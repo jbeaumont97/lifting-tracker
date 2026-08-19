@@ -19,13 +19,13 @@ export function renderSetup(ctx) {
   root.append(el('h2', { class: 'section-title', text: 'How much to show' }));
   root.append(el('div', { class: 'card card-pad' }, [
     el('div', { class: 'field-block' }, [
-      el('span', { class: 'field-label', text: 'Detail level' }),
+      el('span', { class: 'field-label', text: 'The numbers behind each verdict' }),
       segmented({
-        label: 'Detail level', value: settings.detailLevel === 'detailed' ? 'detailed' : 'simple',
-        options: [{ value: 'simple', label: 'Simple' }, { value: 'detailed', label: 'Detailed' }],
-        onChange: (v) => { store.updateSettings({ detailLevel: v }); ctx.refresh({ transition: true }); },
+        label: 'The numbers behind each verdict', value: settings.numbersOpen ? 'open' : 'closed',
+        options: [{ value: 'closed', label: 'Folded away' }, { value: 'open', label: 'Always open' }],
+        onChange: (v) => { store.updateSettings({ numbersOpen: v === 'open' }); ctx.refresh({ transition: true }); },
       }),
-      el('p', { class: 'field-hint', text: 'Simple gives you the prescription and how big a step it is, in plain words. Detailed adds the e1RM maths, the target every suggestion is measured against, the sets-against-weight grid and the projections. Nothing is calculated differently — it is only what gets shown.' }),
+      el('p', { class: 'field-hint', text: 'Every screen leads with the plain-English verdict and keeps the arithmetic — the e1RM maths, the target each suggestion is measured against, the projections — one tap underneath it. This decides whether that tap has already been made for you. Nothing is hidden either way, and nothing is calculated differently.' }),
     ]),
     el('div', { class: 'lever-row lever-row-half' }, [
       stepper({ label: 'Rest timer (seconds)', value: settings.restSeconds, step: 15, min: 0, max: 900, dp: 0, id: 'set-rest',
@@ -122,10 +122,11 @@ export function renderSetup(ctx) {
       el('p', { class: 'field-hint', text: `Past the grace period the losable part of your strength halves every ${fmt(s.detrainHalfLife, 0)} days, toward a floor of ${pct1(s.retainedFloor)} that a layoff never takes: ${detrainLadder(s)}.` }),
     ]),
   ]);
-  root.append(ctx.simple ? details('Fatigue, recovery and detraining', [readinessCard]) : readinessCard);
-  // In the simple view these dials are still all here — just folded away, so
-  // the page is not a wall of coefficients on first read.
-  root.append(ctx.simple ? details('Tune the formulas', [mathsCard]) : mathsCard);
+  // Folded by default whichever way the disclosure setting is set: these are
+  // coefficients, and a settings screen that opens as a wall of them is worse
+  // for everyone. They are one tap away, which is the whole idea.
+  root.append(details('Fatigue, recovery and detraining', [readinessCard]));
+  root.append(details('Tune the formulas', [mathsCard]));
 
   root.append(el('div', { class: 'field-block' }, [
     el('span', { class: 'field-label', text: 'Appearance' }),

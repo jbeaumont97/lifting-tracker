@@ -199,7 +199,7 @@ export function statTile({ label, value, unit, delta, deltaLabel, spark, good })
 
 export function bandChip(band, { compact = false } = {}) {
   if (!band) return null;
-  return el('span', { class: `band-chip is-${band.key}`, title: band.hint }, [
+  return el('span', { class: 'band-chip', dataset: { band: band.key }, title: band.hint }, [
     el('span', { class: 'band-glyph', 'aria-hidden': 'true', text: band.glyph }),
     compact ? null : el('span', { text: band.label }),
   ]);
@@ -322,6 +322,28 @@ export function confirmSheet({ title, message, confirmLabel = 'Delete', onConfir
       { label: confirmLabel, className: 'btn-danger', onClick: onConfirm },
     ],
   });
+}
+
+/**
+ * The numbers behind a verdict.
+ *
+ * The app used to run two parallel designs off a settings flag — a plain one
+ * and an arithmetic one — which meant every screen had to be drawn twice and
+ * half the app was invisible to anyone who never found the toggle. There is one
+ * design now: the plain-English verdict is always the headline and the workings
+ * sit one tap underneath it. The Setup switch only decides whether that tap has
+ * already been made for you.
+ */
+export function disclose(label, bodyNodes, { open = false } = {}) {
+  const body = [].concat(bodyNodes).filter(Boolean);
+  if (!body.length) return null;
+  return el('details', { class: 'disclose', open: open ? '' : null }, [
+    el('summary', { class: 'disclose-summary' }, [
+      el('span', { class: 'disclose-label', text: label }),
+      chevron('disclose-chevron'),
+    ]),
+    el('div', { class: 'disclose-body' }, body),
+  ]);
 }
 
 /** A collapsible explainer — the spreadsheet's HowTo notes, kept out of the way. */

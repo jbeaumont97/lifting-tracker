@@ -18,6 +18,7 @@ const store = await import('../js/store.js');
 const select = await import('../js/core/select.js');
 const bindings = await import('../js/core/bind.js');
 const uistate = await import('../js/core/uistate.js');
+const ui = uistate;
 const { renderPlan, openCard } = await import('../js/views/plan.js');
 const { renderLog, setPrefill, clearForm } = await import('../js/views/log.js');
 const { renderProgress, openExercise, clearSelection } = await import('../js/views/progress.js');
@@ -55,7 +56,7 @@ function ctx(over = {}) {
   const settings = store.getSettings();
   return {
     settings,
-    simple: settings.detailLevel !== 'detailed',
+    numbersOpen: settings.numbersOpen === true,
     stats: select.allStats(settings, TODAY),
     today: TODAY,
     route: 'plan',
@@ -81,11 +82,11 @@ function reset() {
 
 /* ------------------------------------------------- 1. every view, both modes */
 
-for (const level of ['simple', 'detailed']) {
+for (const open of [false, true]) {
   reset();
-  store.updateSettings({ detailLevel: level });
+  store.updateSettings({ numbersOpen: open });
   const c = ctx();
-  const label = `[${level}]`;
+  const label = open ? '[numbers open]' : '[numbers folded]';
 
   const plan = render(`${label} Next`, () => renderPlan(c));
   ok(`${label} Next is a view section`, plan && plan.classList.contains('view'));
@@ -123,6 +124,73 @@ for (const level of ['simple', 'detailed']) {
 
   const setup = render(`${label} Setup`, () => renderSetup(ctx({ route: 'setup' })));
   ok(`${label} Setup offers the steppers`, setup && setup.querySelectorAll('.stepper').length > 5);
+
+  // One design for everyone: the arithmetic is present on every screen, and
+  // the setting only decides whether it starts open.
+  const discs = plan.querySelectorAll('.disclose');
+  ok(`${label} Next offers the numbers`, discs.length > 0);
+
+  // "Show the numbers" and friends follow the setting. The target override is
+  // not a reading aid — it is an input, and it opens when an override is
+  // actually in force, which is a different question.
+  const labelOf = (d) => (d.querySelector('.disclose-label') || {}).textContent || '';
+  const numbers = discs.filter((d) => /^(Show|Where)/.test(labelOf(d)));
+  ok(`${label} at least one numbers disclosure is on the screen`, numbers.length > 0);
+  ok(`${label} the numbers disclosures follow the setting`,
+    numbers.every((d) => d.hasAttribute('open') === open),
+    numbers.map((d) => `${labelOf(d)}=${d.hasAttribute('open')}`).join(', '));
+  const override = discs.filter((d) => labelOf(d) === 'Set the target myself');
+  ok(`${label} the target override stays shut until it is used`,
+    override.every((d) => !d.hasAttribute('open')));
+  ok(`${label} the verdict is on the surface either way`,
+    plan.querySelectorAll('.presc-explain').length > 0);
+  ok(`${label} the numbers are reachable either way`,
+    plan.textContent.includes('against a target of'));
+}
+
+/* ------------------------- 1b. nothing is gated behind a setting any more */
+
+{
+  // The grid and the dashboard table used to appear only in the detailed view.
+  // Everyone gets them now, whichever way the disclosure setting is set.
+  for (const open of [false, true]) {
+    reset();
+    store.updateSettings({ numbersOpen: open });
+    select.invalidate();
+    const label = open ? '[numbers open]' : '[numbers folded]';
+    const c = ctx();
+    const trained = c.stats.find((s) => s.entryCount > 0);
+
+    openCard(trained.exercise.id);
+    const plan = renderPlan(ctx());
+    ok(`${label} the trade-off grid is always there`,
+      plan.querySelectorAll('.cell-btn').length === 42);
+    ok(`${label} so is the target override`,
+      plan.textContent.includes('Set the target myself'));
+    ok(`${label} and the upsell to a hidden mode is gone`,
+      !plan.textContent.includes('Show the trade-off grid'));
+
+    // And it opens itself once an override is actually in force.
+    ui.setForExercise('plan.overrides', trained.exercise.id, { target: 999 });
+    const withOverride = renderPlan(ctx());
+    const od = withOverride.querySelectorAll('.disclose')
+      .find((d) => ((d.querySelector('.disclose-label') || {}).textContent || '') === 'Set the target myself');
+    ok(`${label} the target override opens when one is set`, !!od && od.hasAttribute('open'));
+    ui.clearForExercise('plan.overrides', trained.exercise.id);
+
+    ui.set('progress.listMode', 'table');
+    clearSelection();
+    const prog = renderProgress(ctx({ route: 'progress' }));
+    ok(`${label} the dashboard table is always reachable`,
+      prog.querySelectorAll('.data-table-wide').length === 1);
+    ui.set('progress.listMode', 'cards');
+
+    openExercise(trained.exercise.id);
+    const detail = renderProgress(ctx({ route: 'progress' }));
+    ok(`${label} the projections are always there`,
+      detail.textContent.includes('Projected +12 wks'));
+    clearSelection();
+  }
 }
 
 /* ------------------------------------------------------- 2. the empty states */
@@ -162,7 +230,6 @@ for (const level of ['simple', 'detailed']) {
 
 {
   reset();
-  store.updateSettings({ detailLevel: 'detailed' });
   select.invalidate();
   const c = ctx();
   const trained = c.stats.find((s) => s.entryCount > 0);
@@ -282,6 +349,63 @@ for (const level of ['simple', 'detailed']) {
   c.tick();
   await settle();
   ok('ticking with nothing changed repaints nothing', preview.textContent === steady);
+}
+
+/* ------------------------------------------ 6c. the motion primitives */
+
+// Nothing consumes these yet — the kinetic pass is later — but they are the
+// substrate the live session score is going to be built on, so they get
+// verified before anything depends on them.
+{
+  const motion = await import('../js/core/motion.js');
+  const doc = globalThis.document;
+
+  // Timings come off the CSS tokens. The shim's getComputedStyle returns
+  // nothing, so this is really checking the fallbacks hold.
+  ok('durations resolve to numbers',
+    [motion.durations.fast, motion.durations.base, motion.durations.slow].every(Number.isFinite),
+    `${motion.durations.fast}/${motion.durations.base}/${motion.durations.slow}`);
+  ok('durations are in a sane order',
+    motion.durations.fast < motion.durations.base && motion.durations.base < motion.durations.slow);
+  ok('easings resolve to curves', /cubic-bezier/.test(motion.easings.out) && /cubic-bezier/.test(motion.easings.spring));
+
+  // countUp lands on the target whatever route it takes.
+  const n = doc.createElement('span');
+  n.textContent = '100.0';
+  motion.countUp(n, 118.3, { duration: 40, format: (v) => v.toFixed(1) });
+  ok('countUp starts from where the node already was', n.textContent !== '118.3', n.textContent);
+  await new Promise((r) => setTimeout(r, 120));
+  ok('countUp lands exactly on the target', n.textContent === '118.3', n.textContent);
+
+  // Interrupting mid-run must not snap backwards.
+  motion.countUp(n, 90, { duration: 200, format: (v) => v.toFixed(1) });
+  await new Promise((r) => setTimeout(r, 30));
+  const mid = Number(n.textContent);
+  motion.countUp(n, 130, { duration: 40, format: (v) => v.toFixed(1) });
+  ok('a second countUp picks up mid-flight', Number.isFinite(mid) && mid < 118.3 && mid > 90, String(mid));
+  await new Promise((r) => setTimeout(r, 120));
+  ok('and still lands on the newest target', n.textContent === '130.0', n.textContent);
+
+  // No animation to run: same value, or a value that was never a number.
+  const same = doc.createElement('span');
+  same.textContent = '42.0';
+  motion.countUp(same, 42, { format: (v) => v.toFixed(1) });
+  ok('countUp to the same value writes it straight out', same.textContent === '42.0');
+
+  const blank = doc.createElement('span');
+  motion.countUp(blank, 7, { format: (v) => v.toFixed(1) });
+  ok('countUp from an empty node writes the target', blank.textContent === '7.0', blank.textContent);
+
+  const bad = doc.createElement('span');
+  motion.countUp(bad, NaN, { format: (v) => (Number.isFinite(v) ? v.toFixed(1) : '—') });
+  ok('countUp handles a value that is not a number', bad.textContent === '—', bad.textContent);
+  ok('countUp on nothing does not throw', (() => { try { motion.countUp(null, 5); return true; } catch { return false; } })());
+
+  // spring/pulse need Web Animations, which the shim does not have — they must
+  // decline rather than throw, exactly as they would on an old browser.
+  ok('spring declines without Web Animations', motion.spring(doc.createElement('i')) === null);
+  ok('pulse declines without Web Animations', motion.pulse(doc.createElement('i')) === null);
+  ok('reduced-motion is reported', motion.prefersReducedMotion() === false);
 }
 
 /* ------------------------------------- 7. view state survives a reload */
@@ -406,6 +530,48 @@ for (const level of ['simple', 'detailed']) {
     ok('the action button hides on the screen it points at',
       doc.body.querySelectorAll('.fab').length === 0);
   }
+}
+
+/* ---------------------------- 8b. the band colours: one contract, two files */
+
+// The verdict tints moved from a class per band to a data attribute, so the
+// stylesheet and the planner now agree through data-band. If they drift, every
+// cell in the trade-off grid silently reads grey — which looks deliberate.
+{
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+  const css = readFileSync(join(root, 'css', 'app.css'), 'utf8');
+  const M = await import('../js/metrics.js');
+
+  const styled = new Set([...css.matchAll(/\[data-band="([a-z]+)"\]/g)].map((m) => m[1]));
+  for (const key of Object.keys(M.BANDS)) {
+    ok(`the stylesheet colours the "${key}" verdict`, styled.has(key));
+  }
+  for (const key of styled) {
+    ok(`the stylesheet does not colour a verdict that no longer exists: ${key}`,
+      Object.keys(M.BANDS).includes(key));
+  }
+  ok('the tint is defined once, not per consumer',
+    !/\.is-(ideal|stretch|toobig|beaten|return)/.test(css),
+    'a per-band class rule survived the refactor');
+
+  reset();
+  select.invalidate();
+  const c = ctx();
+  const trained = c.stats.find((s) => s.entryCount > 0);
+  openCard(trained.exercise.id);
+  const plan = renderPlan(ctx());
+
+  const cells = plan.querySelectorAll('.cell');
+  ok('every grid cell declares its verdict',
+    cells.length === 42 && cells.every((n) => !!n.dataset.band), `${cells.length} cells`);
+  ok('and every verdict it declares is a real one',
+    cells.every((n) => Object.keys(M.BANDS).includes(n.dataset.band)));
+  ok('the legend declares its verdicts too',
+    plan.querySelectorAll('.legend-item').every((n) => styled.has(n.dataset.band)));
+  const chips = plan.querySelectorAll('.band-chip');
+  ok('the verdict chips declare theirs', chips.length > 0 && chips.every((n) => !!n.dataset.band));
+  ok('the pick marker still rides alongside the verdict',
+    cells.filter((n) => n.classList.contains('is-pick')).length === 1);
 }
 
 /* ------------------------------------------- 9. the offline shell is complete */

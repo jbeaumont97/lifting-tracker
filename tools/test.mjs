@@ -542,6 +542,74 @@ function fresh() {
   fresh();
 }
 
+/* -------------------------------- 5b. the simple/detailed split, retired */
+
+// The two-mode split is gone: one design, with the arithmetic behind a
+// disclosure. The only thing carried across is whether those disclosures start
+// open — and somebody who chose the detailed view was asking to see the
+// numbers, so they must still see them without touching anything.
+{
+  const base = () => {
+    fresh();
+    return JSON.parse(store.exportJSON());
+  };
+
+  const detailed = base();
+  detailed.settings = { ...detailed.settings, detailLevel: 'detailed' };
+  delete detailed.settings.numbersOpen;
+  ok('a detailed-view user keeps their numbers open',
+    store.importJSON(JSON.stringify(detailed)).settings.numbersOpen === true);
+
+  const simple = base();
+  simple.settings = { ...simple.settings, detailLevel: 'simple' };
+  delete simple.settings.numbersOpen;
+  ok('a simple-view user starts with them folded',
+    store.importJSON(JSON.stringify(simple)).settings.numbersOpen === false);
+
+  // A document written before the split showed everything, so it counts as
+  // detailed — the same rule the old migration used.
+  const ancient = base();
+  delete ancient.settings.detailLevel;
+  delete ancient.settings.numbersOpen;
+  ok('a pre-split document keeps everything it used to show',
+    store.importJSON(JSON.stringify(ancient)).settings.numbersOpen === true);
+
+  // An explicit choice always wins over the migration.
+  const explicit = base();
+  explicit.settings = { ...explicit.settings, detailLevel: 'detailed', numbersOpen: false };
+  ok('an explicit choice beats the migration',
+    store.importJSON(JSON.stringify(explicit)).settings.numbersOpen === false);
+
+  ok('the retired setting is not carried forward',
+    store.getSettings().detailLevel === undefined);
+
+  fresh();
+  store.updateSettings({ numbersOpen: true });
+  ok('the setting is a boolean, not a coerced number', store.getSettings().numbersOpen === true);
+  store.updateSettings({ numbersOpen: false });
+  ok('and it turns off again', store.getSettings().numbersOpen === false);
+  store.undo();
+  ok('undo restores it', store.getSettings().numbersOpen === true);
+}
+
+// --- readinessNote / readinessMaths, split out of one forked function ---
+{
+  fresh();
+  const cfg = store.getSettings();
+  const st = M.allStats(store.getExercises(), store.getEntries(), cfg, '2026-08-18')
+    .find((s) => s.entryCount > 0);
+  const r = st.readiness;
+  const plain = M.readinessNote(r);
+  const maths = M.readinessMaths(r);
+  ok('the plain verdict says something', plain.length > 20);
+  ok('the maths says something else', maths.length > 20 && maths !== plain);
+  ok('the plain verdict keeps the jargon out', !/e1RM|deficit|retention/i.test(plain), plain);
+  ok('both are empty when the model is off', M.readinessNote({ enabled: false }) === ''
+    && M.readinessMaths({ enabled: false }) === '');
+  ok('both are empty without a last session', M.readinessNote({ enabled: true, days: null }) === ''
+    && M.readinessMaths({ enabled: true, days: null }) === '');
+}
+
 /* ------------------------------------- 6. the memo layer (js/core/select.js) */
 
 // The memo is only allowed to change WHEN the maths runs, never WHAT it says.
