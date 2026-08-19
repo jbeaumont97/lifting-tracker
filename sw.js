@@ -1,7 +1,11 @@
 // sw.js — offline shell. Bump CACHE when any file below changes; the new worker
 // installs, drops older caches, and the app offers a reload.
 
-const CACHE = 'lifting-tracker-v2';
+const CACHE = 'lifting-tracker-v3';
+
+// Served from a local server means someone is working on the app, and the file
+// they just saved has to win. The deployed app keeps its offline-first cache.
+const DEV = ['localhost', '127.0.0.1', '[::1]'].includes(self.location.hostname);
 
 const SHELL = [
   './',
@@ -47,27 +51,38 @@ self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET' || new URL(req.url).origin !== self.location.origin) return;
 
+  // One network attempt, shared between the response and the cache refill.
+  const fromNetwork = fetch(req)
+    .then((res) => {
+      if (res.ok) {
+        const copy = res.clone();
+        caches.open(CACHE).then((c) => c.put(req, copy));
+      }
+      return res;
+    })
+    .catch(() => null);
+
+  // In development the network is the only source of truth.
+  if (DEV) {
+    event.respondWith(fromNetwork.then((res) => res || caches.match(req).then((hit) => hit || Response.error())));
+    return;
+  }
+
   // Navigations: network first so an update lands promptly, cache as the fallback.
   if (req.mode === 'navigate') {
     event.respondWith(
-      fetch(req)
-        .then((res) => {
-          caches.open(CACHE).then((c) => c.put(req, res.clone()));
-          return res;
-        })
-        .catch(() => caches.match(req).then((hit) => hit || caches.match('./index.html'))),
+      fromNetwork.then((res) => res || caches.match(req).then((hit) => hit || caches.match('./index.html'))),
     );
     return;
   }
 
-  // Everything else: cache first, then fill the cache in the background.
+  // Everything else: stale while revalidate. Answer from the cache at once, so
+  // the app opens instantly and works with no signal, but always ask the network
+  // as well so the NEXT load is current. Plain cache-first never notices that a
+  // file changed at all — it will happily serve the first CSS it ever saw until
+  // the cache name changes underneath it.
+  event.waitUntil(fromNetwork);
   event.respondWith(
-    caches.match(req).then((hit) => {
-      if (hit) return hit;
-      return fetch(req).then((res) => {
-        if (res.ok) caches.open(CACHE).then((c) => c.put(req, res.clone()));
-        return res;
-      });
-    }),
+    caches.match(req).then((hit) => hit || fromNetwork.then((res) => res || Response.error())),
   );
 });

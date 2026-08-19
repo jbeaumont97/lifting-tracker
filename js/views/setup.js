@@ -113,7 +113,10 @@ export function renderSetup(ctx) {
   /* ------------------------------------------------------------ how to */
   root.append(el('h2', { class: 'section-title', text: 'How this works' }));
   root.append(details('Logging', [
-    el('p', { text: 'One entry per lift per session: date, weight, reps, sets, and optionally RIR — how many more reps you could have done. For straight sets, 3×5 at 100 kg is a single entry with reps 5 and sets 3. For a ramping or pyramid session, log each distinct load as its own entry with sets 1.' }),
+    el('p', { text: 'Two ways in, and they store the same thing. Set by set logs the set you have just finished and starts the rest clock; all at once writes up a session that is already over. Sets that match on weight and reps are counted onto one row either way, so 3×5 at 100 kg is a single entry however you typed it.' }),
+    el('p', { text: 'Drop the reps before your last set and it is recorded as it happened: four sets of five plus one of four is stored as two rows, and the session is scored on the four honest sets rather than being dragged down to the short one or rounded up past it.' }),
+    el('p', { text: 'RIR and notes are recorded per set. Where sets are counted onto one row, that row keeps the lowest RIR — the set that came closest to failure — and collects the notes.' }),
+    el('p', { text: 'For a ramping or pyramid session, just log each set: the different loads become their own rows on their own.' }),
   ]));
   root.append(details('Reading the plan', [
     el('p', { text: 'Grey means you have already beaten that session, so it is not progression. Green is the smallest honest step forward. Amber is a stretch — ambitious but usually doable. Red means the jump is big enough that you will probably miss reps. Aim for green on most sessions and take amber when you are feeling strong.' }),
