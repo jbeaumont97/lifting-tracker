@@ -23,14 +23,36 @@ import {
   adjE1rm, e1rm, volume, planFor, bandFor, exerciseStats, sessionAdjWith,
 } from '../metrics.js';
 import { bandChip } from '../ui.js';
+import * as ui from '../core/uistate.js';
+import { bind } from '../core/bind.js';
+
+const FORM = 'log.form';
+const NOTES_OPEN = 'log.showNotes';
+const LAST_SET = 'log.lastSetId';   // the entry the last set landed on, so undo is exact
 
 let form = null;      // { exerciseId, date, weight, reps, sets, rir, notes, mode }
-let showNotes = false;
-let lastSetId = null; // the entry the last logged set landed on, so undo is exact
+
+/**
+ * The form writes itself to uistate as you fill it in.
+ *
+ * It used to be plain module state, so a reload lost a half-entered set — and
+ * the app forced a reload whenever another tab wrote, which meant a second
+ * device syncing mid-session could take the set out from under you. A proxy
+ * rather than fifty explicit saves: every existing `form.x = y` persists.
+ */
+function persisted(obj) {
+  return new Proxy(obj, {
+    set(t, k, v) { t[k] = v; ui.set(FORM, { ...t }); return true; },
+    deleteProperty(t, k) { delete t[k]; ui.set(FORM, { ...t }); return true; },
+  });
+}
+
+const lastSetId = () => ui.get(LAST_SET, null);
+const setLastSetId = (v) => ui.set(LAST_SET, v);
 
 export function setPrefill(prefill = {}) {
   const date = prefill.date || form?.date || isoToday();
-  form = {
+  const next = {
     exerciseId: prefill.exerciseId ?? form?.exerciseId ?? null,
     date,
     weight: prefill.weight ?? null,
@@ -43,7 +65,16 @@ export function setPrefill(prefill = {}) {
     // up an older one goes straight to the whole-session form.
     mode: prefill.mode ?? modeForDate(date),
   };
-  lastSetId = null;
+  form = persisted(next);
+  ui.set(FORM, { ...next });
+  setLastSetId(null);
+}
+
+/** Start again from nothing — used when the log is reset or a lift is deleted. */
+export function clearForm() {
+  form = null;
+  ui.set(FORM, undefined);
+  setLastSetId(null);
 }
 
 function modeForDate(date) {
@@ -53,7 +84,13 @@ function modeForDate(date) {
 export function renderLog(ctx) {
   const { settings, stats } = ctx;
   const root = el('section', { class: 'view view-log' });
-  if (!form) setPrefill({});
+  if (!form) {
+    const saved = ui.get(FORM, null);
+    if (saved && saved.date) form = persisted({ ...saved });
+    else setPrefill({});
+  }
+  // A lift can be deleted while its half-filled form is still sitting here.
+  if (form.exerciseId && !store.getExercise(form.exerciseId)) form.exerciseId = null;
 
   root.append(el('header', { class: 'view-head' }, [
     el('h1', { text: 'Log' }),
@@ -73,7 +110,7 @@ export function renderLog(ctx) {
     form.date = iso;
     // Changing the day changes which situation you are in.
     form.mode = modeForDate(iso);
-    lastSetId = null;
+    setLastSetId(null);
     ctx.refresh();
   };
   const dateInput = el('input', { type: 'date', class: 'date-input', value: form.date, max: isoAddDays(isoToday(), 1) });
@@ -207,15 +244,15 @@ function entryForm(st, ctx, settings) {
   const weightStep = stepper({
     label: `Weight (${settings.unit})`, value: form.weight, step: ex.step || settings.defaultStep,
     min: base, max: 999, dp: 1, origin: base, id: 'log-weight',
-    onChange: (v) => { form.weight = v; paint(); relabel(); },
+    onChange: (v) => { form.weight = v; ctx.tick(); },
   });
   const repsStep = stepper({
     label: live ? 'Reps this set' : 'Reps', value: form.reps, step: 1, min: 1, max: 50, dp: 0, id: 'log-reps',
-    onChange: (v) => { form.reps = v; paint(); relabel(); },
+    onChange: (v) => { form.reps = v; ctx.tick(); },
   });
   const setsStep = stepper({
     label: live ? 'Sets planned' : 'Sets', value: form.sets, step: 1, min: 1, max: 20, dp: 0, id: 'log-sets',
-    onChange: (v) => { form.sets = v; paint(); relabel(); },
+    onChange: (v) => { form.sets = v; ctx.tick(); },
   });
 
   const rir = chipGroup({
@@ -252,7 +289,7 @@ function entryForm(st, ctx, settings) {
         onclick: () => {
           form.weight = plan.weight; form.reps = plan.reps; form.sets = plan.sets;
           weightStep.setValue(plan.weight); repsStep.setValue(plan.reps); setsStep.setValue(plan.sets);
-          paint(); relabel();
+          ctx.tick();
         },
       }, ['Use']),
     ]) : null,
@@ -268,18 +305,27 @@ function entryForm(st, ctx, settings) {
     ]),
     el('button', {
       type: 'button', class: 'link-btn link-btn-block',
-      onclick: (e) => { showNotes = !showNotes; e.target.closest('.form-body').querySelector('.notes-wrap').hidden = !showNotes; },
+      onclick: (e) => {
+        const open = !ui.get(NOTES_OPEN, false);
+        ui.set(NOTES_OPEN, open);
+        e.target.closest('.form-body').querySelector('.notes-wrap').hidden = !open;
+      },
     }, ['Notes']),
-    el('div', { class: 'notes-wrap', hidden: !showNotes }, [notesArea]),
+    el('div', { class: 'notes-wrap', hidden: !ui.get(NOTES_OPEN, false) }, [notesArea]),
     primary,
   ]);
-  paint();
-  relabel();
+  // The preview and the button label follow the levers without re-rendering.
+  // Rebuilding the view would take the caret out of whichever field is being
+  // typed into, which is why this screen used to repaint itself by hand; bind()
+  // is that same idea, minus the bookkeeping. The key is the three numbers the
+  // preview actually depends on, so moving RIR or typing a note writes nothing.
+  const levers = () => `${form.weight}|${form.reps}|${form.sets}`;
+  bind(preview, levers, paint);
+  bind(primary, levers, relabel);
 
-  // Keep the button's label honest as the steppers move, including the ones
-  // typed into rather than nudged.
+  // Steppers that are typed into rather than nudged still have to be heard.
   for (const s of [weightStep, repsStep, setsStep]) {
-    for (const ev of ['lt:nudge', 'change', 'blur']) s.input.addEventListener(ev, () => { paint(); relabel(); });
+    for (const ev of ['lt:nudge', 'change', 'blur']) s.input.addEventListener(ev, ctx.tick);
   }
 
   return el('div', { class: 'card card-form' }, [
@@ -324,8 +370,8 @@ function tracker(todays, doneSoFar, target, complete, nextPill, ex, ctx) {
       doneSoFar ? el('button', {
         type: 'button', class: 'link-btn',
         onclick: () => {
-          const removed = store.removeLastSet(form.exerciseId, form.date, lastSetId);
-          lastSetId = null;
+          const removed = store.removeLastSet(form.exerciseId, form.date, lastSetId());
+          setLastSetId(null);
           stopRest();
           ctx.refresh();
           if (removed) toast(`Took back ${removed.reps} @ ${fmtWeight(removed.weight)} kg`, {
@@ -354,7 +400,7 @@ function logOneSet(st, ctx, settings) {
     exerciseId: form.exerciseId, date: form.date, weight: w, reps: r,
     rir: form.rir, notes: form.notes,
   });
-  lastSetId = created?.id ?? null;
+  setLastSetId(created?.id ?? null);
   // A note belongs to the set it was written for, not to every set after it.
   form.notes = '';
 
@@ -378,7 +424,7 @@ function logOneSet(st, ctx, settings) {
   if (target && doneAfter === target) {
     stopRest();
     toast(`${st.exercise.name} done · ${doneAfter} set${doneAfter === 1 ? '' : 's'}`, {
-      action: () => { store.undo(); lastSetId = null; ctx.refresh(); }, actionLabel: 'Undo',
+      action: () => { store.undo(); setLastSetId(null); ctx.refresh(); }, actionLabel: 'Undo',
     });
   } else {
     // Past the plan there is no "of five" to count towards any more.

@@ -645,8 +645,8 @@ export function planFor(stats, settings, override = {}) {
   plan.band = bandOf(plan.score, plan.weight);
   plan.lastWeight = stats.lastAdj != null ? stats.entries[stats.entries.length - 1].weight : null;
 
-  // The full trade-off grid: every rep scheme x set count.
-  plan.grid = REP_SCHEMES.map((r) => SET_COLUMNS.map((s) => {
+  /** One cell of the trade-off grid: the lightest loadable weight at reps x sets. */
+  const cell = (r, s) => {
     const w = weightForTarget(target, r, s, settings, step, base);
     const score = w * repFactor(r, settings.formula) * setBonus(s, settings.setBonusK);
     return {
@@ -656,11 +656,35 @@ export function planFor(stats, settings, override = {}) {
       isPick: r === snapReps(reps) && s === sets,
       volume: volume(w, r, s),
     };
-  }));
+  };
+
+  // The grid is 42 solves. A collapsed card never looks at it, and holding a
+  // stepper rebuilds the plan up to twenty times a second, so it is materialised
+  // on first read rather than on construction. Same values, same order; the only
+  // thing that changes is when the work happens.
+  let grid = null;
+  let gentlest;
+  Object.defineProperty(plan, 'grid', {
+    enumerable: true,
+    configurable: true,
+    get() {
+      if (!grid) grid = REP_SCHEMES.map((r) => SET_COLUMNS.map((s) => cell(r, s)));
+      return grid;
+    },
+  });
 
   // Gentlest option at the chosen set count: smallest overshoot of the target.
-  const col = plan.grid.map((row) => row.find((c) => c.sets === sets)).filter((c) => c && Number.isFinite(c.score));
-  if (col.length) plan.gentlest = col.reduce((a, b) => (b.score < a.score ? b : a));
+  // One column, so it solves seven cells rather than forcing the whole grid.
+  Object.defineProperty(plan, 'gentlest', {
+    enumerable: true,
+    configurable: true,
+    get() {
+      if (gentlest !== undefined) return gentlest;
+      const col = REP_SCHEMES.map((r) => cell(r, sets)).filter((c) => Number.isFinite(c.score));
+      gentlest = col.length ? col.reduce((a, b) => (b.score < a.score ? b : a)) : null;
+      return gentlest;
+    },
+  });
 
   return plan;
 }

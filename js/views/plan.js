@@ -11,6 +11,7 @@
 
 import { el, stepper, segmented, bandChip, toast, details, chevron, accentDot, tap } from '../ui.js';
 import * as store from '../store.js';
+import * as ui from '../core/uistate.js';
 import {
   planFor,
   BANDS,
@@ -27,11 +28,14 @@ import {
   SET_COLUMNS,
 } from '../metrics.js';
 
-const overrides = new Map(); // exerciseId -> { target, reps, sets }
-const gridMode = new Map();  // exerciseId -> 'weights' | 'scores' | 'table'
+// View state lives in core/uistate.js so a reload does not throw it away.
+const OV = 'plan.overrides';   // exerciseId -> { target, reps, sets }
+const GRID = 'plan.gridMode';  // exerciseId -> { mode: 'weights'|'scores'|'table' }
+const OPEN = 'plan.openId';
 // undefined = nothing decided yet, so the view may open the top card itself.
 // null = every card is deliberately closed.
-let openId;
+const openId = () => ui.get(OPEN, undefined);
+const setOpenId = (v) => ui.set(OPEN, v);
 
 // Readiness is decided by the model now (metrics.js: readinessFor), not by a
 // day count here. These two are only the fallback for a document written before
@@ -45,10 +49,12 @@ function isReady(s) {
   return (s.daysSince ?? 999) >= RESTED_DAYS;
 }
 
+/** The card's manual overrides. A read-only copy — write through setOv(). */
 function ov(id) {
-  if (!overrides.has(id)) overrides.set(id, { target: null, reps: null, sets: null });
-  return overrides.get(id);
+  return ui.forExercise(OV, id, { target: null, reps: null, sets: null });
 }
+
+function setOv(id, patch) { ui.setForExercise(OV, id, patch); }
 
 export function renderPlan(ctx) {
   const { settings, stats, simple } = ctx;
@@ -94,7 +100,7 @@ export function renderPlan(ctx) {
 
   // The top of the readiness order opens itself: a home screen should show you
   // a weight, not four collapsed rows.
-  if (openId === undefined) openId = (ready[0] || resting[0])?.exercise.id ?? null;
+  if (openId() === undefined) setOpenId((ready[0] || resting[0])?.exercise.id ?? null);
 
   for (const group of [
     { title: 'Ready now', rows: ready, hint: 'Recovered from the last session — stalest first.' },
@@ -150,13 +156,13 @@ function sessionStrip(ctx, trained) {
 function card(stats, ctx, settings) {
   const id = stats.exercise.id;
   const o = ov(id);
-  const isOpen = openId === id;
+  const isOpen = openId() === id;
   const simple = ctx.simple;
   const plan = stats.entryCount ? planFor(stats, settings, o) : null;
 
   const head = el('button', {
     type: 'button', class: 'card-head', 'aria-expanded': isOpen ? 'true' : 'false',
-    onclick: () => { tap(); openId = isOpen ? null : id; ctx.refresh({ transition: true }); },
+    onclick: () => { tap(); setOpenId(isOpen ? null : id); ctx.refresh({ transition: true }); },
   }, [
     accentDot(id),
     el('div', { class: 'card-head-main' }, [
@@ -226,7 +232,7 @@ function card(stats, ctx, settings) {
   if (plan.band.key === 'beaten' && Number.isFinite(plan.bestNow)) {
     body.append(el('button', {
       type: 'button', class: 'hint-btn',
-      onclick: () => { ov(id).target = round1(plan.bestNow * (1 + stats.gainPerWeek)); ctx.refresh(); },
+      onclick: () => { setOv(id, { target: round1(plan.bestNow * (1 + stats.gainPerWeek)) }); ctx.refresh(); },
     }, [
       el('span', { class: 'hint-label', text: 'This does not beat your best' }),
       el('span', {
@@ -246,7 +252,7 @@ function card(stats, ctx, settings) {
     }, ['Log this']),
     el('button', {
       type: 'button', class: 'btn btn-ghost',
-      onclick: () => { tap(); openId = isOpen ? null : id; ctx.refresh({ transition: true }); },
+      onclick: () => { tap(); setOpenId(isOpen ? null : id); ctx.refresh({ transition: true }); },
     }, [isOpen ? 'Close' : 'Adjust']),
   ]);
   body.append(actions);
@@ -268,11 +274,11 @@ function detail(stats, plan, ctx, settings) {
   // --- levers ---
   const repsStepper = stepper({
     label: 'Reps', value: plan.reps, step: 1, min: 1, max: 20, dp: 0, id: `reps-${id}`,
-    onChange: (v) => { o.reps = v; ctx.refresh(); },
+    onChange: (v) => { setOv(id, { reps: v }); ctx.refresh(); },
   });
   const setsStepper = stepper({
     label: 'Sets', value: plan.sets, step: 1, min: 1, max: 10, dp: 0, id: `sets-${id}`,
-    onChange: (v) => { o.sets = v; ctx.refresh(); },
+    onChange: (v) => { setOv(id, { sets: v }); ctx.refresh(); },
   });
   wrap.append(el('div', { class: 'lever-row' }, [repsStepper, setsStepper]));
 
@@ -290,7 +296,7 @@ function detail(stats, plan, ctx, settings) {
       stepper({
         label: 'Override target (kg)', value: o.target ?? '', step: 0.5, min: 0, max: 999, dp: 1,
         id: `tgt-${id}`, placeholder: fmt(plan.autoTarget, 1) + ' auto',
-        onChange: (v) => { o.target = v > 0 ? v : null; ctx.refresh(); },
+        onChange: (v) => { setOv(id, { target: v > 0 ? v : null }); ctx.refresh(); },
       }),
     ]));
   }
@@ -298,7 +304,7 @@ function detail(stats, plan, ctx, settings) {
   if (plan.gentlest && plan.gentlest.score < plan.score - 1e-9) {
     wrap.append(el('button', {
       type: 'button', class: 'hint-btn',
-      onclick: () => { o.reps = plan.gentlest.reps; ctx.refresh(); },
+      onclick: () => { setOv(id, { reps: plan.gentlest.reps }); ctx.refresh(); },
     }, [
       el('span', { class: 'hint-label', text: `Smallest jump at ${plan.sets} sets` }),
       el('span', {
@@ -323,7 +329,7 @@ function detail(stats, plan, ctx, settings) {
     }, ['Show the trade-off grid and targets →']));
   } else {
     // --- the trade-off grid ---
-    const mode = gridMode.get(id) || 'weights';
+    const mode = ui.forExercise(GRID, id, { mode: 'weights' }).mode;
     const gridHost = el('div', { class: 'grid-host' });
     const seg = segmented({
       label: 'Grid view', value: mode,
@@ -332,7 +338,7 @@ function detail(stats, plan, ctx, settings) {
         { value: 'scores', label: 'Scores' },
         { value: 'table', label: 'Table' },
       ],
-      onChange: (v) => { gridMode.set(id, v); gridHost.replaceChildren(gridFor(v, stats, plan, ctx, settings)); },
+      onChange: (v) => { ui.setForExercise(GRID, id, { mode: v }); gridHost.replaceChildren(gridFor(v, stats, plan, ctx, settings)); },
     });
     gridHost.append(gridFor(mode, stats, plan, ctx, settings));
 
@@ -347,7 +353,7 @@ function detail(stats, plan, ctx, settings) {
     wrap.append(el('button', {
       type: 'button', class: 'btn btn-ghost btn-block',
       onclick: () => {
-        overrides.set(id, { target: null, reps: null, sets: null });
+        ui.clearForExercise(OV, id);
         ctx.refresh();
         toast('Back to automatic');
       },
@@ -386,7 +392,7 @@ function gridFor(mode, stats, plan, ctx, settings) {
         el('button', {
           type: 'button', class: 'cell-btn',
           'aria-label': `${sets} sets of ${reps} reps at ${fmtWeight(cell.weight)} kg, scores ${fmt(cell.score, 1)}, ${cell.band.label}`,
-          onclick: () => { tap(); o.reps = reps; o.sets = sets; ctx.refresh(); },
+          onclick: () => { tap(); setOv(id, { reps, sets }); ctx.refresh(); },
         }, [
           el('span', { class: 'cell-value', text: value }),
           el('span', { class: 'cell-glyph', 'aria-hidden': 'true', text: cell.band.glyph }),
@@ -502,6 +508,6 @@ function fmtNum(n) {
   return n == null || !Number.isFinite(Number(n)) ? '—' : String(Math.round(Number(n)));
 }
 
-export function clearOverrides() { overrides.clear(); }
+export function clearOverrides() { ui.set(OV, {}); }
 
-export function openCard(id) { openId = id; }
+export function openCard(id) { setOpenId(id); }

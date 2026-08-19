@@ -34,6 +34,12 @@ let doc = null;
 const listeners = new Set();
 let undoStack = [];
 
+// Bumped by every commit. Anything that derives from the document memoises on
+// this, so a render triggered by view state alone (a stepper nudge, a card
+// opening) costs nothing to recompute. See js/core/select.js.
+let version = 0;
+export const getVersion = () => version;
+
 /* ------------------------------------------------------------- lifecycle */
 
 function blank() {
@@ -74,7 +80,8 @@ function normalise(raw) {
       notes: String(e.notes ?? ''),
       seq: Number(e.seq) || i + 1,
     }));
-  d.seq = Math.max(1, ...d.entries.map((e) => e.seq + 1));
+  // A spread over every entry blows the call stack on a long log; fold instead.
+  d.seq = d.entries.reduce((m, e) => (e.seq + 1 > m ? e.seq + 1 : m), 1);
   d.schema = SCHEMA;
   return d;
 }
@@ -124,15 +131,26 @@ function persist() {
   }
 }
 
-/** Mutate the document through this so saving and notifying never get skipped. */
+/**
+ * Mutate the document through this so saving and notifying never get skipped.
+ *
+ * Undo used to stringify the whole document before every mutation — O(document)
+ * on the hot path, once per logged set. Instead a mutator hands back the inverse
+ * of what it just did through `record()`, and only the coarse, rare operations
+ * (import, reset, clear, deleting a lift) still pay for a full snapshot.
+ */
 function commit(fn, meta = {}) {
   load();
-  const before = JSON.stringify(doc);
-  fn(doc);
-  if (meta.undoable) {
-    undoStack.push({ snapshot: before, label: meta.label || 'change' });
+  const before = meta.coarse ? JSON.stringify(doc) : null;
+  let inverse = null;
+  fn(doc, (f) => { inverse = f; });
+  if (meta.undoable && (before !== null || inverse)) {
+    undoStack.push(before !== null
+      ? { snapshot: before, label: meta.label || 'change' }
+      : { inverse, label: meta.label || 'change' });
     if (undoStack.length > 20) undoStack.shift();
   }
+  version++;
   persist();
   notify({ type: 'change', ...meta });
   return doc;
@@ -154,10 +172,35 @@ export function canUndo() { return undoStack.length > 0; }
 export function undo() {
   const last = undoStack.pop();
   if (!last) return false;
-  doc = normalise(JSON.parse(last.snapshot));
+  if (last.snapshot !== undefined) {
+    doc = normalise(JSON.parse(last.snapshot));
+  } else {
+    // The inverse restores an exactly-valid prior state, so there is nothing for
+    // normalise() to fix. `seq` is deliberately left where it is: letting it fall
+    // back would hand a future entry an id ordering that has already been used.
+    last.inverse(doc);
+  }
+  version++;
   persist();
   notify({ type: 'change', undone: last.label });
   return true;
+}
+
+/**
+ * Re-read a document another tab just wrote. The app used to answer the storage
+ * event with location.reload(), which threw away whatever was half-typed; this
+ * keeps the page, and the view state with it.
+ *
+ * The undo stack goes, because its inverses describe a document this tab no
+ * longer has.
+ */
+export function reload() {
+  doc = null;
+  undoStack = [];
+  load();
+  version++;
+  notify({ type: 'change', external: true });
+  return doc;
 }
 
 /* --------------------------------------------------------------- getters */
@@ -194,7 +237,7 @@ function uid(prefix) {
 
 export function addEntry(entry) {
   let created = null;
-  commit((d) => {
+  commit((d, record) => {
     created = {
       id: uid('en'),
       date: entry.date || isoToday(),
@@ -207,6 +250,8 @@ export function addEntry(entry) {
       seq: d.seq++,
     };
     d.entries.push(created);
+    const id = created.id;
+    record((u) => { u.entries = u.entries.filter((e) => e.id !== id); });
   }, { undoable: true, label: 'set logged' });
   return created;
 }
@@ -228,7 +273,7 @@ export function entriesOn(exerciseId, date) {
  */
 export function logSet(set) {
   let created = null;
-  commit((d) => {
+  commit((d, record) => {
     const date = set.date || isoToday();
     const candidate = {
       weight: Number(set.weight),
@@ -239,6 +284,7 @@ export function logSet(set) {
     const key = setKey(candidate);
     const match = d.entries.find((e) => e.exerciseId === set.exerciseId && e.date === date && setKey(e) === key);
     if (match) {
+      const prev = { id: match.id, sets: match.sets, rir: match.rir, notes: match.notes };
       match.sets += 1;
       // The block keeps the hardest set's RIR — the one closest to failure is
       // what the number is for — and collects any notes rather than losing one.
@@ -247,10 +293,16 @@ export function logSet(set) {
         match.notes = match.notes ? `${match.notes}; ${candidate.notes}` : candidate.notes;
       }
       created = match;
+      record((u) => {
+        const m = u.entries.find((e) => e.id === prev.id);
+        if (m) { m.sets = prev.sets; m.rir = prev.rir; m.notes = prev.notes; }
+      });
       return;
     }
     created = { id: uid('en'), date, exerciseId: set.exerciseId, ...candidate, sets: 1, seq: d.seq++ };
     d.entries.push(created);
+    const id = created.id;
+    record((u) => { u.entries = u.entries.filter((e) => e.id !== id); });
   }, { undoable: true, label: 'set logged' });
   return created;
 }
@@ -262,21 +314,34 @@ export function logSet(set) {
  */
 export function removeLastSet(exerciseId, date, preferId = null) {
   let removed = null;
-  commit((d) => {
+  commit((d, record) => {
     const mine = d.entries.filter((e) => e.exerciseId === exerciseId && e.date === date);
     if (!mine.length) return;
     const target = (preferId && mine.find((e) => e.id === preferId)) || mine.reduce((a, b) => (b.seq > a.seq ? b : a));
     removed = { weight: target.weight, reps: target.reps };
-    if (target.sets > 1) target.sets -= 1;
-    else d.entries = d.entries.filter((e) => e.id !== target.id);
+    if (target.sets > 1) {
+      const id = target.id;
+      target.sets -= 1;
+      record((u) => { const m = u.entries.find((e) => e.id === id); if (m) m.sets += 1; });
+    } else {
+      const idx = d.entries.indexOf(target);
+      const copy = { ...target };
+      d.entries = d.entries.filter((e) => e.id !== target.id);
+      record((u) => { u.entries.splice(Math.min(idx, u.entries.length), 0, copy); });
+    }
   }, { undoable: true, label: 'set removed' });
   return removed;
 }
 
 export function updateEntry(id, patch) {
-  commit((d) => {
+  commit((d, record) => {
     const e = d.entries.find((x) => x.id === id);
     if (!e) return;
+    const prev = {
+      date: e.date, weight: e.weight, reps: e.reps, sets: e.sets,
+      rir: e.rir, notes: e.notes, exerciseId: e.exerciseId,
+    };
+    record((u) => { const t = u.entries.find((x) => x.id === id); if (t) Object.assign(t, prev); });
     Object.assign(e, {
       date: patch.date ?? e.date,
       weight: patch.weight !== undefined ? Number(patch.weight) : e.weight,
@@ -290,13 +355,19 @@ export function updateEntry(id, patch) {
 }
 
 export function deleteEntry(id) {
-  commit((d) => { d.entries = d.entries.filter((e) => e.id !== id); }, { undoable: true, label: 'entry deleted' });
+  commit((d, record) => {
+    const idx = d.entries.findIndex((e) => e.id === id);
+    if (idx < 0) return;
+    const copy = { ...d.entries[idx] };
+    d.entries.splice(idx, 1);
+    record((u) => { u.entries.splice(Math.min(idx, u.entries.length), 0, copy); });
+  }, { undoable: true, label: 'entry deleted' });
 }
 
 export function addExercise(ex) {
   const s = getSettings();
   let created = null;
-  commit((d) => {
+  commit((d, record) => {
     created = {
       id: uid('ex'),
       name: String(ex.name || 'New exercise').trim(),
@@ -308,14 +379,18 @@ export function addExercise(ex) {
       notes: String(ex.notes || ''),
     };
     d.exercises.push(created);
+    const id = created.id;
+    record((u) => { u.exercises = u.exercises.filter((e) => e.id !== id); });
   }, { undoable: true, label: 'exercise added' });
   return created;
 }
 
 export function updateExercise(id, patch) {
-  commit((d) => {
+  commit((d, record) => {
     const ex = d.exercises.find((x) => x.id === id);
     if (!ex) return;
+    const prev = { ...ex };
+    record((u) => { const t = u.exercises.find((x) => x.id === id); if (t) Object.assign(t, prev); });
     if (patch.name !== undefined) ex.name = String(patch.name).trim() || ex.name;
     for (const k of ['step', 'base', 'gainPerWeek', 'setsPerSession', 'setsPerWeek']) {
       if (patch[k] !== undefined) ex[k] = num(patch[k], ex[k]);
@@ -329,24 +404,28 @@ export function deleteExercise(id) {
   commit((d) => {
     d.exercises = d.exercises.filter((e) => e.id !== id);
     d.entries = d.entries.filter((e) => e.exerciseId !== id);
-  }, { undoable: true, label: 'exercise deleted' });
+  }, { undoable: true, coarse: true, label: 'exercise deleted' });
 }
 
 export function moveExercise(id, delta) {
-  commit((d) => {
+  commit((d, record) => {
     const i = d.exercises.findIndex((e) => e.id === id);
     const j = i + delta;
     if (i < 0 || j < 0 || j >= d.exercises.length) return;
     [d.exercises[i], d.exercises[j]] = [d.exercises[j], d.exercises[i]];
+    record((u) => { [u.exercises[i], u.exercises[j]] = [u.exercises[j], u.exercises[i]]; });
   }, { undoable: true, label: 'order changed' });
 }
 
 export function updateSettings(patch) {
-  commit((d) => {
+  commit((d, record) => {
+    const prev = {};
     for (const [k, v] of Object.entries(patch)) {
       if (!(k in DEFAULT_SETTINGS)) continue;
+      prev[k] = d.settings[k];
       d.settings[k] = STRING_SETTINGS.has(k) ? String(v) : num(v, d.settings[k]);
     }
+    record((u) => { Object.assign(u.settings, prev); });
   }, { undoable: true, label: 'settings changed' });
 }
 
@@ -403,7 +482,7 @@ export function importJSON(text, { merge = false } = {}) {
       seen.add(key);
       d.entries.push({ ...en, id: uid('en'), exerciseId: exId, seq: d.seq++ });
     }
-  }, { undoable: true, label: 'backup restored' });
+  }, { undoable: true, coarse: true, label: 'backup restored' });
   return doc;
 }
 
@@ -414,7 +493,7 @@ export function resetToSeed() {
     d.entries = s.entries;
     d.settings = s.settings;
     d.seq = s.seq;
-  }, { undoable: true, label: 'reset to spreadsheet data' });
+  }, { undoable: true, coarse: true, label: 'reset to spreadsheet data' });
 }
 
 /* ------------------------------------------------------------ onboarding */
@@ -427,11 +506,11 @@ export function setOnboarded(value = true) {
 
 /** Keep the standard lifts, drop the sample sessions — "this is my log now". */
 export function startFresh() {
-  commit((d) => { d.entries = []; d.onboarded = true; }, { undoable: true, label: 'started fresh' });
+  commit((d) => { d.entries = []; d.onboarded = true; }, { undoable: true, coarse: true, label: 'started fresh' });
 }
 
 export function clearAll() {
-  commit((d) => { d.entries = []; }, { undoable: true, label: 'log cleared' });
+  commit((d) => { d.entries = []; }, { undoable: true, coarse: true, label: 'log cleared' });
 }
 
 /* ----------------------------------------------------------------- theme */

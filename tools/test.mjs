@@ -333,6 +333,337 @@ ok('relativeDate today', M.relativeDate('2026-08-18', '2026-08-18') === 'Today')
 ok('relativeDate yesterday', M.relativeDate('2026-08-17', '2026-08-18') === 'Yesterday');
 ok('isoAddDays crosses a month', M.isoAddDays('2026-08-31', 1) === '2026-09-01');
 
+/* ------------------------------------------------- 5. the store (js/store.js) */
+
+// store.js is the one place a bug silently loses data, and it has never had a
+// test. It needs a localStorage before it is imported, so the shim goes first.
+class MemoryStorage {
+  constructor() { this.map = new Map(); }
+  getItem(k) { return this.map.has(k) ? this.map.get(k) : null; }
+  setItem(k, v) { this.map.set(k, String(v)); }
+  removeItem(k) { this.map.delete(k); }
+  clear() { this.map.clear(); }
+}
+globalThis.localStorage = new MemoryStorage();
+
+const store = await import('../js/store.js');
+
+/** A store holding nothing but the seed, with an empty undo stack. */
+function fresh() {
+  globalThis.localStorage.clear();
+  store.reload();
+  return store.getExercises()[0].id;
+}
+
+// --- logSet: the merge rule ---
+{
+  const ex = fresh();
+  const day = '2026-08-18';
+  const before = store.entriesOn(ex, day).length;
+  store.logSet({ exerciseId: ex, date: day, weight: 100, reps: 5, rir: 3 });
+  store.logSet({ exerciseId: ex, date: day, weight: 100, reps: 5, rir: 1 });
+  const rows = store.entriesOn(ex, day).filter((e) => e.weight === 100 && e.reps === 5);
+  ok('logSet merges two identical sets into one block', rows.length === 1, `got ${rows.length} rows`);
+  ok('a merged block counts both sets', rows[0].sets === 2, `sets=${rows[0]?.sets}`);
+  ok('a merged block keeps the hardest RIR', rows[0].rir === 1, `rir=${rows[0]?.rir}`);
+  ok('logSet did not disturb the rest of the day', store.entriesOn(ex, day).length === before + 1);
+
+  store.logSet({ exerciseId: ex, date: day, weight: 100, reps: 4, rir: 0 });
+  const four = store.entriesOn(ex, day).filter((e) => e.weight === 100 && e.reps === 4);
+  ok('a different rep count becomes its own block', four.length === 1 && four[0].sets === 1);
+}
+
+// --- logSet: notes are collected, not lost ---
+{
+  const ex = fresh();
+  store.logSet({ exerciseId: ex, date: '2026-08-18', weight: 60, reps: 5, notes: 'felt light' });
+  store.logSet({ exerciseId: ex, date: '2026-08-18', weight: 60, reps: 5, notes: 'grip slipped' });
+  const row = store.entriesOn(ex, '2026-08-18').find((e) => e.weight === 60 && e.reps === 5);
+  ok('a merged block collects both notes', row.notes === 'felt light; grip slipped', row.notes);
+  store.logSet({ exerciseId: ex, date: '2026-08-18', weight: 60, reps: 5, notes: 'grip slipped' });
+  const again = store.entriesOn(ex, '2026-08-18').find((e) => e.weight === 60 && e.reps === 5);
+  ok('a repeated note is not duplicated', again.notes === 'felt light; grip slipped', again.notes);
+}
+
+// --- undo: the merge branch restores every field it touched ---
+{
+  const ex = fresh();
+  const day = '2026-08-18';
+  store.logSet({ exerciseId: ex, date: day, weight: 90, reps: 5, rir: 3, notes: 'one' });
+  const snap = { ...store.entriesOn(ex, day).find((e) => e.weight === 90) };
+  store.logSet({ exerciseId: ex, date: day, weight: 90, reps: 5, rir: 0, notes: 'two' });
+  store.undo();
+  const back = store.entriesOn(ex, day).find((e) => e.weight === 90);
+  ok('undo restores the block set count', back.sets === snap.sets, `${back.sets} vs ${snap.sets}`);
+  ok('undo restores the block RIR', back.rir === snap.rir, `${back.rir} vs ${snap.rir}`);
+  ok('undo restores the block notes', back.notes === snap.notes, `${back.notes} vs ${snap.notes}`);
+}
+
+// --- undo: the create branch removes the entry it added ---
+{
+  const ex = fresh();
+  const day = '2026-08-18';
+  const before = store.getEntries().length;
+  store.logSet({ exerciseId: ex, date: day, weight: 123.5, reps: 7 });
+  ok('logSet added an entry', store.getEntries().length === before + 1);
+  store.undo();
+  ok('undo removes the entry logSet created', store.getEntries().length === before);
+  ok('undo leaves no trace of the set', !store.getEntries().some((e) => e.weight === 123.5));
+}
+
+// --- removeLastSet, both branches, and their inverses ---
+{
+  const ex = fresh();
+  const day = '2026-08-18';
+  store.logSet({ exerciseId: ex, date: day, weight: 80, reps: 5 });
+  store.logSet({ exerciseId: ex, date: day, weight: 80, reps: 5 });
+  store.removeLastSet(ex, day);
+  ok('removeLastSet decrements a multi-set block',
+    store.entriesOn(ex, day).find((e) => e.weight === 80).sets === 1);
+  store.undo();
+  ok('undo puts the removed set back',
+    store.entriesOn(ex, day).find((e) => e.weight === 80).sets === 2);
+
+  const count = store.getEntries().length;
+  store.logSet({ exerciseId: ex, date: day, weight: 77.5, reps: 3 });
+  store.removeLastSet(ex, day);
+  ok('removeLastSet deletes a one-set block', store.getEntries().length === count);
+  store.undo();
+  ok('undo restores a deleted one-set block', store.getEntries().length === count + 1);
+  ok('the restored block is the one that went', store.getEntries().some((e) => e.weight === 77.5 && e.reps === 3));
+}
+
+// --- deleteEntry restores in place, not at the end ---
+{
+  fresh();
+  const all = store.getEntries();
+  const victim = all[Math.floor(all.length / 2)];
+  const idx = all.indexOf(victim);
+  store.deleteEntry(victim.id);
+  ok('deleteEntry removes the entry', !store.getEntries().some((e) => e.id === victim.id));
+  store.undo();
+  ok('undo restores the deleted entry', store.getEntries().some((e) => e.id === victim.id));
+  ok('undo restores it at its original index', store.getEntries().indexOf(
+    store.getEntries().find((e) => e.id === victim.id)) === idx);
+}
+
+// --- updateEntry and its inverse ---
+{
+  fresh();
+  const e0 = store.getEntries()[0];
+  const snap = { ...e0 };
+  store.updateEntry(e0.id, { weight: 999, reps: 2, sets: 9, rir: 0, notes: 'changed' });
+  const hit = store.getEntries().find((e) => e.id === snap.id);
+  ok('updateEntry applies the patch', hit.weight === 999 && hit.reps === 2 && hit.sets === 9);
+  store.undo();
+  const back = store.getEntries().find((e) => e.id === snap.id);
+  for (const k of ['date', 'weight', 'reps', 'sets', 'rir', 'notes', 'exerciseId']) {
+    ok(`undo restores entry.${k}`, back[k] === snap[k], `${back[k]} vs ${snap[k]}`);
+  }
+}
+
+// --- settings, order, and the coarse whole-document path ---
+{
+  fresh();
+  const was = store.getSettings().lookbackDays;
+  store.updateSettings({ lookbackDays: 21 });
+  ok('updateSettings applies', store.getSettings().lookbackDays === 21);
+  store.undo();
+  ok('undo restores the previous setting', store.getSettings().lookbackDays === was);
+
+  const order = store.getExercises().map((e) => e.id);
+  store.moveExercise(order[1], -1);
+  ok('moveExercise swaps', store.getExercises()[0].id === order[1]);
+  store.undo();
+  ok('undo restores the order', store.getExercises().map((e) => e.id).join() === order.join());
+
+  const n = store.getEntries().length;
+  ok('the seed has a log to clear', n > 0);
+  store.clearAll();
+  ok('clearAll empties the log', store.getEntries().length === 0);
+  store.undo();
+  ok('undo restores the whole log from a coarse snapshot', store.getEntries().length === n);
+}
+
+// --- the undo stack itself ---
+{
+  const ex = fresh();
+  const v0 = store.getVersion();
+  store.logSet({ exerciseId: ex, date: '2026-08-18', weight: 50, reps: 5 });
+  ok('a commit bumps the version', store.getVersion() === v0 + 1);
+  store.undo();
+  ok('an undo bumps the version too', store.getVersion() === v0 + 2);
+  ok('the stack is empty once drained', store.canUndo() === false);
+  ok('undo on an empty stack is a no-op', store.undo() === false);
+
+  for (let i = 0; i < 25; i++) store.logSet({ exerciseId: ex, date: '2026-08-18', weight: 50 + i, reps: 5 });
+  let depth = 0;
+  while (store.undo()) depth++;
+  ok('the undo stack caps at 20', depth === 20, `unwound ${depth}`);
+}
+
+// --- normalise: the guards that protect the log ---
+{
+  fresh();
+  const ex = store.getExercises()[0].id;
+  const doc = JSON.parse(store.exportJSON());
+  doc.entries.push({ date: '2026-08-18', exerciseId: 'ex-does-not-exist', weight: 100, reps: 5, sets: 1 });
+  doc.entries.push({ date: '2026-08-18', exerciseId: ex, weight: 100, reps: 0, sets: 1 });
+  const kept = store.importJSON(JSON.stringify(doc)).entries;
+  ok('an entry for an unknown lift is dropped', !kept.some((e) => e.exerciseId === 'ex-does-not-exist'));
+  ok('a zero-rep entry is dropped', !kept.some((e) => e.reps === 0));
+}
+
+// --- reload(): another tab wrote, and this one must not lose its footing ---
+{
+  const ex = fresh();
+  store.logSet({ exerciseId: ex, date: '2026-08-18', weight: 111, reps: 5 });
+  ok('there is something to undo', store.canUndo() === true);
+  const outside = JSON.parse(globalThis.localStorage.getItem('liftingTracker.v1'));
+  outside.entries = outside.entries.filter((e) => e.weight !== 111);
+  globalThis.localStorage.setItem('liftingTracker.v1', JSON.stringify(outside));
+  store.reload();
+  ok('reload picks up the other tab’s write', !store.getEntries().some((e) => e.weight === 111));
+  ok('reload drops an undo stack that no longer applies', store.canUndo() === false);
+}
+
+// --- a long log must not blow the call stack when seq is derived ---
+{
+  fresh();
+  const ex = store.getExercises()[0].id;
+  const big = { exercises: store.getExercises(), settings: store.getSettings(), entries: [] };
+  for (let i = 0; i < 200000; i++) {
+    big.entries.push({ id: `b-${i}`, date: '2026-08-18', exerciseId: ex, weight: 100, reps: 5, sets: 1, seq: i + 1 });
+  }
+  let threw = null;
+  try { store.importJSON(JSON.stringify(big)); } catch (err) { threw = err; }
+  ok('a 200k-entry log normalises without a RangeError', threw === null, String(threw && threw.message));
+  ok('seq is derived correctly at that size', store.getDoc().seq === 200001, String(store.getDoc().seq));
+  fresh();
+}
+
+/* ------------------------------------- 6. the memo layer (js/core/select.js) */
+
+// The memo is only allowed to change WHEN the maths runs, never WHAT it says.
+// If these drift, the app is quietly showing something the spreadsheet does not.
+const select = await import('../js/core/select.js');
+
+{
+  fresh();
+  select.invalidate();
+  const cfg = store.getSettings();
+  const day = '2026-08-18';
+
+  const raw = M.allStats(store.getExercises(), store.getEntries(), cfg, day);
+  const memo = select.allStats(cfg, day);
+  ok('the memo returns one stats object per lift', memo.length === raw.length);
+  ok('the memo agrees with metrics.js on every published field',
+    JSON.stringify(memo) === JSON.stringify(raw),
+    'memoised stats differ from a direct allStats() call');
+
+  // Pre-filtering the log per exercise must not change a single figure.
+  for (const [i, st] of memo.entries()) {
+    close(`memo lastAdj matches for ${st.exercise.name}`, st.lastAdj ?? 0, raw[i].lastAdj ?? 0, 1e-12);
+    close(`memo nextTarget matches for ${st.exercise.name}`, st.nextTarget ?? 0, raw[i].nextTarget ?? 0, 1e-12);
+    close(`memo trendPerWeek matches for ${st.exercise.name}`, st.trendPerWeek ?? 0, raw[i].trendPerWeek ?? 0, 1e-12);
+  }
+
+  // --- what the cache is actually for ---
+  ok('a repeat call is served from the cache', select.allStats(cfg, day) === memo);
+  ok('statsFor hands back the same object as the list',
+    select.statsFor(memo[0].exercise.id, cfg, day) === memo[0]);
+
+  // Settings that never reach the maths must not cost a recompute.
+  ok('changing the detail level keeps the cache',
+    select.allStats({ ...cfg, detailLevel: 'detailed' }, day) === memo);
+  ok('changing the rest timer keeps the cache',
+    select.allStats({ ...cfg, restSeconds: 90 }, day) === memo);
+
+  // Settings that do reach it must not.
+  ok('changing the formula drops the cache',
+    select.allStats({ ...cfg, formula: 'brzycki' }, day) !== memo);
+  select.invalidate();
+  const again = select.allStats(cfg, day);
+  ok('changing a readiness dial drops the cache',
+    select.allStats({ ...cfg, fatigueTau: 3 }, day) !== again);
+
+  // A new day is a new answer: daysSince moves under everything.
+  select.invalidate();
+  const onDay = select.allStats(cfg, day);
+  ok('a different day drops the cache', select.allStats(cfg, '2026-08-19') !== onDay);
+}
+
+// --- the band settings invalidate plans, and only plans ---
+{
+  fresh();
+  select.invalidate();
+  const cfg = store.getSettings();
+  const day = '2026-08-18';
+  const trained = select.allStats(cfg, day).filter((s) => s.entryCount > 0);
+  ok('the seed has a trained lift to plan for', trained.length > 0);
+  const st = trained[0];
+
+  const p1 = select.planFor(st, cfg, {}, day);
+  ok('a repeat plan is served from the cache', select.planFor(st, cfg, {}, day) === p1);
+  ok('a different override computes a different plan',
+    select.planFor(st, cfg, { reps: 8 }, day) !== p1);
+  ok('the same override is cached again',
+    select.planFor(st, cfg, { reps: 8 }, day) === select.planFor(st, cfg, { reps: 8 }, day));
+
+  const wide = { ...cfg, idealBand: 0.2 };
+  ok('widening the ideal band keeps the stats cache',
+    select.allStats(wide, day) === select.allStats(cfg, day));
+  const p2 = select.planFor(st, wide, {}, day);
+  ok('widening the ideal band recomputes the plan', p2 !== p1);
+  ok('and the verdict actually moves with it', p2.band.key !== p1.band.key || p1.band.key === 'beaten');
+
+  // The memoised plan must equal the plan metrics.js would have produced.
+  const direct = M.planFor(st, cfg, {});
+  const p3 = select.planFor(st, cfg, {}, day);
+  close('memo plan weight matches metrics.js', p3.weight, direct.weight, 1e-12);
+  close('memo plan score matches metrics.js', p3.score, direct.score, 1e-12);
+  ok('memo plan verdict matches metrics.js', p3.band.key === direct.band.key);
+}
+
+// --- a write must invalidate everything ---
+{
+  const ex = fresh();
+  select.invalidate();
+  const cfg = store.getSettings();
+  const day = '2026-08-18';
+  const before = select.allStats(cfg, day);
+  store.logSet({ exerciseId: ex, date: day, weight: 500, reps: 5 });
+  const after = select.allStats(cfg, day);
+  ok('logging a set drops the cache', after !== before);
+  const mine = after.find((s) => s.exercise.id === ex);
+  ok('and the new set is in the fresh stats', mine.entries.some((e) => e.weight === 500));
+  store.undo();
+  ok('undoing drops it again', select.allStats(cfg, day) !== after);
+  ok('and the set is gone from the stats',
+    !select.allStats(cfg, day).find((s) => s.exercise.id === ex).entries.some((e) => e.weight === 500));
+}
+
+// --- the lazy grid must be exactly the grid that used to be built eagerly ---
+{
+  fresh();
+  const cfg = store.getSettings();
+  const st = M.allStats(store.getExercises(), store.getEntries(), cfg, '2026-08-18')
+    .find((s) => s.entryCount > 0);
+  const plan = M.planFor(st, cfg, {});
+  ok('the grid is enumerable, as it was when it was a plain array',
+    Object.keys(plan).includes('grid'));
+  ok('the grid has a row per rep scheme', plan.grid.length === M.REP_SCHEMES.length);
+  ok('the grid has a column per set count', plan.grid[0].length === M.SET_COLUMNS.length);
+  ok('a second read is the same array', plan.grid === plan.grid);
+  ok('gentlest resolves without forcing the grid',
+    plan.gentlest === null || Number.isFinite(plan.gentlest.score));
+  // gentlest is the smallest score in the chosen set column, however it is found.
+  const col = plan.grid.map((row) => row.find((c) => c.sets === plan.sets)).filter((c) => c && Number.isFinite(c.score));
+  const expect = col.length ? col.reduce((a, b) => (b.score < a.score ? b : a)) : null;
+  close('gentlest picks the same cell the grid would', plan.gentlest?.score ?? 0, expect?.score ?? 0, 1e-12);
+  ok('gentlest picks the same rep scheme', (plan.gentlest?.reps ?? 0) === (expect?.reps ?? 0));
+}
+
 /* ------------------------------------------------------------------ report */
 
 console.log(`\n${pass} checks passed`);
