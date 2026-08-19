@@ -114,9 +114,13 @@ only what gets shown. An existing install stays on Detailed.
 
 **Next** — one card per lift, each with a single concrete prescription:
 `5 × 5 @ 82.5 kg`, plus how big a jump that is. Lifts are grouped by whether they
-are ready — rested at least a day, stalest first — and the top card opens itself,
-so the screen answers "what do I do today?" rather than listing rows. A lift left
-ten days or more is flagged. Tap **Log this** and the log form opens pre-filled.
+are ready — recovered from the last session, stalest first — and the top card
+opens itself, so the screen answers "what do I do today?" rather than listing
+rows. A chip on each card carries its readiness: _ready in 1d_ while a lift is
+still recovering, a plain day count once rest has stopped adding anything, and
+`24 days · −4%` once a layoff has started costing you strength. Open a card and a
+line under the prescription says why today's number is what it is. Tap **Log
+this** and the log form opens pre-filled.
 Tap a card to open it and you get the reps/sets levers, and in the detailed view
 the target and the full trade-off grid.
 
@@ -135,6 +139,7 @@ meaning never rests on colour alone:
 | `✓` | Ideal step     | The smallest honest step forward.               |
 | `▲` | Stretch        | Ambitious but usually doable.                   |
 | `!` | Too big a jump | You will probably miss reps.                    |
+| `↩` | Way back in    | Lighter than you were lifting, after time off.  |
 
 Aim for green most sessions, take amber when you feel strong. If nearly everything
 reads amber, your weight step is simply large relative to the lift — widen the
@@ -179,8 +184,9 @@ session. Below that: weekly sets against your budget, working sets per week over
 the last 8 weeks, and every session as a table.
 
 **Setup** — how much detail to show, the rest timer's target (0 turns it off), your
-lifts (tap one to edit), the maths dials, light/dark theme, and your backups. The
-welcome tour can be replayed from the bottom of the page.
+lifts (tap one to edit), the maths dials, the fatigue/recovery/detraining model
+and its six coefficients, light/dark theme, and your backups. The welcome tour can
+be replayed from the bottom of the page.
 
 Each lift has a **starting weight** and a **weight step**, and together they
 describe the loads that actually exist for it. A 20 kg bar with 2.5 kg steps means
@@ -211,9 +217,43 @@ Unchanged from the workbook:
   per muscle per week, spread across every lift that trains it.
 - **Trend** — least-squares fit of adjusted e1RM against date over the lookback
   window (84 days by default), reported in kg/week.
-- **Next target** = last session's adjusted e1RM × (1 + that lift's weekly gain).
+- **Flat target** = last session's adjusted e1RM × (1 + that lift's weekly gain).
   The planner then finds the lightest loadable weight that meets it — where
   _loadable_ means `starting weight + n × step` for that lift.
+
+Added on top (Setup → *Fatigue, recovery and detraining*, on by default; switch it
+off and every target falls back to the flat one above):
+
+- **Next target** = `last adj e1RM × retention × (1 + accrual) × (1 − fatigue)`.
+  Three separate things move between one session and the next, so they are
+  modelled separately:
+  - **Accrual** — the weekly gain, earned *per week of elapsed time* rather than
+    per session. Train a lift twice in a week and each session asks for half of
+    it. Rest past the productive window (10 days by default) adds no more.
+  - **Fatigue** — `peak × severity × e^(−days / τ)`, peak 6% and τ 1.5 days, so a
+    normal hard session costs ~3% the next day and is spent inside three.
+    *Severity* comes from data you already log: sets relative to this lift's usual
+    count, and RIR — eight sets to failure leaves a bigger hole than three easy
+    ones. A lift counts as **ready** once the deficit drops under 3%.
+  - **Retention** — detraining. Nothing for the first 14 days, then
+    `floor + (1 − floor) × 0.5^((days − grace) / halfLife)`, half-life 42 days
+    toward a floor of 75%: about −5% at four weeks off, −13% at eight, −23% at six
+    months. Whatever you gained in the gap fades on the same curve — the newest
+    adaptations are the least durable.
+
+  The productive window and the grace period both stretch to fit how you actually
+  train a lift, from the median gap in its own log: if your normal rhythm is a
+  fortnight, day fifteen is not a layoff.
+
+  Detraining discounts your recorded **best** as well as your target, because a
+  comeback session should not be marked down for failing to beat a number you no
+  longer own. Fatigue does not — being tired today has not taken a kilo off what
+  you can do.
+
+  All six coefficients are dials in Setup. They are the usual findings, not
+  precise ones: recovery from heavy compound work in 48–72 hours, detraining
+  showing up after about a fortnight, and a long layoff leaving you well above
+  untrained. They vary by person and by lift, which is exactly why they are dials.
 
 ### Things to keep in mind
 
@@ -233,7 +273,7 @@ Unchanged from the workbook:
 
 Everything the workbook publishes, the app reproduces to the decimal —
 `npm test` checks each Dashboard row and every cell of both planner grids against
-the values Excel itself calculated. Six things are intentionally different:
+the values Excel itself calculated. Seven things are intentionally different:
 
 1. **Projections are withheld until the fit earns them.** The sheet will happily
    extrapolate two sessions three days apart to +12 weeks; on your August data that
@@ -258,6 +298,14 @@ the values Excel itself calculated. Six things are intentionally different:
    session, a good session followed by a poor one can make the plan suggest
    something you have already beaten — the sheet greys it out and stops there. The
    app offers a one-tap _aim past your best_ instead.
+7. **The gap between sessions counts.** The sheet adds the full weekly gain every
+   session, whether the last one was yesterday or in March — so it asks for a step
+   up the morning after a hard session, and for a PR after eight weeks off. The
+   app models fatigue, accrual and detraining instead (section 4), and while a
+   lift is coming back from a layoff it stops calling weights you have already
+   lifted _too big a jump_: they are labelled **way back in**. Both numbers are
+   still published — Progress → Table shows the flat target and the readiness one
+   side by side — and the model can be switched off in Setup.
 
 ---
 

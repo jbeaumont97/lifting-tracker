@@ -212,6 +212,14 @@ button { font: inherit; color: inherit; }
 .presc-delta.is-good { color: var(--good-ink); }
 .presc-explain { color: var(--text-secondary); font-size: 13px; }
 
+.presc-readiness {
+  display: flex; gap: 7px; align-items: baseline;
+  margin-top: -2px; padding: 7px 10px; border-radius: 10px;
+  background: var(--neutral-tint); color: var(--text-secondary); font-size: 12.5px;
+}
+.presc-readiness-glyph { flex: none; font-size: 11px; opacity: 0.8; }
+.presc-readiness.is-detrained { background: var(--crit-tint); color: var(--crit-ink); }
+
 /* ------------------------------------------------------------ band chips */
 
 .band-chip {
@@ -225,6 +233,7 @@ button { font: inherit; color: inherit; }
 .band-chip.is-stretch { background: var(--warn-tint); color: var(--warn-ink); }
 .band-chip.is-toobig  { background: var(--crit-tint); color: var(--crit-ink); }
 .band-chip.is-beaten  { background: var(--neutral-tint); color: var(--neutral-ink); }
+.band-chip.is-return  { background: var(--neutral-tint); color: var(--text-secondary); }
 
 .status-chip {
   display: inline-flex; align-items: center; gap: 5px;
@@ -382,6 +391,7 @@ table.grid td.cell.is-ideal   { background: var(--good-tint); }
 table.grid td.cell.is-stretch { background: var(--warn-tint); }
 table.grid td.cell.is-toobig  { background: var(--crit-tint); }
 table.grid td.cell.is-beaten  { background: var(--neutral-tint); }
+table.grid td.cell.is-return  { background: var(--neutral-tint); }
 table.grid td.cell.is-pick { box-shadow: inset 0 0 0 2px var(--series-1); }
 
 .cell-btn {
@@ -395,6 +405,7 @@ table.grid td.cell.is-ideal   .cell-glyph { color: var(--good-ink); }
 table.grid td.cell.is-stretch .cell-glyph { color: var(--warn-ink); }
 table.grid td.cell.is-toobig  .cell-glyph { color: var(--crit-ink); }
 table.grid td.cell.is-beaten  .cell-glyph { color: var(--neutral-ink); }
+table.grid td.cell.is-return  .cell-glyph { color: var(--text-secondary); }
 
 /* ---------------------------------------------------------------- legend */
 
@@ -786,6 +797,11 @@ h1 .accent-dot { width: 11px; height: 11px; margin-right: 9px; vertical-align: m
   background: var(--warn-tint); color: var(--warn-ink);
   font-size: 11px; font-weight: 650; font-variant-numeric: tabular-nums;
 }
+/* Readiness phases: recovering and holding are states, not warnings; only a
+   real layoff is worth colouring as one. */
+.stale-chip.is-recovering { background: var(--neutral-tint); color: var(--neutral-ink); }
+.stale-chip.is-holding    { background: var(--neutral-tint); color: var(--text-secondary); }
+.stale-chip.is-detrained  { background: var(--crit-tint); color: var(--crit-ink); }
 
 /* ---------------------------------------------------------- chart motion */
 

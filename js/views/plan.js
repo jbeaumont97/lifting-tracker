@@ -21,6 +21,8 @@ import {
   weekdayName,
   plainVerdict,
   snapReps,
+  readinessNote,
+  READY_AT,
   REP_SCHEMES,
   SET_COLUMNS,
 } from '../metrics.js';
@@ -31,8 +33,17 @@ const gridMode = new Map();  // exerciseId -> 'weights' | 'scores' | 'table'
 // null = every card is deliberately closed.
 let openId;
 
-const STALE_DAYS = 10;   // past this, a lift is drifting rather than resting
+// Readiness is decided by the model now (metrics.js: readinessFor), not by a
+// day count here. These two are only the fallback for a document written before
+// the model existed, or with it switched off.
 const RESTED_DAYS = 2;   // trained today or yesterday is still recovering
+const STALE_DAYS = 10;   // past this, a lift is drifting rather than resting
+
+/** Fit to be trained hard today. */
+function isReady(s) {
+  if (s.readiness && s.readiness.enabled) return s.readiness.recovered;
+  return (s.daysSince ?? 999) >= RESTED_DAYS;
+}
 
 function ov(id) {
   if (!overrides.has(id)) overrides.set(id, { target: null, reps: null, sets: null });
@@ -74,10 +85,10 @@ export function renderPlan(ctx) {
 
   // --- who is ready, stalest first ---
   const ready = trained
-    .filter((s) => (s.daysSince ?? 999) >= RESTED_DAYS)
+    .filter(isReady)
     .sort((a, b) => (b.daysSince ?? 0) - (a.daysSince ?? 0));
   const resting = trained
-    .filter((s) => (s.daysSince ?? 999) < RESTED_DAYS)
+    .filter((s) => !isReady(s))
     .sort((a, b) => (a.daysSince ?? 0) - (b.daysSince ?? 0));
   const unlogged = stats.filter((s) => !s.entryCount);
 
@@ -86,8 +97,8 @@ export function renderPlan(ctx) {
   if (openId === undefined) openId = (ready[0] || resting[0])?.exercise.id ?? null;
 
   for (const group of [
-    { title: 'Ready now', rows: ready, hint: 'Rested at least a day — stalest first.' },
-    { title: 'Trained in the last day or two', rows: resting, hint: null },
+    { title: 'Ready now', rows: ready, hint: 'Recovered from the last session — stalest first.' },
+    { title: 'Still recovering', rows: resting, hint: 'Trained recently enough that a hard session would be uphill. The plans below are held back to match.' },
     { title: 'Not logged yet', rows: unlogged, hint: null },
   ]) {
     if (!group.rows.length) continue;
@@ -103,12 +114,14 @@ export function renderPlan(ctx) {
 
   root.append(
     details('How the planner decides', simple ? [
-      el('p', { text: 'Each plan starts from your last session for that lift and adds a small step — the weekly gain you set per lift in Setup. The weight always rounds up to something you can actually load, so a suggestion never undershoots.' }),
+      el('p', { text: 'Each plan starts from your last session for that lift and adds a small step — the weekly gain you set per lift in Setup, earned by the week rather than by the session, so a lift you train twice a week is not asked to gain twice as fast as one you train once.' }),
+      el('p', { text: 'Then it takes the gap into account. Train again a day later and the step is held back, because you are still carrying the last session. Come back after a month and the suggestion drops below what you last did, because some of it will have gone. Both of those settle back to nothing in between: a few days of rest is simply rest.' }),
       el('p', { text: 'The colour tells you how big the jump is: green is the smallest honest step forward, amber is ambitious but usually doable, red will probably cost you reps.' }),
       el('p', { text: 'Switch to the detailed view in Setup to see the maths, the target you are being measured against, and the full grid of sets-against-weight trade-offs.' }),
       legend(),
     ] : [
-      el('p', { text: 'Your target is last session’s adjusted e1RM plus this lift’s weekly gain (set per lift in Setup). The planner holds your rep scheme and set count steady and adds weight, because that is usually what you want; the grid is there for when you would rather trade sets against load.' }),
+      el('p', { text: 'Your target is last session’s adjusted e1RM, moved by three things and then multiplied together: fitness earned in the gap (this lift’s weekly gain, pro-rated over the days since, and only while the rest is still productive); strength lost to a layoff (nothing for the first fortnight, then a half-life decay toward a floor you keep indefinitely); and fatigue still owed to the last session (a deficit that decays over roughly three days, scaled by how many sets you did and how close to failure you took them). The planner holds your rep scheme and set count steady and adds weight; the grid is there for when you would rather trade sets against load.' }),
+      el('p', { text: 'Detraining discounts your recorded best as well as your target — a comeback session should not be marked down for failing to be a PR against a number you no longer own. Fatigue does not: being tired today has not taken a kilo off what you can do. All six coefficients are yours to change in Setup, and the whole model can be switched off there, which puts the flat per-session step back.' }),
       el('p', { text: 'Weights always round UP to a loadable step, so no suggestion can undershoot the target. The colour band tells you how big the jump is.' }),
       el('p', { text: 'If nearly everything reads amber, your weight step is simply large relative to the lift — one plate on a 40 kg press is a bigger percentage than on a 140 kg deadlift. Widen the ideal band in Setup until green means what you want it to mean.' }),
       legend(),
@@ -122,7 +135,7 @@ function sessionStrip(ctx, trained) {
   const { stats, today } = ctx;
   const lastDate = trained.map((s) => s.lastDate).sort().pop();
   const sets7 = stats.reduce((n, s) => n + s.sets7, 0);
-  const readyCount = trained.filter((s) => (s.daysSince ?? 999) >= RESTED_DAYS).length;
+  const readyCount = trained.filter(isReady).length;
   return el('div', { class: 'day-strip' }, [
     el('span', { class: 'day-strip-day', text: weekdayName(today) }),
     el('span', { class: 'day-strip-sep', 'aria-hidden': 'true', text: '·' }),
@@ -140,7 +153,6 @@ function card(stats, ctx, settings) {
   const isOpen = openId === id;
   const simple = ctx.simple;
   const plan = stats.entryCount ? planFor(stats, settings, o) : null;
-  const stale = (stats.daysSince ?? 0) >= STALE_DAYS;
 
   const head = el('button', {
     type: 'button', class: 'card-head', 'aria-expanded': isOpen ? 'true' : 'false',
@@ -150,7 +162,7 @@ function card(stats, ctx, settings) {
     el('div', { class: 'card-head-main' }, [
       el('div', { class: 'card-title-row' }, [
         el('h2', { class: 'card-title', text: stats.exercise.name }),
-        stale ? el('span', { class: 'stale-chip', text: `${stats.daysSince} days` }) : null,
+        readinessChip(stats),
       ]),
       el('p', {
         class: 'card-meta',
@@ -200,17 +212,29 @@ function card(stats, ctx, settings) {
         + (plan.atBase ? ` That is the lightest this lift loads — ${fmtWeight(plan.base)} kg is the bar.` : ''),
   }));
 
-  if (plan.band.key === 'beaten' && Number.isFinite(stats.bestAdj)) {
+  // Why today's number is what it is: fatigue still owed, or strength lost to a
+  // layoff. Only worth the line when it is actually saying something, or when
+  // the card is open and there is room for the detail.
+  const rNote = readinessNote(stats.readiness, { simple });
+  if (rNote && (isOpen || stats.readiness.phase.key !== 'ready')) {
+    body.append(el('p', { class: `presc-readiness is-${stats.readiness.phase.key}` }, [
+      el('span', { class: 'presc-readiness-glyph', 'aria-hidden': 'true', text: stats.readiness.phase.glyph }),
+      el('span', { text: rNote }),
+    ]));
+  }
+
+  if (plan.band.key === 'beaten' && Number.isFinite(plan.bestNow)) {
     body.append(el('button', {
       type: 'button', class: 'hint-btn',
-      onclick: () => { ov(id).target = round1(stats.bestAdj * (1 + stats.gainPerWeek)); ctx.refresh(); },
+      onclick: () => { ov(id).target = round1(plan.bestNow * (1 + stats.gainPerWeek)); ctx.refresh(); },
     }, [
       el('span', { class: 'hint-label', text: 'This does not beat your best' }),
       el('span', {
         class: 'hint-value',
         text: simple
-          ? 'Your last session was lighter than your best ever. Aim past your best instead →'
-          : `Your target comes from last session (${fmt(stats.lastAdj, 1)}), which is under your best of ${fmt(stats.bestAdj, 1)}. Aim past the best instead →`,
+          ? 'Your last session was lighter than your best. Aim past your best instead →'
+          : `Your target comes from last session (${fmt(stats.lastAdj, 1)}), which is under your best of ${fmt(plan.bestNow, 1)}`
+            + `${plan.bestNow < stats.bestAdj - 0.05 ? ` (${fmt(stats.bestAdj, 1)} discounted for the layoff)` : ''}. Aim past the best instead →`,
       }),
     ]));
   }
@@ -257,9 +281,11 @@ function detail(stats, plan, ctx, settings) {
     wrap.append(el('div', { class: 'target-row' }, [
       el('div', { class: 'target-facts' }, [
         factLine('Target adj e1RM', `${fmt(plan.target, 1)} kg`,
-          plan.usingManualTarget ? 'your override' : `last ${fmt(stats.lastAdj, 1)} + ${(stats.gainPerWeek * 100).toFixed(2)}%/wk`),
-        factLine('Current best', `${fmt(stats.bestAdj, 1)} kg`,
-          stats.bestAdj > stats.lastAdj + 1e-9 ? 'beat this to set a PR' : 'set last session'),
+          plan.usingManualTarget ? 'your override' : targetSub(stats, plan)),
+        factLine('Current best', `${fmt(plan.bestNow, 1)} kg`,
+          plan.bestNow < stats.bestAdj - 0.05
+            ? `${fmt(stats.bestAdj, 1)} less ${((1 - stats.readiness.retention) * 100).toFixed(1)}% detraining`
+            : stats.bestAdj > stats.lastAdj + 1e-9 ? 'beat this to set a PR' : 'set last session'),
       ]),
       stepper({
         label: 'Override target (kg)', value: o.target ?? '', step: 0.5, min: 0, max: 999, dp: 1,
@@ -406,6 +432,37 @@ function legend() {
     el('span', { class: 'legend-label', text: b.label }),
     el('span', { class: 'legend-hint', text: b.hint }),
   ])));
+}
+
+/** "last 126.1 · +0.21% in 2 days · −1.6% fatigue" — the target, itemised. */
+function targetSub(stats, plan) {
+  const r = stats.readiness;
+  if (!r || !r.enabled) return `last ${fmt(stats.lastAdj, 1)} + ${(stats.gainPerWeek * 100).toFixed(2)}%/wk`;
+  const bits = [`last ${fmt(stats.lastAdj, 1)}`];
+  if (r.retention < 1 - 1e-9) bits.push(`−${((1 - r.retention) * 100).toFixed(1)}% detraining`);
+  bits.push(`+${(r.accrual * 100).toFixed(2)}% earned in ${r.days === 1 ? 'a day' : `${r.days} days`}`);
+  if (r.fatigue > 0) bits.push(`−${(r.fatigue * 100).toFixed(1)}% fatigue`);
+  return bits.join(' · ');
+}
+
+/** The phase badge on the card head. Silent when a lift is simply ready. */
+function readinessChip(stats) {
+  const r = stats.readiness;
+  if (!r || !r.enabled || r.days === null) {
+    return (stats.daysSince ?? 0) >= STALE_DAYS
+      ? el('span', { class: 'stale-chip', text: `${stats.daysSince} days` }) : null;
+  }
+  const cls = `stale-chip is-${r.phase.key}`;
+  switch (r.phase.key) {
+    case 'detrained':
+      return el('span', { class: cls, text: `${r.days} days · −${((1 - r.retention) * 100).toFixed(0)}%` });
+    case 'recovering':
+      return el('span', { class: cls, text: r.readyIn > 0 ? `ready in ${r.readyIn}d` : 'recovering' });
+    case 'holding':
+      return el('span', { class: cls, text: `${r.days} days` });
+    default:
+      return null;
+  }
 }
 
 function factLine(label, value, sub) {

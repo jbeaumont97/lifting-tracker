@@ -4,7 +4,7 @@
 import { el, stepper, chipGroup, segmented, toast, sheet, confirmSheet, details, chevron, accentDot } from '../ui.js';
 import * as store from '../store.js';
 import { showWelcome } from './welcome.js';
-import { fmt, setBonus } from '../metrics.js';
+import { fmt, setBonus, READY_AT, fatigueAt, retentionAt, readinessSettings } from '../metrics.js';
 
 export function renderSetup(ctx) {
   const { settings } = ctx;
@@ -84,6 +84,44 @@ export function renderSetup(ctx) {
         onChange: (v) => { store.updateSettings({ defaultGainPerWeek: v / 100 }); ctx.refresh(); } }),
     ]),
   ]);
+
+  /* --------------------------------- fatigue, recovery and detraining */
+  const on = s.readiness !== 'off';
+  const readinessCard = el('div', { class: 'card card-pad' }, [
+    el('div', { class: 'field-block' }, [
+      el('span', { class: 'field-label', text: 'Account for the gap between sessions' }),
+      segmented({
+        label: 'Readiness model', value: on ? 'on' : 'off',
+        options: [{ value: 'on', label: 'On' }, { value: 'off', label: 'Off' }],
+        onChange: (v) => { store.updateSettings({ readiness: v }); ctx.refresh({ transition: true }); },
+      }),
+      el('p', { class: 'field-hint', text: 'On, your weekly gain is earned by the week: train a lift twice in a week and each session asks for half of it, not all of it. On top of that the planner subtracts fatigue still owed to your last session, and — after a real layoff — the strength you will have lost. Off puts back the flat step of the original spreadsheet: last session plus the full weekly gain, whether that was yesterday or in March.' }),
+    ]),
+    !on ? null : el('div', {}, [
+      el('div', { class: 'lever-row' }, [
+        stepper({ label: 'Fatigue after a session (%)', value: s.fatiguePeak * 100, step: 0.5, min: 0, max: 25, dp: 1, id: 'set-fpeak',
+          onChange: (v) => { store.updateSettings({ fatiguePeak: v / 100 }); ctx.refresh(); } }),
+        stepper({ label: 'Recovery time constant (days)', value: s.fatigueTau, step: 0.5, min: 0.5, max: 10, dp: 1, id: 'set-ftau',
+          onChange: (v) => { store.updateSettings({ fatigueTau: v }); ctx.refresh(); } }),
+      ]),
+      el('p', { class: 'field-hint', text: `A normal hard session costs you ${pct1(s.fatiguePeak)} on the day, decaying by 1/e every ${fmt(s.fatigueTau, 1)} days: ${fatigueLadder(s)}. More sets or a lower RIR scale the peak up, fewer or a higher RIR scale it down. A lift counts as ready once the deficit falls under ${pct1(READY_AT)}.` }),
+      el('div', { class: 'lever-row' }, [
+        stepper({ label: 'Productive rest (days)', value: s.productiveDays, step: 1, min: 1, max: 60, dp: 0, id: 'set-prod',
+          onChange: (v) => { store.updateSettings({ productiveDays: v }); ctx.refresh(); } }),
+        stepper({ label: 'Grace before detraining (days)', value: s.graceDays, step: 1, min: 1, max: 90, dp: 0, id: 'set-grace',
+          onChange: (v) => { store.updateSettings({ graceDays: v }); ctx.refresh(); } }),
+      ]),
+      el('p', { class: 'field-hint', text: 'Rest past the productive window stops adding fitness; time past the grace period starts taking it away. Both stretch to fit how you actually train a lift — if your normal gap is a fortnight, nothing counts as a layoff at fifteen days.' }),
+      el('div', { class: 'lever-row' }, [
+        stepper({ label: 'Detraining half-life (days)', value: s.detrainHalfLife, step: 7, min: 7, max: 180, dp: 0, id: 'set-half',
+          onChange: (v) => { store.updateSettings({ detrainHalfLife: v }); ctx.refresh(); } }),
+        stepper({ label: 'Strength you keep (%)', value: s.retainedFloor * 100, step: 1, min: 0, max: 100, dp: 0, id: 'set-floor',
+          onChange: (v) => { store.updateSettings({ retainedFloor: v / 100 }); ctx.refresh(); } }),
+      ]),
+      el('p', { class: 'field-hint', text: `Past the grace period the losable part of your strength halves every ${fmt(s.detrainHalfLife, 0)} days, toward a floor of ${pct1(s.retainedFloor)} that a layoff never takes: ${detrainLadder(s)}.` }),
+    ]),
+  ]);
+  root.append(ctx.simple ? details('Fatigue, recovery and detraining', [readinessCard]) : readinessCard);
   // In the simple view these dials are still all here — just folded away, so
   // the page is not a wall of coefficients on first read.
   root.append(ctx.simple ? details('Tune the formulas', [mathsCard]) : mathsCard);
@@ -156,6 +194,29 @@ function ladderExample(ex) {
 
 function pct(mult) {
   return `+${((mult - 1) * 100).toFixed(1)}%`;
+}
+
+function pct1(fraction) {
+  return `${(Number(fraction) * 100).toFixed(1).replace(/\.0$/, '')}%`;
+}
+
+/** "day 1 −3.1%, day 2 −1.6%, day 3 recovered" — the dials, made concrete. */
+function fatigueLadder(settings) {
+  const rs = readinessSettings(settings);
+  return [1, 2, 3, 4]
+    .map((d) => {
+      const f = fatigueAt(d, 1, rs);
+      return `day ${d} ${f > 0 ? '−' + (f * 100).toFixed(1) + '%' : 'spent'}`;
+    })
+    .join(', ');
+}
+
+/** "4 weeks −5.2%, 8 weeks −12.5%, 6 months −23.4%". */
+function detrainLadder(settings) {
+  const rs = readinessSettings(settings);
+  return [['4 weeks', 28], ['8 weeks', 56], ['6 months', 182]]
+    .map(([label, d]) => `${label} ${'−' + ((1 - retentionAt(d, rs.graceDays, rs)) * 100).toFixed(1)}%`)
+    .join(', ');
 }
 
 function today() {

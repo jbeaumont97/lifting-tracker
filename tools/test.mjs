@@ -84,7 +84,10 @@ for (const row of fixture.dashboard) {
   close(`${row.name}: last adj e1RM`, s.lastAdj, row.lastAdj, 0.0001);
   close(`${row.name}: best adj e1RM`, s.bestAdj, row.bestAdj, 0.0001);
   close(`${row.name}: trend kg/week`, s.trendPerWeek, row.trendPerWeek, 0.0001);
-  close(`${row.name}: next target`, s.nextTarget, row.nextTarget, 0.0001);
+  // The sheet's target is the flat one — last session plus the weekly gain,
+  // whatever the gap. The app still publishes it as baseTarget; nextTarget is
+  // that number after the fatigue/detraining model has had its say.
+  close(`${row.name}: next target`, s.baseTarget, row.nextTarget, 0.0001);
   close(`${row.name}: volume last 7 days`, s.volume7, row.volume7, 0.0001);
   close(`${row.name}: reps last session`, s.lastReps, row.lastReps);
   close(`${row.name}: sets last session`, s.lastSets, row.lastSets);
@@ -97,7 +100,12 @@ for (const row of fixture.dashboard) {
 const planStats = byName.get(fixture.plan.exercise);
 ok('planner exercise is present', !!planStats);
 if (planStats) {
-  const plan = M.planFor(planStats, settings, {});
+  // The grid the spreadsheet drew was built with the flat target, so the
+  // comparison is made with the readiness model switched off.
+  const flat = { ...settings, readiness: 'off' };
+  const flatStats = M.allStats(SEED.exercises, SEED.entries, flat, TODAY)
+    .find((s) => s.exercise.name === fixture.plan.exercise);
+  const plan = M.planFor(flatStats, flat, {});
   close('planner: target used', plan.target, fixture.plan.target, 0.0001);
   close('planner: weight step', plan.step, fixture.plan.step);
   close('planner: reps used', plan.reps, fixture.plan.repsUsed);
@@ -124,8 +132,9 @@ if (planStats) {
 {
   // The same lift, given a 20 kg bar: every cell must sit on the ladder and
   // still clear the target, and none may fall below the bar.
+  const flat = { ...settings, readiness: 'off' };
   const withBar = { ...planStats, base: 20, exercise: { ...planStats.exercise, base: 20 } };
-  const plan = M.planFor(withBar, settings, {});
+  const plan = M.planFor(withBar, flat, {});
   let offLadder = 0, underBar = 0, shortOfTarget = 0;
   for (const row of plan.grid) {
     for (const cell of row) {
@@ -141,9 +150,150 @@ if (planStats) {
 
   // A lift whose bar is already heavier than the target needs.
   const heavy = { ...planStats, base: 200, exercise: { ...planStats.exercise, base: 200 } };
-  const heavyPlan = M.planFor(heavy, settings, {});
+  const heavyPlan = M.planFor(heavy, flat, {});
   ok('a too-heavy bar is reported as such', heavyPlan.atBase === true);
   close('a too-heavy bar prescribes the bar', heavyPlan.weight, 200);
+}
+
+/* ------------------------- 3c. fatigue, recovery and detraining */
+
+{
+  const rs = M.READINESS_DEFAULTS;
+
+  // Fatigue: biggest on the day, decaying by 1/e every tau, and gone eventually.
+  close('fatigue on the day is the peak', M.fatigueAt(0, 1, rs), rs.fatiguePeak, 1e-9);
+  close('fatigue falls by 1/e after one tau', M.fatigueAt(rs.fatigueTau, 1, rs), rs.fatiguePeak / Math.E, 1e-9);
+  ok('fatigue decays monotonically', M.fatigueAt(1, 1, rs) > M.fatigueAt(2, 1, rs));
+  ok('fatigue is spent after a fortnight', M.fatigueAt(14, 1, rs) === 0);
+  ok('a brutal session cannot exceed the cap', M.fatigueAt(0, 100, rs) <= 0.15 + 1e-12);
+  ok('the ready line falls between day 1 and day 2',
+    M.fatigueAt(1, 1, rs) > M.READY_AT && M.fatigueAt(2, 1, rs) < M.READY_AT,
+    `day1 ${M.fatigueAt(1, 1, rs)}, day2 ${M.fatigueAt(2, 1, rs)}`);
+
+  // Severity: more sets and a lower RIR cost more; a blank RIR is a normal set.
+  const ex = { setsPerSession: 5 };
+  const sev = (sets, rir) => M.sessionSeverity({ sets, best: { rir } }, ex);
+  ok('to failure is harder than leaving two', sev(5, 0) > sev(5, 2));
+  ok('leaving four is easier than leaving two', sev(5, 4) < sev(5, 2));
+  ok('more sets is harder', sev(8, 2) > sev(5, 2));
+  close('a normal session is severity 1', sev(5, 2), 1.01, 0.02);
+  close('a missing RIR is treated as normal', sev(5, null), 1, 1e-9);
+  ok('severity is bounded', sev(50, 0) <= 1.8 + 1e-12 && sev(1, 10) >= 0.4 - 1e-12);
+
+  // Accrual: earned by the week, and only while the rest is productive.
+  close('half a week earns half the gain', M.accrualAt(3.5, 0.01, 10), 0.005, 1e-12);
+  close('a week earns the week', M.accrualAt(7, 0.01, 10), 0.01, 1e-12);
+  close('past the window earns nothing more', M.accrualAt(40, 0.01, 10), 0.01 * 10 / 7, 1e-12);
+  ok('no time means no gain', M.accrualAt(0, 0.01, 10) === 0);
+
+  // Retention: nothing lost inside the grace period, a half-life outside it.
+  close('nothing is lost at the grace boundary', M.retentionAt(rs.graceDays, rs.graceDays, rs), 1, 1e-12);
+  close('nothing is lost before it', M.retentionAt(3, rs.graceDays, rs), 1, 1e-12);
+  close('one half-life loses half the losable part',
+    M.retentionAt(rs.graceDays + rs.detrainHalfLife, rs.graceDays, rs),
+    rs.retainedFloor + (1 - rs.retainedFloor) / 2, 1e-12);
+  close('a decade off leaves exactly the floor', M.retentionAt(3650, rs.graceDays, rs), rs.retainedFloor, 1e-9);
+  // The shape everyone quotes: a few percent by a month, low teens by two.
+  const lost = (d) => (1 - M.retentionAt(d, rs.graceDays, rs)) * 100;
+  ok('a month off costs a few percent', lost(28) > 3 && lost(28) < 8, `${lost(28).toFixed(1)}%`);
+  ok('two months off costs low double digits', lost(56) > 9 && lost(56) < 18, `${lost(56).toFixed(1)}%`);
+
+  // The typical gap is the median of the gaps, not of the days.
+  close('typical interval, an odd number of gaps',
+    M.typicalInterval([{ day: 0 }, { day: 3 }, { day: 7 }, { day: 10 }]), 3);
+  close('typical interval, an even number of gaps',
+    M.typicalInterval([{ day: 0 }, { day: 3 }, { day: 7 }, { day: 10 }, { day: 14 }]), 3.5);
+  close('typical interval is a median, not a mean',
+    M.typicalInterval([{ day: 0 }, { day: 3 }, { day: 6 }, { day: 90 }]), 3);
+  ok('two sessions are not enough to call a rhythm', M.typicalInterval([{ day: 0 }, { day: 3 }]) === null);
+}
+
+{
+  // One session, then the same lift read at every gap after it.
+  const anchor = '2026-01-01';
+  const ex = { id: 'x', name: 'X', step: 2.5, base: 0, gainPerWeek: 0.0075, setsPerSession: 5, setsPerWeek: 15 };
+  const entries = [{ id: 'a', date: anchor, exerciseId: 'x', weight: 100, reps: 5, sets: 5, rir: 2, seq: 1 }];
+  const at = (d, over = {}) => M.exerciseStats(ex, entries, { ...settings, ...over }, M.isoAddDays(anchor, d));
+
+  const d0 = at(0), d1 = at(1), d3 = at(3), d7 = at(7), d10 = at(10), d21 = at(21), d90 = at(90);
+
+  ok('a repeat on the day is still recovering', d0.readiness.phase.key === 'recovering');
+  ok('a day later is still recovering', d1.readiness.phase.key === 'recovering');
+  ok('three days out is ready', d3.readiness.phase.key === 'ready');
+  ok('ten days out is holding', d10.readiness.phase.key === 'holding');
+  ok('three weeks out is detraining', d21.readiness.phase.key === 'detrained');
+
+  ok('a same-day repeat asks for less than the session it follows',
+    d0.nextTarget < d0.lastAdj, `${d0.nextTarget} vs ${d0.lastAdj}`);
+  ok('the target climbs as the fatigue clears', d0.nextTarget < d1.nextTarget && d1.nextTarget < d3.nextTarget);
+  close('a week off earns exactly the weekly gain', d7.nextTarget, d7.baseTarget, 0.0001);
+  ok('rest past the window stops adding', at(10).nextTarget === at(13).nextTarget);
+  ok('a layoff asks for less than you last did', d90.nextTarget < d90.lastAdj, String(d90.nextTarget));
+  ok('the target falls the longer the layoff runs', at(180).nextTarget < d90.nextTarget);
+
+  // Detraining discounts your best; fatigue does not.
+  close('fatigue leaves your best alone', d1.readiness.currentBest, d1.bestAdj, 1e-9);
+  ok('a layoff discounts your best', d90.readiness.currentBest < d90.bestAdj);
+  close('the discount is the retention', d90.readiness.currentBest, d90.bestAdj * d90.readiness.retention, 1e-9);
+
+  // The flat target is untouched throughout — the two live side by side.
+  close('the flat target ignores the gap', d90.baseTarget, d0.baseTarget, 1e-9);
+
+  // Switched off, every gap gives the spreadsheet's answer.
+  for (const d of [0, 1, 7, 90]) {
+    const off = at(d, { readiness: 'off' });
+    close(`model off, day ${d}: the flat step`, off.nextTarget, off.baseTarget, 1e-9);
+    ok(`model off, day ${d}: your best stands`, off.readiness.currentBest === off.bestAdj);
+  }
+
+  // A harder last session leaves a bigger hole the next day.
+  const hard = [{ ...entries[0], sets: 8, rir: 0 }];
+  const easy = [{ ...entries[0], sets: 3, rir: 4 }];
+  const hardR = M.exerciseStats(ex, hard, settings, M.isoAddDays(anchor, 1)).readiness;
+  const easyR = M.exerciseStats(ex, easy, settings, M.isoAddDays(anchor, 1)).readiness;
+  ok('eight sets to failure costs more than three easy ones', hardR.fatigue > easyR.fatigue);
+
+  // A comeback weight is not scolded for failing to be a PR, and a weight you
+  // have already lifted for the same reps is never "too big a jump".
+  const back = at(120);
+  const backPlan = M.planFor(back, settings, {});
+  ok('a comeback plan is measured against today’s best', backPlan.bestNow === back.readiness.currentBest);
+  ok('a comeback plan is lighter than the last session', backPlan.weight < 100, String(backPlan.weight));
+  ok('a comeback plan is called a way back in', backPlan.band.key === 'return', backPlan.band.key);
+  ok('the way-back-in verdict says so', /way back in/i.test(M.plainVerdict(backPlan.band, -20)));
+  const overreach = backPlan.grid.flat().filter((c) => c.weight < 100 - 1e-9 && c.band.key === 'toobig');
+  ok('no weight under the last session reads as too big a jump', overreach.length === 0,
+    `${overreach.length} cells`);
+  // The relabelling is a floor, not a blanket: options at or above the weight
+  // you last lifted are still judged on the maths.
+  const shortLayoff = M.planFor(at(28), settings, {}).grid.flat();
+  ok('options over the last weight are judged normally',
+    shortLayoff.filter((c) => c.weight >= 100).length > 0
+      && shortLayoff.filter((c) => c.weight >= 100).every((c) => c.band.key !== 'return'));
+  ok('options under it are the way back in',
+    shortLayoff.filter((c) => c.weight < 100).every((c) => c.band.key === 'return'));
+  // Nothing is relabelled while the lift is merely rested rather than detrained.
+  ok('the way-back-in band is only for a real layoff',
+    M.planFor(at(5), settings, {}).grid.flat().every((c) => c.band.key !== 'return'));
+
+  // Whatever the gap, the prescription still clears the target it was given.
+  for (const d of [0, 1, 2, 5, 14, 30, 120]) {
+    const st = at(d);
+    const pl = M.planFor(st, settings, {});
+    ok(`day ${d}: the weight still meets its target`,
+      pl.score >= pl.target - 1e-9, `${pl.score} vs ${pl.target}`);
+    ok(`day ${d}: the weight is loadable`, Math.abs(pl.weight / pl.step % 1) < 1e-9);
+  }
+
+  // A lift trained on a fortnightly rhythm is not detraining on day fifteen.
+  const slow = [0, 14, 28, 42].map((d, i) => ({
+    id: `s${i}`, date: M.isoAddDays(anchor, d), exerciseId: 'x',
+    weight: 100, reps: 5, sets: 5, rir: 2, seq: i + 1,
+  }));
+  const slowStats = M.exerciseStats(ex, slow, settings, M.isoAddDays(anchor, 42 + 15));
+  close('the rhythm is read off the log', slowStats.readiness.typicalInterval, 14);
+  ok('the grace period stretches to the rhythm', slowStats.readiness.grace >= 28);
+  ok('day fifteen of a fortnightly lift is not a layoff', slowStats.readiness.phase.key !== 'detrained');
 }
 
 /* ---------------------------------------------------- 4. behaviour guards */
