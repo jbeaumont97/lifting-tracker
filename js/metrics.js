@@ -207,7 +207,8 @@ export function exerciseStats(exercise, entries, settings, todayIso = isoToday()
     daysSince: null, prCount: 0,
     bestAdj: null, bestEntry: null,
     trendPerWeek: null, trendPerDay: null, trendReliable: false,
-    trendWindowCount: 0, trendWindowDays: 0, proj4: null, proj12: null, nextTarget: null,
+    trendWindowCount: 0, trendWindowDays: 0, proj4: null, proj12: null,
+    baseTarget: null, nextTarget: null, readiness: null,
     volume7: 0, sets7: 0, sessions: [],
     setsPerWeekTarget: exercise.setsPerWeek || null, setStatus: null,
     gainPerWeek: exercise.gainPerWeek ?? settings.defaultGainPerWeek,
@@ -267,7 +268,14 @@ export function exerciseStats(exercise, entries, settings, todayIso = isoToday()
     }
   }
 
-  stats.nextTarget = stats.lastAdj * (1 + stats.gainPerWeek);
+  // The spreadsheet's target: last session plus this lift's weekly gain, flat,
+  // however long ago that session was.
+  stats.baseTarget = stats.lastAdj * (1 + stats.gainPerWeek);
+
+  // What that becomes once the gap is taken seriously — see readinessFor().
+  // With the model switched off the two are identical by construction.
+  stats.readiness = readinessFor(stats, settings);
+  stats.nextTarget = Number.isFinite(stats.readiness.target) ? stats.readiness.target : stats.baseTarget;
 
   // Last 7 days — the sheet's window is day >= today-7.
   for (const e of mine) {
@@ -287,10 +295,238 @@ export function allStats(exercises, entries, settings, todayIso = isoToday()) {
   return exercises.map((ex) => exerciseStats(ex, entries, settings, todayIso));
 }
 
+/* ------------------------------------------- fatigue, recovery, detraining */
+
+/**
+ * How much of last session you are actually carrying today.
+ *
+ * The spreadsheet had one lever — add gainPerWeek to the last session, every
+ * session, whatever the gap. That is wrong at both ends: it asks for a step up
+ * the morning after a hard session, and it asks for a PR after six weeks off.
+ *
+ * Three separate things move between one session and the next, so they are
+ * modelled separately and multiplied:
+ *
+ *   fatigue    a transient deficit from the last session, decaying to nothing
+ *              over a few days. Costs you strength today; costs you nothing
+ *              permanently.
+ *   accrual    the adaptation itself. It is earned per WEEK of elapsed time,
+ *              not per session — which is what "gain per week" always said —
+ *              and it stops once rest passes the point of being productive.
+ *   retention  detraining. Nothing is lost for the first couple of weeks; past
+ *              that, the losable part of your strength decays with a half-life
+ *              toward a floor you keep more or less indefinitely.
+ *
+ *   target = lastAdj x retention x (1 + accrual) x (1 - fatigue)
+ *
+ * The defaults are set to the usual findings rather than to anything precise:
+ * heavy compound work is recovered in 48-72 h; detraining shows up after about
+ * two weeks off and costs roughly 5% by four weeks and 10-15% by eight; and a
+ * long layoff leaves you well above untrained, not back at zero. All six are
+ * settings, because the honest position is that these vary by person and lift.
+ */
+export const READINESS_DEFAULTS = {
+  fatiguePeak: 0.06,        // deficit on the day of a normal hard session
+  fatigueTau: 1.5,          // days for that deficit to fall to ~37% of peak
+  productiveDays: 10,       // rest past this adds no more fitness
+  graceDays: 14,            // nothing is lost before this
+  detrainHalfLife: 42,      // days for the losable part to halve
+  retainedFloor: 0.75,      // the share of your best a long layoff leaves
+};
+
+export const READINESS_PHASES = {
+  recovering: { key: 'recovering', label: 'Recovering', glyph: '◔' },
+  ready:      { key: 'ready',      label: 'Ready',      glyph: '●' },
+  holding:    { key: 'holding',    label: 'Holding',    glyph: '○' },
+  detrained:  { key: 'detrained',  label: 'Detraining', glyph: '↓' },
+};
+
+const FATIGUE_FLOOR = 0.005;   // below half a percent, call it spent
+const FATIGUE_CAP = 0.15;      // no session leaves you 15% weaker than yourself
+
+/**
+ * The deficit at which a lift is fit to be trained hard again. Above it the
+ * lift is still recovering and gets sorted that way; below it the residue is
+ * still subtracted from the target, it just no longer changes what you do.
+ * At the default peak and tau this falls between the first and second day
+ * after a normal session, which is where the 48-hour rule of thumb puts it.
+ */
+export const READY_AT = 0.03;
+
+function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+
+/**
+ * The readiness dials, defaults filled in for any the settings do not carry,
+ * plus whether the model is switched on at all. A negative or non-numeric value
+ * falls back to the default rather than producing a curve that runs backwards.
+ */
+export function readinessSettings(settings = {}) {
+  const out = { ...READINESS_DEFAULTS };
+  for (const k of Object.keys(READINESS_DEFAULTS)) {
+    const v = Number(settings[k]);
+    if (Number.isFinite(v) && v >= 0) out[k] = v;
+  }
+  out.enabled = settings.readiness !== 'off';
+  return out;
+}
+
+/**
+ * How hard the last session was, as a multiple of a normal one. Sets say how
+ * much work; RIR says how close to failure it was taken. Both are already
+ * logged, so nothing new is asked of the user — and where RIR was left blank
+ * the session is assumed to have been a normal hard one rather than an easy or
+ * a brutal one.
+ */
+export function sessionSeverity(session, exercise) {
+  const usual = Number(exercise?.setsPerSession) > 0 ? Number(exercise.setsPerSession) : 3;
+  const sets = Number(session?.sets) > 0 ? Number(session.sets) : usual;
+  const setPart = clamp(sets / usual, 0.5, 1.6);
+  const rir = session?.best?.rir;
+  const rirPart = rir === null || rir === undefined || !Number.isFinite(Number(rir))
+    ? 1
+    : clamp(1.25 - 0.12 * Number(rir), 0.7, 1.25);
+  return clamp(setPart * rirPart, 0.4, 1.8);
+}
+
+/** The strength deficit still owed to the last session, as a fraction. */
+export function fatigueAt(days, severity = 1, rs = READINESS_DEFAULTS) {
+  if (!(days >= 0) || !(rs.fatigueTau > 0) || !(rs.fatiguePeak > 0)) return 0;
+  const f = rs.fatiguePeak * severity * Math.exp(-days / rs.fatigueTau);
+  return f < FATIGUE_FLOOR ? 0 : Math.min(f, FATIGUE_CAP);
+}
+
+/** Fitness earned since the last session — per week of it, and only while it counts. */
+export function accrualAt(days, gainPerWeek, productiveWindow) {
+  if (!(days > 0) || !(gainPerWeek > 0)) return 0;
+  return gainPerWeek * (Math.min(days, productiveWindow) / 7);
+}
+
+/** What is left of your strength after a layoff, as a fraction of it. */
+export function retentionAt(days, grace, rs = READINESS_DEFAULTS) {
+  if (!(days > grace) || !(rs.detrainHalfLife > 0)) return 1;
+  const floor = clamp(rs.retainedFloor, 0, 1);
+  return floor + (1 - floor) * Math.pow(0.5, (days - grace) / rs.detrainHalfLife);
+}
+
+/** Median gap, in days, between this lift's sessions. Null until there are two. */
+export function typicalInterval(sessions) {
+  if (!sessions || sessions.length < 3) return null;
+  const gaps = [];
+  for (let i = 1; i < sessions.length; i++) gaps.push(sessions[i].day - sessions[i - 1].day);
+  const usable = gaps.filter((g) => g > 0).sort((a, b) => a - b);
+  if (usable.length < 2) return null;
+  const mid = Math.floor(usable.length / 2);
+  return usable.length % 2 ? usable[mid] : (usable[mid - 1] + usable[mid]) / 2;
+}
+
+/**
+ * The whole picture for one lift: where it sits between fatigue and detraining,
+ * what its last session is worth today, and what to aim for.
+ *
+ * The windows stretch to fit how the lift is actually trained. Somebody who
+ * squats every ten days is not detraining on day twelve, so the grace period
+ * never sits below twice their normal gap.
+ */
+export function readinessFor(stats, settings = {}) {
+  const rs = readinessSettings(settings);
+  const days = stats.daysSince;
+  const typical = typicalInterval(stats.sessions);
+  const productiveWindow = Math.max(rs.productiveDays, typical ? typical * 1.5 : 0);
+  const grace = Math.max(rs.graceDays, typical ? typical * 2 : 0);
+  const last = stats.sessions.length ? stats.sessions[stats.sessions.length - 1] : null;
+  const severity = sessionSeverity(last, stats.exercise);
+
+  const out = {
+    enabled: rs.enabled, days, typicalInterval: typical, severity,
+    productiveWindow, grace,
+    fatigue: 0, accrual: 0, retention: 1, factor: 1,
+    baseline: stats.lastAdj, currentBest: stats.bestAdj,
+    target: stats.baseTarget, phase: READINESS_PHASES.ready,
+    recovered: true, readyIn: 0,
+  };
+  if (days === null || !Number.isFinite(stats.lastAdj)) return out;
+
+  if (!rs.enabled) {
+    // Off: exactly the spreadsheet's flat step, whatever the gap.
+    out.accrual = stats.gainPerWeek;
+    out.factor = 1 + out.accrual;
+    out.target = stats.baseTarget;
+    return out;
+  }
+
+  out.fatigue = fatigueAt(days, severity, rs);
+  out.recovered = out.fatigue <= READY_AT;
+  out.retention = retentionAt(days, grace, rs);
+  // What you gained in the gap is the first thing a layoff takes back: the
+  // newest adaptations are the least durable, so accrual fades on the same
+  // curve retention does rather than sitting there as a credit forever.
+  const durable = rs.retainedFloor < 1
+    ? clamp((out.retention - rs.retainedFloor) / (1 - rs.retainedFloor), 0, 1) : 1;
+  out.accrual = accrualAt(days, stats.gainPerWeek, productiveWindow) * durable;
+  out.factor = out.retention * (1 + out.accrual) * (1 - out.fatigue);
+
+  // Detraining is a real loss of capacity, so it discounts your best too —
+  // otherwise a comeback session is scored against a number you no longer own,
+  // and every honest re-entry weight reads as "already beaten". Fatigue does
+  // not: being tired today never took a kilo off what you can do.
+  out.baseline = stats.lastAdj * out.retention;
+  out.currentBest = Number.isFinite(stats.bestAdj) ? stats.bestAdj * out.retention : stats.bestAdj;
+  out.target = stats.lastAdj * out.factor;
+
+  // Whole days until the lift is fit to be trained hard again.
+  if (!out.recovered) {
+    const full = rs.fatiguePeak * severity;
+    out.readyIn = Math.max(0, Math.ceil(rs.fatigueTau * Math.log(full / READY_AT) - days));
+  }
+
+  out.phase = !out.recovered ? READINESS_PHASES.recovering
+    : out.retention < 1 - 1e-9 ? READINESS_PHASES.detrained
+    : days >= productiveWindow ? READINESS_PHASES.holding
+    : READINESS_PHASES.ready;
+  return out;
+}
+
+/** The same verdict in plain words, for the card. */
+export function readinessNote(r, { simple = true } = {}) {
+  if (!r || !r.enabled || r.days === null) return '';
+  const d = r.days;
+  const gap = d === 0 ? 'Earlier today' : d === 1 ? '1 day ago' : `${d} days ago`;
+  const residue = r.fatigue > 0
+    ? ` Still about ${(r.fatigue * 100).toFixed(1)}% short of fresh, which is taken off the target.`
+    : '';
+  switch (r.phase.key) {
+    case 'recovering':
+      return simple
+        ? `${gap} — you are still carrying that session, so today asks for less than it would rested.`
+          + (r.readyIn > 0 ? ` Fit for a hard one again in about ${plural(r.readyIn, 'day')}.` : '')
+        : `${gap}: an estimated ${(r.fatigue * 100).toFixed(1)}% deficit still owed to fatigue, discounted off the target.`
+          + (r.readyIn > 0 ? ` Below the ${(READY_AT * 100).toFixed(0)}% ready line in about ${plural(r.readyIn, 'day')}.` : '');
+    case 'holding':
+      return simple
+        ? `${plural(d, 'day')} of rest — recovered, and nothing lost yet. This is about as strong as this lift gets without training it.`
+        : `${plural(d, 'day')} rest: past the ${Math.round(r.productiveWindow)}-day productive window, inside the ${Math.round(r.grace)}-day grace period. No more fitness gained, none lost yet.`;
+    case 'detrained':
+      return simple
+        ? `${plural(d, 'day')} since you last did this. Expect to be roughly ${((1 - r.retention) * 100).toFixed(0)}% off your best — this is a way back in, not a PR attempt.`
+        : `${plural(d, 'day')} off, ${Math.round(d - r.grace)} past the ${Math.round(r.grace)}-day grace period. Retention ${(r.retention * 100).toFixed(1)}%, applied to the target and to your best alike.`;
+    default:
+      return simple
+        ? `${plural(d, 'day')} of rest — recovered and ready.`
+          + (r.fatigue > 0 ? ' Not quite fresh, so the step up is a small one.' : '')
+        : `${plural(d, 'day')} rest, ${(r.accrual * 100).toFixed(2)}% of a week's gain earned in the gap.` + residue;
+  }
+}
+
+function plural(n, word) {
+  const v = Math.round(n);
+  return `${v} ${word}${v === 1 ? '' : 's'}`;
+}
+
 /* ---------------------------------------------------------- the planner */
 
 export const BANDS = {
   beaten:  { key: 'beaten',  label: 'Already beaten', glyph: '=', hint: 'At or below your current best — not progression' },
+  return:  { key: 'return',  label: 'Way back in',     glyph: '↩', hint: 'Lighter than you were lifting, on purpose, after time off' },
   ideal:   { key: 'ideal',   label: 'Ideal step',     glyph: '✓', hint: 'The smallest honest step forward' },
   stretch: { key: 'stretch', label: 'Stretch',        glyph: '▲', hint: 'Ambitious but usually doable' },
   toobig:  { key: 'toobig',  label: 'Too big a jump', glyph: '!', hint: 'You will probably miss reps' },
@@ -314,6 +550,9 @@ export function plainVerdict(band, deltaKg) {
     case 'toobig':
       return move ? `A large jump — ${move}. You will probably miss reps.`
         : 'A large jump — you will probably miss reps.';
+    case 'return':
+      return move ? `Lighter than last time — ${move}. A way back in after time off, not a step backwards.`
+        : 'Lighter than last time, on purpose — a way back in after time off.';
     default:
       return 'Lighter than a session you have already done — not progression yet.';
   }
@@ -326,6 +565,12 @@ export function bandFor(score, target, bestAdj, settings) {
   if (score > target * (1 + settings.stretchBand)) return BANDS.toobig;
   if (score > target * (1 + settings.idealBand)) return BANDS.stretch;
   return BANDS.ideal;
+}
+
+/** The weight behind the best set of the most recent session. */
+export function lastSessionWeight(stats) {
+  const last = stats.sessions && stats.sessions.length ? stats.sessions[stats.sessions.length - 1] : null;
+  return last && Number.isFinite(last.best.weight) ? last.best.weight : null;
 }
 
 /** Snap a rep count down to the nearest scheme in the grid (the sheet's MATCH,1). */
@@ -346,6 +591,32 @@ export function planFor(stats, settings, override = {}) {
   const base = stats.base || 0;
   const autoTarget = stats.nextTarget;
   const target = Number(override.target) > 0 ? Number(override.target) : autoTarget;
+  const readiness = stats.readiness || null;
+  // What counts as "already beaten" is your best AS OF TODAY. A layoff really
+  // does take strength off, so after one the comparison is against the
+  // discounted figure — otherwise every sensible re-entry weight is scolded for
+  // not being a PR. Fatigue never moves this: tired is not weaker for good.
+  const bestNow = readiness && Number.isFinite(readiness.currentBest)
+    ? readiness.currentBest : stats.bestAdj;
+
+  /**
+   * Coming back from a layoff, the bands stop describing anything true. The
+   * target has been discounted, so the next loadable rung above it can sit 3-4%
+   * over and score as "too big a jump" — on a weight well under one you have
+   * already lifted for the same reps. Nothing about that is a jump, and the
+   * retention estimate is far too rough to be read to a whole percent.
+   *
+   * So while a lift is detraining, anything lighter than the session it is
+   * coming back from is called what it is: a way back in. The judgement rests
+   * on what you have demonstrably done, not on the model's guess.
+   */
+  const comebackUnder = readiness && readiness.phase && readiness.phase.key === 'detrained'
+    ? lastSessionWeight(stats) : null;
+  const bandOf = (score, weight) => (
+    comebackUnder !== null && weight < comebackUnder - 1e-9
+      ? BANDS.return
+      : bandFor(score, target, bestNow, settings)
+  );
 
   const reps = Number(override.reps) > 0 ? Math.round(Number(override.reps))
     : Number(stats.lastReps) > 0 ? Math.round(Number(stats.lastReps)) : 5;
@@ -357,6 +628,7 @@ export function planFor(stats, settings, override = {}) {
     ready: Number.isFinite(target) && target > 0,
     autoTarget, target, reps, sets, step, base,
     usingManualTarget: Number(override.target) > 0,
+    readiness, baseTarget: stats.baseTarget, bestNow,
     bestAdj: stats.bestAdj,
     idealCeiling: target * (1 + settings.idealBand),
     stretchCeiling: target * (1 + settings.stretchBand),
@@ -370,7 +642,7 @@ export function planFor(stats, settings, override = {}) {
   plan.atBase = base > 0 && Math.abs(plan.weight - base) < 1e-9;
   plan.score = plan.weight * repFactor(reps, settings.formula) * setBonus(sets, settings.setBonusK);
   plan.overshoot = plan.score - target;
-  plan.band = bandFor(plan.score, target, stats.bestAdj, settings);
+  plan.band = bandOf(plan.score, plan.weight);
   plan.lastWeight = stats.lastAdj != null ? stats.entries[stats.entries.length - 1].weight : null;
 
   // The full trade-off grid: every rep scheme x set count.
@@ -379,7 +651,7 @@ export function planFor(stats, settings, override = {}) {
     const score = w * repFactor(r, settings.formula) * setBonus(s, settings.setBonusK);
     return {
       reps: r, sets: s, weight: w, score,
-      band: bandFor(score, target, stats.bestAdj, settings),
+      band: bandOf(score, w),
       atBase: base > 0 && Math.abs(w - base) < 1e-9,
       isPick: r === snapReps(reps) && s === sets,
       volume: volume(w, r, s),

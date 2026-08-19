@@ -1,7 +1,7 @@
 // sw.js — offline shell. Bump CACHE when any file below changes; the new worker
 // installs, drops older caches, and the app offers a reload.
 
-const CACHE = 'lifting-tracker-v3';
+const CACHE = 'lifting-tracker-v4';
 
 // Served from a local server means someone is working on the app, and the file
 // they just saved has to win. The deployed app keeps its offline-first cache.

@@ -4,7 +4,7 @@
 // notifies subscribers, so the UI is always a pure function of this document.
 
 import { SEED } from './seed.js';
-import { isoToday, setKey } from './metrics.js';
+import { isoToday, setKey, READINESS_DEFAULTS } from './metrics.js';
 
 const KEY = 'liftingTracker.v1';
 const THEME_KEY = 'liftingTracker.theme';
@@ -21,9 +21,14 @@ export const DEFAULT_SETTINGS = {
   detailLevel: 'simple',   // 'simple' shows the prescription, 'detailed' the maths
   restSeconds: 150,        // rest timer target; 0 turns the timer off
   unit: 'kg',
+
+  // Fatigue / recovery / detraining — see readinessFor() in metrics.js.
+  // 'off' falls back to the spreadsheet's flat per-session step.
+  readiness: 'on',
+  ...READINESS_DEFAULTS,
 };
 
-const STRING_SETTINGS = new Set(['formula', 'unit', 'detailLevel']);
+const STRING_SETTINGS = new Set(['formula', 'unit', 'detailLevel', 'readiness']);
 
 let doc = null;
 const listeners = new Set();
@@ -43,6 +48,7 @@ function normalise(raw) {
   // than starting a newcomer one level too deep.
   if (raw.settings && raw.settings.detailLevel === undefined) d.settings.detailLevel = 'detailed';
   if (d.settings.detailLevel !== 'detailed') d.settings.detailLevel = 'simple';
+  if (d.settings.readiness !== 'off') d.settings.readiness = 'on';
   d.exercises = (raw.exercises || []).map((e, i) => ({
     id: String(e.id ?? `ex-${i}`),
     name: String(e.name ?? 'Exercise'),

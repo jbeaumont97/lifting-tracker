@@ -176,7 +176,8 @@ function detailView(st, ctx) {
   root.append(el('div', { class: ctx.simple ? 'kpi-row kpi-row-2' : 'kpi-row' }, [
     statTile({ label: 'Best ever', value: fmt(st.bestAdj, 1), unit: 'kg',
       delta: st.prCount ? `${st.prCount} PR${st.prCount === 1 ? '' : 's'} so far` : null }),
-    statTile({ label: 'Next target', value: fmt(st.nextTarget, 1), unit: 'kg', delta: `+${(st.gainPerWeek * 100).toFixed(2)}%`, deltaLabel: 'per week' }),
+    statTile({ label: 'Next target', value: fmt(st.nextTarget, 1), unit: 'kg',
+      delta: targetDelta(st), deltaLabel: targetDeltaLabel(st) }),
     // Straight-line projections are a detailed-view idea: shown too early they
     // read as promises rather than as the extrapolation they are.
     ctx.simple ? null : statTile({ label: 'Projected +4 wks', value: st.proj4 != null ? fmt(st.proj4, 1) : '—', unit: st.proj4 != null ? 'kg' : '',
@@ -225,12 +226,30 @@ function sessionTable(st, settings) {
   ]);
 }
 
+/** What moved the target off the last session, in one word. */
+function targetDelta(st) {
+  const r = st.readiness;
+  if (!r || !r.enabled || st.lastAdj == null) return `+${(st.gainPerWeek * 100).toFixed(2)}%`;
+  const pct = ((st.nextTarget / st.lastAdj) - 1) * 100;
+  return `${pct >= 0 ? '+' : '−'}${Math.abs(pct).toFixed(2)}%`;
+}
+
+function targetDeltaLabel(st) {
+  const r = st.readiness;
+  if (!r || !r.enabled) return 'per week';
+  switch (r.phase.key) {
+    case 'recovering': return 'on last, held back for fatigue';
+    case 'detrained': return 'on last, after the layoff';
+    default: return `on last, ${r.days === 1 ? 'a day' : `${r.days} days`} ago`;
+  }
+}
+
 function dashboardTable(stats) {
   return el('div', { class: 'table-scroll' }, [
     el('table', { class: 'data-table data-table-wide' }, [
-      el('caption', { text: 'The Dashboard sheet, one row per lift. * = provisional fit, fewer than 3 sessions or under 2 weeks.' }),
+      el('caption', { text: 'The Dashboard sheet, one row per lift. * = provisional fit, fewer than 3 sessions or under 2 weeks. Flat target is the spreadsheet’s — last session plus the weekly gain; Next target is that number after fatigue and detraining.' }),
       el('thead', {}, [el('tr', {}, [
-        'Lift', 'Sessions', 'Last', 'Last adj', 'Best adj', 'Trend kg/wk', '+4 wks', '+12 wks', 'Next target', 'Vol 7d', 'Sets 7d', 'Target/wk', 'Status',
+        'Lift', 'Sessions', 'Last', 'Last adj', 'Best adj', 'Trend kg/wk', '+4 wks', '+12 wks', 'Flat target', 'Next target', 'Vol 7d', 'Sets 7d', 'Target/wk', 'Status',
       ].map((h) => el('th', { scope: 'col', text: h })))]),
       el('tbody', {}, stats.map((s) => el('tr', {}, [
         el('th', { scope: 'row', text: s.exercise.name }),
@@ -241,6 +260,7 @@ function dashboardTable(stats) {
         el('td', { text: s.trendPerWeek != null ? fmtSigned(s.trendPerWeek, 2) + (s.trendReliable ? '' : '*') : '—' }),
         el('td', { text: s.proj4 != null ? fmt(s.proj4, 1) : '—' }),
         el('td', { text: s.proj12 != null ? fmt(s.proj12, 1) : '—' }),
+        el('td', { text: s.baseTarget != null ? fmt(s.baseTarget, 1) : '—' }),
         el('td', { text: s.nextTarget != null ? fmt(s.nextTarget, 1) : '—' }),
         el('td', { text: fmtCompact(s.volume7) }),
         el('td', { text: String(s.sets7) }),
