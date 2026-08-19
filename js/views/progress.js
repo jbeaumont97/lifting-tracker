@@ -5,20 +5,27 @@
 import { el, statTile, segmented, details, emptyState, chevron, accentDot, prBadge, tap } from '../ui.js';
 import { progressionChart, sparkline, setsMeter, weeklySetsChart } from '../charts.js';
 import { fmt, fmtWeight, fmtSigned, fmtCompact, relativeDate, formatDate, isoToday } from '../metrics.js';
+import * as ui from '../core/uistate.js';
 
-let selectedId = null;
-let listMode = 'cards';
+// Which lift is drilled into, and how the list is drawn. Kept in uistate so a
+// reload puts you back where you were rather than at the top of the list.
+const SELECTED = 'progress.selectedId';
+const MODE = 'progress.listMode';
 
-export function openExercise(id) { selectedId = id; }
-export function clearSelection() { selectedId = null; }
-export function hasSelection() { return selectedId !== null; }
+const selected = () => ui.get(SELECTED, null);
+const listMode = () => ui.get(MODE, 'cards');
+
+export function openExercise(id) { ui.set(SELECTED, id); }
+export function clearSelection() { ui.set(SELECTED, null); }
+export function hasSelection() { return selected() !== null; }
 
 export function renderProgress(ctx) {
   const { stats } = ctx;
-  if (selectedId) {
-    const st = stats.find((s) => s.exercise.id === selectedId);
+  const id = selected();
+  if (id) {
+    const st = stats.find((s) => s.exercise.id === id);
     if (st) return detailView(st, ctx);
-    selectedId = null;
+    clearSelection();                    // the lift was deleted underneath us
   }
   return listView(ctx);
 }
@@ -58,13 +65,13 @@ function listView(ctx) {
     // The wide dashboard table is a detailed-view tool; the cards say the same
     // thing in the shape a phone can actually read.
     ctx.simple ? null : segmented({
-      label: 'View', value: listMode,
+      label: 'View', value: listMode(),
       options: [{ value: 'cards', label: 'Cards' }, { value: 'table', label: 'Table' }],
-      onChange: (v) => { listMode = v; ctx.refresh({ transition: true }); },
+      onChange: (v) => { ui.set(MODE, v); ctx.refresh({ transition: true }); },
     }),
   ]));
 
-  if (listMode === 'table' && !ctx.simple) {
+  if (listMode() === 'table' && !ctx.simple) {
     root.append(dashboardTable(stats));
     root.append(el('p', { class: 'field-hint', text: 'Swipe the table sideways for trend, projections and weekly sets.' }));
   } else {
@@ -108,7 +115,7 @@ function exerciseRow(st, ctx) {
   }, [
     el('button', {
       type: 'button', class: 'row-open',
-      onclick: () => { tap(); selectedId = st.exercise.id; ctx.refresh({ transition: true }); },
+      onclick: () => { tap(); openExercise(st.exercise.id); ctx.refresh({ transition: true }); },
     }, [
       accentDot(st.exercise.id),
       el('div', { class: 'row-open-main' }, [
@@ -139,7 +146,7 @@ function detailView(st, ctx) {
   root.append(el('div', { class: 'detail-bar' }, [
     el('button', {
       type: 'button', class: 'back-btn',
-      onclick: () => { tap(); selectedId = null; ctx.refresh({ transition: true }); },
+      onclick: () => { tap(); clearSelection(); ctx.refresh({ transition: true }); },
     }, ['‹ All lifts']),
     el('button', { type: 'button', class: 'link-btn', onclick: () => ctx.goTo('plan', { openExercise: st.exercise.id }) }, ['Plan next →']),
   ]));

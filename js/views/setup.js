@@ -4,6 +4,7 @@
 import { el, stepper, chipGroup, segmented, toast, sheet, confirmSheet, details, chevron, accentDot } from '../ui.js';
 import * as store from '../store.js';
 import { showWelcome } from './welcome.js';
+import * as ui from '../core/uistate.js';
 import { fmt, setBonus, READY_AT, fatigueAt, retentionAt, readinessSettings } from '../metrics.js';
 
 export function renderSetup(ctx) {
@@ -223,10 +224,10 @@ function today() {
   return new Date().toISOString().slice(0, 10);
 }
 
-let openExerciseId = null;
+const OPEN_EX = 'setup.openExerciseId';
 
 function exerciseCard(ex, index, total, ctx) {
-  const isOpen = openExerciseId === ex.id;
+  const isOpen = ui.get(OPEN_EX, null) === ex.id;
   const body = el('div', { class: 'card-body' }, [
     el('div', { class: 'lever-row' }, [
       stepper({ label: 'Starting weight', value: ex.base, step: 0.5, min: 0, max: 200, dp: 1, id: `bs-${ex.id}`,
@@ -265,7 +266,7 @@ function exerciseCard(ex, index, total, ctx) {
   return el('article', { class: `card${isOpen ? ' is-open' : ''}` }, [
     el('button', {
       type: 'button', class: 'card-head', 'aria-expanded': isOpen ? 'true' : 'false',
-      onclick: () => { openExerciseId = isOpen ? null : ex.id; ctx.refresh({ transition: true }); },
+      onclick: () => { ui.set(OPEN_EX, isOpen ? null : ex.id); ctx.refresh({ transition: true }); },
     }, [
       accentDot(ex.id),
       el('div', { class: 'card-head-main' }, [

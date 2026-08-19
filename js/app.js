@@ -10,7 +10,10 @@
 // unwanted, per prefers-reduced-motion) the app simply cuts, exactly as before.
 
 import * as store from './store.js';
-import { allStats, isoToday } from './metrics.js';
+import { isoToday } from './metrics.js';
+import { allStats } from './core/select.js';
+import { resetBindings, tick } from './core/bind.js';
+import * as uistate from './core/uistate.js';
 import { el, toast } from './ui.js';
 import { renderPlan, openCard } from './views/plan.js';
 import { renderLog, setPrefill } from './views/log.js';
@@ -46,10 +49,15 @@ function ctx() {
     // One flag, read everywhere: the simple view shows the prescription, the
     // detailed view shows the maths behind it.
     simple: settings.detailLevel !== 'detailed',
-    stats: allStats(store.getExercises(), store.getEntries(), settings, today),
+    // Memoised in core/select.js: a render caused by view state alone — a card
+    // opening, a stepper moving — reads this straight out of the cache.
+    stats: allStats(settings, today),
     today,
     route,
     refresh,
+    // The cheap sibling of refresh(): re-read every binding without rebuilding
+    // anything. Use it when values moved and the shape did not.
+    tick,
     goTo,
     onResize: (fn) => resizeHandlers.push(fn),
   };
@@ -92,6 +100,8 @@ function render(opts = {}) {
 function draw({ restore = false, keepScroll = false } = {}) {
   const y = window.scrollY;
   resizeHandlers = [];
+  // The nodes these point at are about to be thrown away.
+  resetBindings();
   const c = ctx();
   let view;
   try {
@@ -195,16 +205,22 @@ window.addEventListener('resize', () => {
   resizeTimer = setTimeout(() => { for (const fn of resizeHandlers) { try { fn(); } catch { /* ignore */ } } }, 150);
 });
 
-// Coming back to the app after midnight must not leave "today" stale.
+// Coming back to the app after midnight must not leave "today" stale — and
+// going away must not lose whatever was half-typed on the way out.
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState !== 'visible') return;
+  if (document.visibilityState !== 'visible') { uistate.flush(); return; }
   const now = isoToday();
   if (now !== today) { today = now; refresh(); }
 });
 
-// Another tab (or another window) changed the data.
+window.addEventListener('pagehide', () => uistate.flush());
+
+// Another tab (or another window) changed the data. Re-read it and repaint —
+// reloading the page, as this used to, threw away whatever was half-typed.
 window.addEventListener('storage', (e) => {
-  if (e.key === 'liftingTracker.v1') { location.reload(); }
+  if (e.key !== 'liftingTracker.v1') return;
+  store.reload();
+  refresh({ transition: true });
 });
 
 store.subscribe((evt) => { if (evt.type === 'error') toast(evt.message); });
