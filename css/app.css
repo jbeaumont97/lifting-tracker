@@ -981,3 +981,45 @@ h1 .accent-dot { width: 11px; height: 11px; margin-right: 9px; vertical-align: m
   .presc-hero .presc-weight { font-size: 60px; }
   .fab { min-height: 52px; }
 }
+
+/* --------------------------------------------------------- set-by-set log */
+
+.mode-row { display: flex; justify-content: center; padding-bottom: 2px; }
+.mode-row .segmented { width: 100%; }
+.mode-row .seg { flex: 1; }
+
+.chip-done {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 18px; padding: 0 5px; margin-left: 2px; border-radius: 999px;
+  background: var(--good-tint); color: var(--good-ink);
+  font-size: 10.5px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.chip.is-selected .chip-done { background: rgba(255, 255, 255, 0.24); color: #fff; }
+
+.set-track {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 10px 12px; border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.set-track.is-complete { background: color-mix(in srgb, var(--good) 12%, var(--surface-2)); }
+.set-track-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 22px; }
+.set-track-label { font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); font-weight: 650; }
+.set-track-head .link-btn { padding: 0 2px; min-height: 22px; }
+.set-track-note { font-size: 12px; color: var(--good-ink); font-weight: 550; }
+
+.set-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+.set-pill {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 34px; height: 34px; padding: 0 8px; border-radius: 9px;
+  border: 1px dashed var(--border-strong); background: none;
+  color: var(--muted); font-size: 14px; font-weight: 650; font-variant-numeric: tabular-nums;
+}
+.set-pill.is-done {
+  border-style: solid; border-color: transparent;
+  background: var(--series-1); color: #fff;
+  animation: mark-in 220ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+.set-pill.is-next {
+  border-style: solid; border-color: var(--series-1); color: var(--series-1);
+  background: var(--surface-1);
+}

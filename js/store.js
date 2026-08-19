@@ -4,7 +4,7 @@
 // notifies subscribers, so the UI is always a pure function of this document.
 
 import { SEED } from './seed.js';
-import { isoToday } from './metrics.js';
+import { isoToday, setKey } from './metrics.js';
 
 const KEY = 'liftingTracker.v1';
 const THEME_KEY = 'liftingTracker.theme';
@@ -203,6 +203,68 @@ export function addEntry(entry) {
     d.entries.push(created);
   }, { undoable: true, label: 'set logged' });
   return created;
+}
+
+/** Every set logged for one lift on one day, oldest first. */
+export function entriesOn(exerciseId, date) {
+  return load().entries
+    .filter((e) => e.exerciseId === exerciseId && e.date === date)
+    .sort((a, b) => a.seq - b.seq);
+}
+
+/**
+ * Log a single set, as it happens.
+ *
+ * Sets that match an existing one — same weight, reps, RIR and note — are
+ * counted onto that entry rather than added beside it, so logging 3x5 set by
+ * set produces exactly the row that logging it all at once would. A set that
+ * differs in any way (the last one at four reps, say) becomes its own entry.
+ */
+export function logSet(set) {
+  let created = null;
+  commit((d) => {
+    const date = set.date || isoToday();
+    const candidate = {
+      weight: Number(set.weight),
+      reps: Math.round(Number(set.reps)),
+      rir: set.rir === '' || set.rir === null || set.rir === undefined ? null : Number(set.rir),
+      notes: String(set.notes || ''),
+    };
+    const key = setKey(candidate);
+    const match = d.entries.find((e) => e.exerciseId === set.exerciseId && e.date === date && setKey(e) === key);
+    if (match) {
+      match.sets += 1;
+      // The block keeps the hardest set's RIR — the one closest to failure is
+      // what the number is for — and collects any notes rather than losing one.
+      if (candidate.rir !== null) match.rir = match.rir === null ? candidate.rir : Math.min(match.rir, candidate.rir);
+      if (candidate.notes && !String(match.notes).includes(candidate.notes)) {
+        match.notes = match.notes ? `${match.notes}; ${candidate.notes}` : candidate.notes;
+      }
+      created = match;
+      return;
+    }
+    created = { id: uid('en'), date, exerciseId: set.exerciseId, ...candidate, sets: 1, seq: d.seq++ };
+    d.entries.push(created);
+  }, { undoable: true, label: 'set logged' });
+  return created;
+}
+
+/**
+ * Take one set back off. `preferId` is the entry the caller last added to,
+ * which is the only way to be exact about ordering — merged entries do not
+ * record which set arrived when. Without it, the newest entry loses a set.
+ */
+export function removeLastSet(exerciseId, date, preferId = null) {
+  let removed = null;
+  commit((d) => {
+    const mine = d.entries.filter((e) => e.exerciseId === exerciseId && e.date === date);
+    if (!mine.length) return;
+    const target = (preferId && mine.find((e) => e.id === preferId)) || mine.reduce((a, b) => (b.seq > a.seq ? b : a));
+    removed = { weight: target.weight, reps: target.reps };
+    if (target.sets > 1) target.sets -= 1;
+    else d.entries = d.entries.filter((e) => e.id !== target.id);
+  }, { undoable: true, label: 'set removed' });
+  return removed;
 }
 
 export function updateEntry(id, patch) {

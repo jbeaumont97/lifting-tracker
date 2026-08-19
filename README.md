@@ -106,10 +106,19 @@ every lift starts at 0 — set them in the app, or add the column and re-import.
 
 ## 3. Using it
 
+The app has two levels of detail, set in **Setup**. **Simple** — the default for a
+new install — gives you the prescription and how big a step it is, in plain words.
+**Detailed** adds the e1RM maths, the target each suggestion is measured against,
+the trade-off grid and the projections. Nothing is calculated differently; it is
+only what gets shown. An existing install stays on Detailed.
+
 **Next** — one card per lift, each with a single concrete prescription:
-`5 × 5 @ 82.5 kg`, plus how big a jump that is. Tap **Log this** and the log form
-opens pre-filled; all that is left is to save. Tap a card to open it and you get
-the full trade-off grid, the target, and reps/sets levers.
+`5 × 5 @ 82.5 kg`, plus how big a jump that is. Lifts are grouped by whether they
+are ready — rested at least a day, stalest first — and the top card opens itself,
+so the screen answers "what do I do today?" rather than listing rows. A lift left
+ten days or more is flagged. Tap **Log this** and the log form opens pre-filled.
+Tap a card to open it and you get the reps/sets levers, and in the detailed view
+the target and the full trade-off grid.
 
 - **Weight** grid: the load to lift for every reps × sets combination that meets
   your target. Tap any cell to plan it.
@@ -131,25 +140,47 @@ Aim for green most sessions, take amber when you feel strong. If nearly everythi
 reads amber, your weight step is simply large relative to the lift — widen the
 ideal band in **Setup** until green means what you want it to mean.
 
-**Log** — pick the date (Today / Yesterday / any date), tap a lift, and the form
-arrives pre-filled with the plan. Weight has its own row with big `−` / `+` keys
-that step by that lift's increment. As you adjust, a live readout shows what the
-set would score and which band it lands in. RIR is one tap. Save, and a toast
-offers **Undo**.
+**Log** — pick the date, tap a lift, and the form arrives pre-filled with the plan.
+Weight has its own row with big `−` / `+` keys that step by that lift's increment;
+hold one down to travel. A live readout shows what the session would score and
+which band it lands in. RIR is one tap.
 
-One entry per lift per session: `3 × 5 @ 100 kg` is a single entry with reps 5 and
-sets 3. For a ramping or pyramid session, log each distinct load as its own entry
-with sets 1.
+There are two ways to log, because there are two situations:
+
+- **Set by set** — the default for today. One tap logs the set you have just
+  finished, the rest clock starts above the tab bar, and the tracker moves on:
+  `5 5 5 5 ·`. Drop the reps before your last set and the short set is recorded as
+  it happened. **Undo last set** takes exactly one back off.
+- **All at once** — the default for any earlier date. The whole block as one row,
+  exactly as it has always worked.
+
+Both store the same thing. Sets that match on **weight and reps** are counted onto
+one entry, so `3 × 5 @ 100 kg` is a single row however you typed it, and logging
+set by set scores identically to writing the session up afterwards. A set that
+differs becomes its own row: four at five reps plus a last one at four is stored as
+`4 × 5` and `1 × 4`, and the session is scored on the four honest sets — the short
+one neither inflates the number nor erases the work before it.
+
+RIR and notes are recorded per set. Where sets are counted onto one row, that row
+keeps the **lowest** RIR — the set closest to failure — and collects the notes;
+splitting the row on them instead would split the set count with it, and five sets
+would score as five separate single sets.
+
+The first time a session passes your best from before today, that one set is
+marked as a personal best — once, not once per set from there on. Swipe a row in
+the history left to delete it; a toast offers **Undo**.
 
 **Progress** — the Dashboard, with charts. The list gives each lift's current
 adjusted e1RM, its trend and a sparkline; **Table** shows the full Dashboard grid.
-Tap a lift for its progression chart: every session, the fitted trend, the
-projection, and a ring marking your next target. Drag across the chart to read any
+Personal bests are ringed on the chart and badged in the history. Tap a lift for
+its progression chart: every session, the fitted trend, the projection, and a ring
+marking your next target. Drag across the chart to read any
 session. Below that: weekly sets against your budget, working sets per week over
 the last 8 weeks, and every session as a table.
 
-**Setup** — your lifts (tap one to edit), the maths dials, light/dark theme, and
-your backups.
+**Setup** — how much detail to show, the rest timer's target (0 turns it off), your
+lifts (tap one to edit), the maths dials, light/dark theme, and your backups. The
+welcome tour can be replayed from the bottom of the page.
 
 Each lift has a **starting weight** and a **weight step**, and together they
 describe the loads that actually exist for it. A 20 kg bar with 2.5 kg steps means
@@ -211,9 +242,11 @@ the values Excel itself calculated. Six things are intentionally different:
    trend figure itself is still shown, and the maths is identical.
 2. **"Sessions" counts session days**, not logged rows. The trend still fits every
    logged set, exactly as the sheet does.
-3. **"Last session" means that day's best set.** With one row per lift per session
-   this is identical to the sheet's "last row"; it only differs if you log several
-   loads on one day, where the top set is the more useful reading.
+3. **"Last session" means that day's best block** — the best set, credited for the
+   number of times it was repeated. With one row per lift per session this is
+   identical to the sheet's "last row". It differs once a day holds more than one
+   row, which set-by-set logging makes ordinary: a session of four fives and a
+   final four is read as the four fives, not as the single short set.
 4. **The planner takes any reps and sets**, computing the weight directly rather
    than looking it up in a 5-column grid. The grid runs to 6 sets, and reps snap to
    the nearest scheme only for choosing which cell to highlight.
@@ -262,10 +295,12 @@ css/app.css              one stylesheet; light and dark palettes as tokens
 js/metrics.js            all the maths, as pure functions (no DOM, no storage)
 js/store.js              localStorage: load, mutate, undo, import/export
 js/charts.js             hand-built SVG — progression chart, sparkline, meter, bars
-js/ui.js                 steppers, chips, toasts, bottom sheets
+js/ui.js                 steppers, chips, toasts, bottom sheets, celebration
+js/timer.js              the rest clock, docked above the tab bar
 js/seed.js               generated from the workbook; loaded once on first run
-js/app.js                router, render loop, service-worker registration
+js/app.js                router, render loop, view transitions, service worker
 js/views/                one module per tab: plan, log, progress, setup
+                         plus welcome.js, the first-run tour
 tools/seed_from_xlsx.py  regenerates js/seed.js from Lifting Tracker.xlsx
 tools/make_icons.py      regenerates the app icons
 tools/test.mjs           the maths, checked against the workbook's own values

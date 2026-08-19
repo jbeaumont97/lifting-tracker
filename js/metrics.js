@@ -95,6 +95,51 @@ export function volume(weight, reps, sets) {
   return Number(weight) * Number(reps) * (Number(sets) > 0 ? Number(sets) : 1);
 }
 
+/**
+ * The identity of a set: the weight and the reps, and deliberately nothing
+ * else. Two sets that match here are the same set done twice and are stored as
+ * one entry with a count — the shape the spreadsheet used, and what keeps 3x5
+ * a single row however it was typed in.
+ *
+ * RIR and notes are NOT part of this. They vary set to set, and splitting an
+ * entry on them would split the set count with it: five sets logged with
+ * falling RIR would score as five separate single sets, which is a much worse
+ * lie than one block carrying the hardest set's RIR.
+ */
+export function setKey(e) {
+  return `${Number(e.weight)}|${Math.round(Number(e.reps))}`;
+}
+
+/**
+ * What a session scores, optionally with one more set added to it.
+ *
+ * A session is worth its best block: the best set, credited for how many times
+ * it was repeated. Four sets of five plus a dropped-to-four last set is scored
+ * on the four honest sets — the short one neither inflates the number nor
+ * erases the work that came before it.
+ *
+ * This mirrors what the store will do with the set exactly, so the preview and
+ * the saved result can never disagree.
+ */
+export function sessionAdjWith(entries, extra, settings) {
+  const list = entries.map((e) => ({
+    weight: Number(e.weight), reps: Number(e.reps),
+    sets: Number(e.sets) > 0 ? Number(e.sets) : 1, key: setKey(e),
+  }));
+  if (extra) {
+    const key = setKey(extra);
+    const hit = list.find((e) => e.key === key);
+    if (hit) hit.sets += 1;
+    else list.push({ weight: Number(extra.weight), reps: Number(extra.reps), sets: 1, key });
+  }
+  let best = NaN;
+  for (const e of list) {
+    const adj = adjE1rm(e.weight, e.reps, e.sets, settings);
+    if (Number.isFinite(adj) && !(adj <= best)) best = adj;
+  }
+  return best;
+}
+
 /** What one logged entry is worth on each scale. */
 export function scoreEntry(entry, settings) {
   const one = e1rm(entry.weight, entry.reps, settings.formula);
