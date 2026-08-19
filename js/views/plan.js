@@ -9,8 +9,7 @@
 // also get the full trade-off grid the spreadsheet drew, colour-banded against
 // your target.
 
-import { el, stepper, segmented, bandChip, toast, details, chevron, accentDot, tap } from '../ui.js';
-import * as store from '../store.js';
+import { el, stepper, segmented, bandChip, toast, details, disclose, chevron, accentDot, tap } from '../ui.js';
 import * as ui from '../core/uistate.js';
 import {
   planFor,
@@ -23,6 +22,7 @@ import {
   plainVerdict,
   snapReps,
   readinessNote,
+  readinessMaths,
   READY_AT,
   REP_SCHEMES,
   SET_COLUMNS,
@@ -57,7 +57,7 @@ function ov(id) {
 function setOv(id, patch) { ui.setForExercise(OV, id, patch); }
 
 export function renderPlan(ctx) {
-  const { settings, stats, simple } = ctx;
+  const { settings, stats } = ctx;
   const root = el('section', { class: 'view view-plan' });
 
   root.append(
@@ -65,9 +65,7 @@ export function renderPlan(ctx) {
       el('h1', { text: 'Next session' }),
       el('p', {
         class: 'view-sub',
-        text: simple
-          ? 'One prescription per lift, sized to be a small step up on your last session.'
-          : 'One prescription per lift, sized to beat your last session by your weekly target.',
+        text: 'One prescription per lift, sized to be a small step up on your last session.',
       }),
     ]),
   );
@@ -119,17 +117,16 @@ export function renderPlan(ctx) {
   }
 
   root.append(
-    details('How the planner decides', simple ? [
+    details('How the planner decides', [
       el('p', { text: 'Each plan starts from your last session for that lift and adds a small step — the weekly gain you set per lift in Setup, earned by the week rather than by the session, so a lift you train twice a week is not asked to gain twice as fast as one you train once.' }),
       el('p', { text: 'Then it takes the gap into account. Train again a day later and the step is held back, because you are still carrying the last session. Come back after a month and the suggestion drops below what you last did, because some of it will have gone. Both of those settle back to nothing in between: a few days of rest is simply rest.' }),
       el('p', { text: 'The colour tells you how big the jump is: green is the smallest honest step forward, amber is ambitious but usually doable, red will probably cost you reps.' }),
-      el('p', { text: 'Switch to the detailed view in Setup to see the maths, the target you are being measured against, and the full grid of sets-against-weight trade-offs.' }),
-      legend(),
-    ] : [
-      el('p', { text: 'Your target is last session’s adjusted e1RM, moved by three things and then multiplied together: fitness earned in the gap (this lift’s weekly gain, pro-rated over the days since, and only while the rest is still productive); strength lost to a layoff (nothing for the first fortnight, then a half-life decay toward a floor you keep indefinitely); and fatigue still owed to the last session (a deficit that decays over roughly three days, scaled by how many sets you did and how close to failure you took them). The planner holds your rep scheme and set count steady and adds weight; the grid is there for when you would rather trade sets against load.' }),
-      el('p', { text: 'Detraining discounts your recorded best as well as your target — a comeback session should not be marked down for failing to be a PR against a number you no longer own. Fatigue does not: being tired today has not taken a kilo off what you can do. All six coefficients are yours to change in Setup, and the whole model can be switched off there, which puts the flat per-session step back.' }),
-      el('p', { text: 'Weights always round UP to a loadable step, so no suggestion can undershoot the target. The colour band tells you how big the jump is.' }),
-      el('p', { text: 'If nearly everything reads amber, your weight step is simply large relative to the lift — one plate on a 40 kg press is a bigger percentage than on a 140 kg deadlift. Widen the ideal band in Setup until green means what you want it to mean.' }),
+      disclose('Show the maths', [
+        el('p', { text: 'Your target is last session’s adjusted e1RM, moved by three things and then multiplied together: fitness earned in the gap (this lift’s weekly gain, pro-rated over the days since, and only while the rest is still productive); strength lost to a layoff (nothing for the first fortnight, then a half-life decay toward a floor you keep indefinitely); and fatigue still owed to the last session (a deficit that decays over roughly three days, scaled by how many sets you did and how close to failure you took them). The planner holds your rep scheme and set count steady and adds weight; the grid is there for when you would rather trade sets against load.' }),
+        el('p', { text: 'Detraining discounts your recorded best as well as your target — a comeback session should not be marked down for failing to be a PR against a number you no longer own. Fatigue does not: being tired today has not taken a kilo off what you can do. All six coefficients are yours to change in Setup, and the whole model can be switched off there, which puts the flat per-session step back.' }),
+        el('p', { text: 'Weights always round UP to a loadable step, so no suggestion can undershoot the target.' }),
+        el('p', { text: 'If nearly everything reads amber, your weight step is simply large relative to the lift — one plate on a 40 kg press is a bigger percentage than on a 140 kg deadlift. Widen the ideal band in Setup until green means what you want it to mean.' }),
+      ], { open: ctx.numbersOpen }),
       legend(),
     ]),
   );
@@ -157,7 +154,6 @@ function card(stats, ctx, settings) {
   const id = stats.exercise.id;
   const o = ov(id);
   const isOpen = openId() === id;
-  const simple = ctx.simple;
   const plan = stats.entryCount ? planFor(stats, settings, o) : null;
 
   const head = el('button', {
@@ -209,25 +205,38 @@ function card(stats, ctx, settings) {
     ]),
   );
 
-  // Plain words first; the arithmetic only in the detailed view.
+  // Plain words carry the verdict; the arithmetic sits under them.
   body.append(el('p', {
     class: 'presc-explain',
-    text: simple
-      ? plainVerdict(plan.band, delta) + (plan.atBase ? ` That is the bar on its own — ${fmtWeight(plan.base)} kg.` : '')
-      : `Scores ${fmt(plan.score, 1)} against a target of ${fmt(plan.target, 1)} (${fmtSigned(plan.overshoot, 1)} kg over). ${plan.band.hint}.`
-        + (plan.atBase ? ` That is the lightest this lift loads — ${fmtWeight(plan.base)} kg is the bar.` : ''),
+    text: plainVerdict(plan.band, delta)
+      + (plan.atBase ? ` That is the bar on its own — ${fmtWeight(plan.base)} kg.` : ''),
   }));
 
   // Why today's number is what it is: fatigue still owed, or strength lost to a
   // layoff. Only worth the line when it is actually saying something, or when
   // the card is open and there is room for the detail.
-  const rNote = readinessNote(stats.readiness, { simple });
+  const rNote = readinessNote(stats.readiness);
   if (rNote && (isOpen || stats.readiness.phase.key !== 'ready')) {
     body.append(el('p', { class: `presc-readiness is-${stats.readiness.phase.key}` }, [
       el('span', { class: 'presc-readiness-glyph', 'aria-hidden': 'true', text: stats.readiness.phase.glyph }),
       el('span', { text: rNote }),
     ]));
   }
+
+  body.append(disclose('Show the numbers', [
+    el('p', { text: `Scores ${fmt(plan.score, 1)} against a target of ${fmt(plan.target, 1)} `
+      + `(${fmtSigned(plan.overshoot, 1)} kg over). ${plan.band.hint}.`
+      + (plan.atBase ? ` That is the lightest this lift loads — ${fmtWeight(plan.base)} kg is the bar.` : '') }),
+    readinessMaths(stats.readiness) ? el('p', { text: readinessMaths(stats.readiness) }) : null,
+    el('div', { class: 'target-facts' }, [
+      factLine('Target adj e1RM', `${fmt(plan.target, 1)} kg`,
+        plan.usingManualTarget ? 'your override' : targetSub(stats, plan)),
+      factLine('Current best', `${fmt(plan.bestNow, 1)} kg`,
+        plan.bestNow < stats.bestAdj - 0.05
+          ? `${fmt(stats.bestAdj, 1)} less ${((1 - stats.readiness.retention) * 100).toFixed(1)}% detraining`
+          : stats.bestAdj > stats.lastAdj + 1e-9 ? 'beat this to set a PR' : 'set last session'),
+    ]),
+  ], { open: ctx.numbersOpen }));
 
   if (plan.band.key === 'beaten' && Number.isFinite(plan.bestNow)) {
     body.append(el('button', {
@@ -237,10 +246,7 @@ function card(stats, ctx, settings) {
       el('span', { class: 'hint-label', text: 'This does not beat your best' }),
       el('span', {
         class: 'hint-value',
-        text: simple
-          ? 'Your last session was lighter than your best. Aim past your best instead →'
-          : `Your target comes from last session (${fmt(stats.lastAdj, 1)}), which is under your best of ${fmt(plan.bestNow, 1)}`
-            + `${plan.bestNow < stats.bestAdj - 0.05 ? ` (${fmt(stats.bestAdj, 1)} discounted for the layoff)` : ''}. Aim past the best instead →`,
+        text: 'Your last session was lighter than your best. Aim past your best instead →',
       }),
     ]));
   }
@@ -268,7 +274,6 @@ function card(stats, ctx, settings) {
 function detail(stats, plan, ctx, settings) {
   const id = stats.exercise.id;
   const o = ov(id);
-  const simple = ctx.simple;
   const wrap = el('div', { class: 'card-detail' });
 
   // --- levers ---
@@ -282,24 +287,15 @@ function detail(stats, plan, ctx, settings) {
   });
   wrap.append(el('div', { class: 'lever-row' }, [repsStepper, setsStepper]));
 
-  if (!simple) {
-    // --- target ---
-    wrap.append(el('div', { class: 'target-row' }, [
-      el('div', { class: 'target-facts' }, [
-        factLine('Target adj e1RM', `${fmt(plan.target, 1)} kg`,
-          plan.usingManualTarget ? 'your override' : targetSub(stats, plan)),
-        factLine('Current best', `${fmt(plan.bestNow, 1)} kg`,
-          plan.bestNow < stats.bestAdj - 0.05
-            ? `${fmt(stats.bestAdj, 1)} less ${((1 - stats.readiness.retention) * 100).toFixed(1)}% detraining`
-            : stats.bestAdj > stats.lastAdj + 1e-9 ? 'beat this to set a PR' : 'set last session'),
-      ]),
-      stepper({
-        label: 'Override target (kg)', value: o.target ?? '', step: 0.5, min: 0, max: 999, dp: 1,
-        id: `tgt-${id}`, placeholder: fmt(plan.autoTarget, 1) + ' auto',
-        onChange: (v) => { setOv(id, { target: v > 0 ? v : null }); ctx.refresh(); },
-      }),
-    ]));
-  }
+  wrap.append(disclose('Set the target myself', [
+    el('p', { text: 'The planner works this out from your last session. Put a number in to '
+      + 'override it — the grid below re-solves against whatever you set.' }),
+    stepper({
+      label: 'Override target (kg)', value: o.target ?? '', step: 0.5, min: 0, max: 999, dp: 1,
+      id: `tgt-${id}`, placeholder: fmt(plan.autoTarget, 1) + ' auto',
+      onChange: (v) => { setOv(id, { target: v > 0 ? v : null }); ctx.refresh(); },
+    }),
+  ], { open: plan.usingManualTarget }));
 
   if (plan.gentlest && plan.gentlest.score < plan.score - 1e-9) {
     wrap.append(el('button', {
@@ -309,25 +305,12 @@ function detail(stats, plan, ctx, settings) {
       el('span', { class: 'hint-label', text: `Smallest jump at ${plan.sets} sets` }),
       el('span', {
         class: 'hint-value',
-        text: simple
-          ? `${plan.sets} × ${plan.gentlest.reps} @ ${fmtWeight(plan.gentlest.weight)} kg — an easier way up`
-          : `${plan.sets} × ${plan.gentlest.reps} @ ${fmtWeight(plan.gentlest.weight)} kg — scores ${fmt(plan.gentlest.score, 1)}`,
+        text: `${plan.sets} × ${plan.gentlest.reps} @ ${fmtWeight(plan.gentlest.weight)} kg — an easier way up`,
       }),
     ]));
   }
 
-  if (simple) {
-    // The grid is the app's power tool. Offer the door rather than the whole
-    // room: this is also how most people will discover the detailed view.
-    wrap.append(el('button', {
-      type: 'button', class: 'link-btn link-btn-block',
-      onclick: () => {
-        store.updateSettings({ detailLevel: 'detailed' });
-        ctx.refresh({ transition: true });
-        toast('Detailed view on — the maths and the trade-off grid. Turn it off in Setup.', { duration: 6000 });
-      },
-    }, ['Show the trade-off grid and targets →']));
-  } else {
+  {
     // --- the trade-off grid ---
     const mode = ui.forExercise(GRID, id, { mode: 'weights' }).mode;
     const gridHost = el('div', { class: 'grid-host' });
@@ -388,7 +371,7 @@ function gridFor(mode, stats, plan, ctx, settings) {
       const cell = plan.grid[ri][ci];
       const value = scores ? fmt(cell.score, 1) : fmtWeight(cell.weight);
       const isPick = reps === snapReps(plan.reps) && sets === plan.sets;
-      tr.append(el('td', { class: `cell is-${cell.band.key}${isPick ? ' is-pick' : ''}` }, [
+      tr.append(el('td', { class: `cell${isPick ? ' is-pick' : ''}`, dataset: { band: cell.band.key } }, [
         el('button', {
           type: 'button', class: 'cell-btn',
           'aria-label': `${sets} sets of ${reps} reps at ${fmtWeight(cell.weight)} kg, scores ${fmt(cell.score, 1)}, ${cell.band.label}`,
@@ -433,7 +416,7 @@ function tableView(stats, plan) {
 }
 
 function legend() {
-  return el('ul', { class: 'legend' }, Object.values(BANDS).map((b) => el('li', { class: `legend-item is-${b.key}` }, [
+  return el('ul', { class: 'legend' }, Object.values(BANDS).map((b) => el('li', { class: 'legend-item', dataset: { band: b.key } }, [
     el('span', { class: 'legend-glyph', 'aria-hidden': 'true', text: b.glyph }),
     el('span', { class: 'legend-label', text: b.label }),
     el('span', { class: 'legend-hint', text: b.hint }),

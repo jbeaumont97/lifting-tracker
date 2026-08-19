@@ -94,9 +94,7 @@ export function renderLog(ctx) {
 
   root.append(el('header', { class: 'view-head' }, [
     el('h1', { text: 'Log' }),
-    el('p', { class: 'view-sub', text: ctx.simple
-      ? 'Log each set as you do it, or write the whole session up at once.'
-      : 'Log set by set as you train, or write up the whole session at once. Either way, identical sets are stored as one row: 3×5 at 100 kg.' }),
+    el('p', { class: 'view-sub', text: 'Log each set as you do it, or write the whole session up at once. Identical sets are stored as one row: 3×5 at 100 kg.' }),
   ]));
 
   const exercises = store.exercisesByRecency();
@@ -225,7 +223,7 @@ function entryForm(st, ctx, settings) {
 
     preview.replaceChildren(
       el('div', { class: 'preview-main' }, [
-        el('span', { class: 'preview-value' }, [fmt(adj, 1), el('small', { text: ctx.simple ? ' score' : ' kg adj e1RM' })]),
+        el('span', { class: 'preview-value' }, [fmt(adj, 1), el('small', { text: ' score' })]),
         band ? bandChip(band) : null,
         beatsBest ? prBadge() : null,
       ]),
@@ -233,11 +231,9 @@ function entryForm(st, ctx, settings) {
         ? `after ${doneSoFar + 1} set${doneSoFar ? 's' : ''} · ${fmt(work, 0)} kg of work`
           + (alreadyBest ? ' · already your best session'
             : bestBefore > -Infinity ? ` · best before today ${fmt(bestBefore, 1)}` : '')
-        : (ctx.simple
-          ? `${fmt(work, 0)} kg of work` + (bestBefore > -Infinity ? ` · your best is ${fmt(bestBefore, 1)}` : '')
-          : `e1RM ${fmt(e1rm(w, r, settings.formula), 1)} · volume ${fmt(work, 0)} kg`
-            + (target1rm ? ` · target ${fmt(target1rm, 1)} (${fmtSigned(adj - target1rm, 1)})` : '')
-            + (bestBefore > -Infinity ? ` · best ${fmt(bestBefore, 1)}` : '')) }),
+        : `${fmt(work, 0)} kg of work`
+          + (target1rm ? ` · target ${fmt(target1rm, 1)} (${fmtSigned(adj - target1rm, 1)})` : '')
+          + (bestBefore > -Infinity ? ` · best ${fmt(bestBefore, 1)}` : '') }),
     );
   };
 
@@ -416,7 +412,7 @@ function logOneSet(st, ctx, settings) {
   if (crossed) {
     celebrate();
     tap([30, 60, 30]);
-    toast(`🏆 New best for ${st.exercise.name} — ${fmt(adj, 1)}${ctx.simple ? '' : ' kg adj e1RM'}`);
+    toast(`🏆 New best for ${st.exercise.name} — ${fmt(adj, 1)}`);
   }
 
   // Only the set that finishes the plan ends the session. Carrying on past it
@@ -449,8 +445,8 @@ function save(st, ctx) {
   const beatBest = bestBefore > -Infinity && adj > bestBefore + 1e-9;
   // A personal best is the moment the whole app exists for — mark it.
   if (beatBest) { celebrate(); tap([30, 60, 30]); }
-  toast(beatBest ? `🏆 New best for ${st.exercise.name} — ${fmt(adj, 1)}${ctx.simple ? '' : ' kg adj e1RM'}`
-    : `Saved · ${fmt(adj, 1)}${ctx.simple ? '' : ' kg adj e1RM'}`, {
+  toast(beatBest ? `🏆 New best for ${st.exercise.name} — ${fmt(adj, 1)}`
+    : `Saved · ${fmt(adj, 1)}`, {
     action: () => { store.undo(); ctx.refresh(); },
     actionLabel: 'Undo',
   });
@@ -508,9 +504,7 @@ function historyRow(entry, name, isPR, ctx, settings) {
   const btn = el('button', { type: 'button', class: 'row-btn', onclick: () => editSheet(entry, ctx, settings) }, [
     el('span', { class: 'row-name' }, [accentDot(entry.exerciseId), name, isPR ? prBadge({ compact: true }) : null]),
     el('span', { class: 'row-set', text: `${entry.sets} × ${entry.reps} @ ${fmtWeight(entry.weight)} kg` }),
-    el('span', { class: 'row-adj', text: ctx.simple
-      ? fmt(adjE1rm(entry.weight, entry.reps, entry.sets, ctx.settings), 1)
-      : `${fmt(adjE1rm(entry.weight, entry.reps, entry.sets, ctx.settings), 1)} adj` }),
+    el('span', { class: 'row-adj', text: fmt(adjE1rm(entry.weight, entry.reps, entry.sets, ctx.settings), 1) }),
     entry.rir !== null && entry.rir !== undefined ? el('span', { class: 'row-rir', text: `RIR ${entry.rir}` }) : null,
   ]);
   const li = el('li', { class: 'swipe-row' }, [

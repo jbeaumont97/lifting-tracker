@@ -486,8 +486,31 @@ export function readinessFor(stats, settings = {}) {
   return out;
 }
 
-/** The same verdict in plain words, for the card. */
-export function readinessNote(r, { simple = true } = {}) {
+/**
+ * The verdict in plain words. This is what the card leads with, always — the
+ * arithmetic behind it is readinessMaths(), one tap away rather than behind a
+ * mode switch.
+ */
+export function readinessNote(r) {
+  if (!r || !r.enabled || r.days === null) return '';
+  const d = r.days;
+  const gap = d === 0 ? 'Earlier today' : d === 1 ? '1 day ago' : `${d} days ago`;
+  switch (r.phase.key) {
+    case 'recovering':
+      return `${gap} — you are still carrying that session, so today asks for less than it would rested.`
+        + (r.readyIn > 0 ? ` Fit for a hard one again in about ${plural(r.readyIn, 'day')}.` : '');
+    case 'holding':
+      return `${plural(d, 'day')} of rest — recovered, and nothing lost yet. This is about as strong as this lift gets without training it.`;
+    case 'detrained':
+      return `${plural(d, 'day')} since you last did this. Expect to be roughly ${((1 - r.retention) * 100).toFixed(0)}% off your best — this is a way back in, not a PR attempt.`;
+    default:
+      return `${plural(d, 'day')} of rest — recovered and ready.`
+        + (r.fatigue > 0 ? ' Not quite fresh, so the step up is a small one.' : '');
+  }
+}
+
+/** The same verdict with the model's workings shown. */
+export function readinessMaths(r) {
   if (!r || !r.enabled || r.days === null) return '';
   const d = r.days;
   const gap = d === 0 ? 'Earlier today' : d === 1 ? '1 day ago' : `${d} days ago`;
@@ -496,24 +519,14 @@ export function readinessNote(r, { simple = true } = {}) {
     : '';
   switch (r.phase.key) {
     case 'recovering':
-      return simple
-        ? `${gap} — you are still carrying that session, so today asks for less than it would rested.`
-          + (r.readyIn > 0 ? ` Fit for a hard one again in about ${plural(r.readyIn, 'day')}.` : '')
-        : `${gap}: an estimated ${(r.fatigue * 100).toFixed(1)}% deficit still owed to fatigue, discounted off the target.`
-          + (r.readyIn > 0 ? ` Below the ${(READY_AT * 100).toFixed(0)}% ready line in about ${plural(r.readyIn, 'day')}.` : '');
+      return `${gap}: an estimated ${(r.fatigue * 100).toFixed(1)}% deficit still owed to fatigue, discounted off the target.`
+        + (r.readyIn > 0 ? ` Below the ${(READY_AT * 100).toFixed(0)}% ready line in about ${plural(r.readyIn, 'day')}.` : '');
     case 'holding':
-      return simple
-        ? `${plural(d, 'day')} of rest — recovered, and nothing lost yet. This is about as strong as this lift gets without training it.`
-        : `${plural(d, 'day')} rest: past the ${Math.round(r.productiveWindow)}-day productive window, inside the ${Math.round(r.grace)}-day grace period. No more fitness gained, none lost yet.`;
+      return `${plural(d, 'day')} rest: past the ${Math.round(r.productiveWindow)}-day productive window, inside the ${Math.round(r.grace)}-day grace period. No more fitness gained, none lost yet.`;
     case 'detrained':
-      return simple
-        ? `${plural(d, 'day')} since you last did this. Expect to be roughly ${((1 - r.retention) * 100).toFixed(0)}% off your best — this is a way back in, not a PR attempt.`
-        : `${plural(d, 'day')} off, ${Math.round(d - r.grace)} past the ${Math.round(r.grace)}-day grace period. Retention ${(r.retention * 100).toFixed(1)}%, applied to the target and to your best alike.`;
+      return `${plural(d, 'day')} off, ${Math.round(d - r.grace)} past the ${Math.round(r.grace)}-day grace period. Retention ${(r.retention * 100).toFixed(1)}%, applied to the target and to your best alike.`;
     default:
-      return simple
-        ? `${plural(d, 'day')} of rest — recovered and ready.`
-          + (r.fatigue > 0 ? ' Not quite fresh, so the step up is a small one.' : '')
-        : `${plural(d, 'day')} rest, ${(r.accrual * 100).toFixed(2)}% of a week's gain earned in the gap.` + residue;
+      return `${plural(d, 'day')} rest, ${(r.accrual * 100).toFixed(2)}% of a week's gain earned in the gap.` + residue;
   }
 }
 

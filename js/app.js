@@ -46,9 +46,9 @@ function ctx() {
   const settings = store.getSettings();
   return {
     settings,
-    // One flag, read everywhere: the simple view shows the prescription, the
-    // detailed view shows the maths behind it.
-    simple: settings.detailLevel !== 'detailed',
+    // Not a mode — every screen is the same screen for everyone. This only says
+    // whether the "show the numbers" disclosures start open.
+    numbersOpen: settings.numbersOpen === true,
     // Memoised in core/select.js: a render caused by view state alone — a card
     // opening, a stepper moving — reads this straight out of the cache.
     stats: allStats(settings, today),

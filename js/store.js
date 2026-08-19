@@ -18,7 +18,10 @@ export const DEFAULT_SETTINGS = {
   defaultGainPerWeek: 0.0075,
   idealBand: 0.01,         // <= target x (1+this)  -> ideal
   stretchBand: 0.03,       // <= target x (1+this)  -> stretch, above -> too big
-  detailLevel: 'simple',   // 'simple' shows the prescription, 'detailed' the maths
+  // One design now, not two: the verdict is always the headline and the
+  // arithmetic sits behind a disclosure. This only decides whether those
+  // disclosures start open.
+  numbersOpen: false,
   restSeconds: 150,        // rest timer target; 0 turns the timer off
   unit: 'kg',
 
@@ -28,7 +31,8 @@ export const DEFAULT_SETTINGS = {
   ...READINESS_DEFAULTS,
 };
 
-const STRING_SETTINGS = new Set(['formula', 'unit', 'detailLevel', 'readiness']);
+const STRING_SETTINGS = new Set(['formula', 'unit', 'readiness']);
+const BOOL_SETTINGS = new Set(['numbersOpen']);
 
 let doc = null;
 const listeners = new Set();
@@ -49,11 +53,16 @@ function blank() {
 function normalise(raw) {
   const d = { ...blank(), ...raw };
   d.settings = { ...DEFAULT_SETTINGS, ...(raw.settings || {}) };
-  // A document written before the simple/detailed split keeps everything it used
-  // to show: hiding half the app under someone who was already using it is worse
-  // than starting a newcomer one level too deep.
-  if (raw.settings && raw.settings.detailLevel === undefined) d.settings.detailLevel = 'detailed';
-  if (d.settings.detailLevel !== 'detailed') d.settings.detailLevel = 'simple';
+  // The simple/detailed split is gone: everything is reachable now, and the
+  // only question is whether the numbers start open. Someone who chose the
+  // detailed view was asking to see them, so they still do — and a document
+  // predating the split kept everything, so it counts as detailed too.
+  const legacy = raw.settings ? raw.settings.detailLevel : undefined;
+  if (raw.settings && raw.settings.numbersOpen === undefined) {
+    d.settings.numbersOpen = legacy === undefined || legacy === 'detailed';
+  }
+  d.settings.numbersOpen = d.settings.numbersOpen === true;
+  delete d.settings.detailLevel;
   if (d.settings.readiness !== 'off') d.settings.readiness = 'on';
   d.exercises = (raw.exercises || []).map((e, i) => ({
     id: String(e.id ?? `ex-${i}`),
@@ -95,9 +104,9 @@ export function seedDoc() {
   return normalise({
     exercises: SEED.exercises,
     entries: SEED.entries,
-    // detailLevel is stated explicitly so normalise() reads this as a new
-    // document rather than an upgrade from before the simple/detailed split.
-    settings: { detailLevel: 'simple', ...DEFAULT_SETTINGS, ...SEED.settings },
+    // numbersOpen is stated explicitly so normalise() reads this as a new
+    // document rather than an upgrade from before the disclosure change.
+    settings: { numbersOpen: false, ...DEFAULT_SETTINGS, ...SEED.settings },
   });
 }
 
@@ -423,7 +432,9 @@ export function updateSettings(patch) {
     for (const [k, v] of Object.entries(patch)) {
       if (!(k in DEFAULT_SETTINGS)) continue;
       prev[k] = d.settings[k];
-      d.settings[k] = STRING_SETTINGS.has(k) ? String(v) : num(v, d.settings[k]);
+      d.settings[k] = STRING_SETTINGS.has(k) ? String(v)
+        : BOOL_SETTINGS.has(k) ? v === true || v === 'true'
+        : num(v, d.settings[k]);
     }
     record((u) => { Object.assign(u.settings, prev); });
   }, { undoable: true, label: 'settings changed' });
@@ -529,4 +540,32 @@ export function applyTheme(theme = getTheme()) {
   const root = document.documentElement;
   if (theme === 'system') root.removeAttribute('data-theme');
   else root.setAttribute('data-theme', theme);
+  paintThemeColor(theme);
+}
+
+/**
+ * Keep the browser chrome in step with the theme.
+ *
+ * index.html carries two <meta name="theme-color"> tags picked by
+ * prefers-color-scheme, which is right until someone overrides the theme in the
+ * app: forcing dark on a light phone left a pale status bar sitting above a
+ * dark screen. A tag with no media query matches unconditionally, and the first
+ * matching tag wins, so the override goes in front of the pair rather than
+ * replacing them — with the theme back on "system" it is simply removed and the
+ * original two take over again.
+ *
+ * The colour is read back off the stylesheet so the palette stays in one place.
+ */
+function paintThemeColor(theme) {
+  const head = document.head;
+  if (!head) return;
+  head.querySelector('meta[name="theme-color"][data-override]')?.remove();
+  if (theme === 'system') return;
+  const plane = getComputedStyle(document.documentElement).getPropertyValue('--plane').trim();
+  if (!plane) return;
+  const meta = document.createElement('meta');
+  meta.setAttribute('name', 'theme-color');
+  meta.setAttribute('content', plane);
+  meta.setAttribute('data-override', '');
+  head.insertBefore(meta, head.firstChild);
 }
