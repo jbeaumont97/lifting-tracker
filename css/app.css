@@ -1308,3 +1308,52 @@ h1 .accent-dot { width: 11px; height: 11px; margin-right: 9px; vertical-align: m
   font-size: var(--text-xs); color: var(--warn-ink);
 }
 .baseline-note strong { font-variant-numeric: tabular-nums; font-weight: var(--fw-semi); }
+
+/* -------------------------------------------------- trajectory chart v2 */
+
+/* A repaint after a resize is the same chart at a new size, not a new chart. */
+.chart.no-anim .line,
+.chart.no-anim .area,
+.chart.no-anim .dot,
+.chart.no-anim .dot-pr,
+.chart.no-anim .bar { animation: none; }
+
+/* The room the sessions actually scatter in. Deliberately faint: it is context
+   for the projection, not a second series. */
+.chart-svg .proj-cone { fill: var(--series-1); opacity: 0.10; }
+
+/* The running best, as a step. A plateau should look like a plateau. */
+.chart-svg .pr-step {
+  stroke: var(--good); stroke-width: 1.5; opacity: 0.5;
+  stroke-linejoin: round; stroke-dasharray: 1 3; stroke-linecap: round;
+}
+
+.chart-svg .ref-milestone { stroke: var(--series-1); stroke-width: 1; stroke-dasharray: 5 4; opacity: 0.7; }
+.chart-svg .label-milestone {
+  fill: var(--series-1-deep); font: var(--fw-semi) var(--text-3xs) var(--font);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------- readiness lane */
+
+.chart-readiness .line { stroke: var(--series-1); }
+.chart-svg .readiness-wash { fill: var(--series-1); opacity: 0.10; }
+.chart-svg .ready-mark { stroke: var(--good); stroke-width: 1; stroke-dasharray: 3 3; }
+
+/* --------------------------------------------------------- chart ranges */
+
+.chart-range { display: flex; align-items: center; justify-content: flex-end; }
+.chart-range .segmented { font-size: var(--text-2xs); }
+
+/* The cone is an area, so its key mark has to be one too — a 2px rule would
+   read as another line. */
+.key-mark.key-cone {
+  height: 9px; border-radius: 2px;
+  background: color-mix(in srgb, var(--series-1) 22%, transparent);
+}
+.key-mark.key-best {
+  background: repeating-linear-gradient(90deg, var(--good) 0 2px, transparent 2px 5px); opacity: 0.7;
+}
+.key-mark.key-milestone {
+  background: repeating-linear-gradient(90deg, var(--series-1) 0 5px, transparent 5px 9px); opacity: 0.8;
+}

@@ -4,6 +4,7 @@
 // on the points that carry the story (last, best, projection, target).
 
 import { fmt, fmtWeight, formatDate, formatDateShort, dayNumber, isoAddDays, isoToday } from './metrics.js';
+import { projectionBand, runway, readinessCurve } from './insights.js';
 
 const SVG = 'http://www.w3.org/2000/svg';
 
@@ -62,9 +63,26 @@ export function niceTicks(min, max, count = 4) {
  * the fitted trend, its dashed projection, and the next-session target.
  * Returns a figure element containing the SVG, a key, and a table-view twin.
  */
-export function progressionChart(stats, settings, { width = 340, height = 210, showProjection = true, todayIso = isoToday() } = {}) {
-  const sessions = stats.sessions;
-  const fig = el('figure', { class: 'chart' });
+export function progressionChart(stats, settings, {
+  width = 340, height = 210, showProjection = true, todayIso = isoToday(), range = null,
+  animate = true,
+} = {}) {
+  // The chart is repainted whenever the container is resized, because the
+  // viewBox has to match the real pixel width for one unit to be one pixel.
+  // Replaying the draw-in every time the keyboard opens is the part that was
+  // wrong, so a repaint can ask for the finished state instead.
+  const fig = el('figure', { class: `chart${animate ? '' : ' no-anim'}` });
+  const all = stats.sessions;
+
+  // `range` clips what is drawn, never what is fitted: the trend is the app's
+  // one fit over its own lookback window, and zooming the axis must not quietly
+  // change the number the rest of the screen is quoting.
+  let sessions = all;
+  if (range && all.length) {
+    const cut = dayNumber(todayIso) - range;
+    const kept = all.filter((s) => s.day >= cut);
+    sessions = kept.length >= 2 ? kept : all.slice(-2);
+  }
 
   if (sessions.length === 0) {
     fig.append(el('p', { class: 'chart-empty', text: 'No sessions logged yet — log one and your progression appears here.' }));
@@ -100,9 +118,24 @@ export function progressionChart(stats, settings, { width = 340, height = 210, s
   const xSpan = Math.max(1, xMax - xMin);
 
   const projAt = (day) => stats.lastAdj + stats.trendPerDay * (day - lastDay);
+
+  // How far the sessions actually scatter around the fit — the honest width of
+  // the projection, rather than a line one pixel wide.
+  const band = horizon ? projectionBand(stats, settings, { todayIso }) : null;
+
+  // The chart's y is adjusted e1RM, so a weight milestone has to be converted
+  // before it can be drawn. Using the runway's own figure keeps this line and
+  // the milestone track on the Progress screen pointing at the same thing.
+  const run = runway(stats, settings, { todayIso });
+  const milestoneY = run && Number.isFinite(run.scoreNeeded) ? run.scoreNeeded : null;
+
   const values = actual.slice();
   if (stats.nextTarget) values.push(stats.nextTarget);
   if (horizon) values.push(projAt(xMax));
+  if (band) values.push(projAt(xMax) + band.halfWidth(xMax - lastDay), projAt(xMax) - band.halfWidth(xMax - lastDay));
+  // Only pull the axis up to the milestone when it is nearly in reach; a target
+  // twenty kilos away would flatten every session into a line at the bottom.
+  if (milestoneY !== null && milestoneY < Math.max(...actual) * 1.12) values.push(milestoneY);
   const { ticks, lo, hi, step: tickStep } = niceTicks(Math.min(...values), Math.max(...values), 4);
   const tickDp = tickStep >= 1 ? 0 : tickStep >= 0.1 ? 1 : 2;
 
@@ -132,6 +165,18 @@ export function progressionChart(stats, settings, { width = 340, height = 210, s
     svg.append(text(lab.label, { x: x(lab.day), y: height - 8, class: 'tick', 'text-anchor': anchor }));
   }
 
+  // --- the next round number on the bar, where it is close enough to matter ---
+  let milestoneDrawn = false;
+  if (milestoneY !== null && milestoneY >= lo && milestoneY <= hi) {
+    milestoneDrawn = true;
+    svg.append(svgEl('line', {
+      x1: pad.l, x2: pad.l + plotW, y1: y(milestoneY), y2: y(milestoneY), class: 'ref-milestone',
+    }));
+    svg.append(text(`${fmtWeight(run.milestone.value)} kg`, {
+      x: pad.l + plotW, y: y(milestoneY) - 5, class: 'label-milestone', 'text-anchor': 'end',
+    }));
+  }
+
   // --- best-ever reference, only when it is not simply the last point ---
   if (Number.isFinite(stats.bestAdj) && stats.bestAdj > stats.lastAdj + 1e-9) {
     svg.append(svgEl('line', { x1: pad.l, x2: pad.l + plotW, y1: y(stats.bestAdj), y2: y(stats.bestAdj), class: 'ref-best' }));
@@ -146,12 +191,47 @@ export function progressionChart(stats, settings, { width = 340, height = 210, s
       x1: x(fitFrom), y1: y(fitAt(fitFrom)), x2: x(lastDay), y2: y(fitAt(lastDay)), class: 'trend',
     }));
     if (horizon) {
+      // The cone: the fit, plus the room the sessions themselves say to leave
+      // around it. Sampled rather than drawn as a triangle so the widening,
+      // which is sublinear, actually shows.
+      if (band) {
+        const steps = 12;
+        const upper = [];
+        const lower = [];
+        for (let i = 0; i <= steps; i++) {
+          const day = lastDay + ((xMax - lastDay) * i) / steps;
+          const hw = band.halfWidth(day - lastDay);
+          upper.push(`${x(day).toFixed(1)} ${y(fitAt(day) + hw).toFixed(1)}`);
+          lower.push(`${x(day).toFixed(1)} ${y(fitAt(day) - hw).toFixed(1)}`);
+        }
+        svg.append(svgEl('path', {
+          d: `M${upper.join(' L')} L${lower.reverse().join(' L')} Z`, class: 'proj-cone',
+        }));
+      }
       svg.append(svgEl('line', {
         x1: x(lastDay), y1: y(fitAt(lastDay)), x2: x(xMax), y2: y(fitAt(xMax)), class: 'trend-proj',
       }));
       const py = y(fitAt(xMax));
       svg.append(svgEl('circle', { cx: x(xMax), cy: py, r: 3, class: 'proj-dot' }));
       svg.append(text(fmt(fitAt(xMax), 0), { x: x(xMax) - 4, y: py - 8, class: 'label-proj', 'text-anchor': 'end' }));
+    }
+  }
+
+  // --- the running best: a step line, so a plateau reads as a plateau ---
+  let anyStep = false;
+  {
+    let running = -Infinity;
+    const steps = [];
+    for (const sn of sessions) {
+      const v = Math.max(running, sn.best.adj);
+      if (running > -Infinity && v !== running) anyStep = true;
+      if (running === -Infinity) steps.push(`M${x(sn.day).toFixed(1)} ${y(v).toFixed(1)}`);
+      else steps.push(`L${x(sn.day).toFixed(1)} ${y(running).toFixed(1)} L${x(sn.day).toFixed(1)} ${y(v).toFixed(1)}`);
+      running = v;
+    }
+    if (steps.length > 1) {
+      steps.push(`L${(pad.l + plotW).toFixed(1)} ${y(running).toFixed(1)}`);
+      svg.append(svgEl('path', { d: steps.join(' '), class: 'pr-step', fill: 'none' }));
     }
   }
 
@@ -272,8 +352,11 @@ export function progressionChart(stats, settings, { width = 340, height = 210, s
     keyItem('line', 'Adj e1RM per session'),
     stats.trendPerDay != null ? keyItem('trend', `Trend ${fmt(stats.trendPerWeek, 2)} kg/wk`) : null,
     horizon ? keyItem('proj', `Projection, +${Math.round(horizon / 7)} wks`) : null,
-    Number.isFinite(stats.nextTarget) ? keyItem('target', `Next target ${fmt(stats.nextTarget, 1)}`) : null,
-    anyPR ? keyItem('pr', 'Personal best') : null,
+    band ? keyItem('cone', `Spread your sessions sit in, ±${fmt(band.sd, 1)} kg`) : null,
+    anyStep ? keyItem('best', 'Best up to that point') : null,
+    milestoneDrawn ? keyItem('milestone', `Next milestone ${fmtWeight(run.milestone.value)} kg`) : null,
+    Number.isFinite(stats.nextTarget) ? keyItem('target', `Next session ${fmt(stats.nextTarget, 1)}`) : null,
+    anyPR ? keyItem('pr', 'A set that was a PR') : null,
   ]);
   fig.append(key);
   return fig;
@@ -564,4 +647,102 @@ export function restRing({ size = 30 } = {}) {
     arc.setAttribute('stroke-dashoffset', (circ * (1 - f)).toFixed(2));
   };
   return svg;
+}
+
+/* ============================================================== readiness */
+
+/**
+ * The fatigue and detraining model, drawn.
+ *
+ * This is the most distinctive thing the app does and it has only ever been
+ * reported as one number: today's target, already discounted, with a sentence
+ * explaining it. As a curve the shape is the point — the dip while the last
+ * session is still being carried, the climb as it clears, the plateau once rest
+ * stops being productive, and the slide once a layoff starts costing you.
+ *
+ * Plotted as a percentage against your last session, because zero then means
+ * something concrete: as strong as you were when you last did this.
+ *
+ * It has its own x-axis rather than sharing the progression chart's. The model
+ * only speaks about the future, so on a shared axis it would sit in a corner of
+ * the plot with the whole history blank beside it.
+ */
+export function readinessLane(stats, settings, { width = 340, height = 104, days = 28, todayIso = isoToday() } = {}) {
+  const curve = readinessCurve(stats, settings, { days });
+  const fig = el('figure', { class: 'chart chart-sm chart-readiness' });
+  if (curve.length < 2) return null;
+
+  const pad = { t: 16, r: 12, b: 20, l: 30 };
+  const w = Math.max(240, width);
+  const plotW = w - pad.l - pad.r;
+  const plotH = height - pad.t - pad.b;
+
+  const pcts = curve.map((c) => (c.factor - 1) * 100);
+  const lo = Math.min(-1.2, ...pcts) * 1.15;
+  const hi = Math.max(1.2, ...pcts) * 1.15;
+  const x = (d) => pad.l + (d / days) * plotW;
+  const y = (v) => pad.t + plotH - ((v - lo) / (hi - lo || 1)) * plotH;
+
+  const here = Math.max(0, Math.min(days, Math.round(stats.daysSince ?? 0)));
+  const ready = curve.find((c) => c.recovered);
+
+  const svg = svgEl('svg', {
+    viewBox: `0 0 ${w} ${height}`, width: '100%', height, class: 'chart-svg',
+    role: 'img', preserveAspectRatio: 'xMidYMid meet',
+    'aria-label': readinessLabel(stats, curve, ready, here),
+  });
+
+  // Zero: as strong as the session you are recovering from.
+  svg.append(svgEl('line', { x1: pad.l, x2: pad.l + plotW, y1: y(0), y2: y(0), class: 'grid' }));
+  svg.append(text('last session', { x: pad.l - 4, y: y(0) + 3.5, class: 'tick', 'text-anchor': 'end' }));
+
+  const pts = curve.map((c, i) => [x(c.daysSince), y(pcts[i])]);
+  const d = pts.map(([px, py], i) => `${i ? 'L' : 'M'}${px.toFixed(1)} ${py.toFixed(1)}`).join(' ');
+  svg.append(svgEl('path', {
+    d: `${d} L${pts[pts.length - 1][0].toFixed(1)} ${y(0).toFixed(1)} L${pts[0][0].toFixed(1)} ${y(0).toFixed(1)} Z`,
+    class: 'readiness-wash',
+  }));
+  svg.append(svgEl('path', { d, class: 'line', fill: 'none', pathLength: 1 }));
+
+  // The day the lift is fit to be trained hard again.
+  if (ready && ready.daysSince > 0) {
+    svg.append(svgEl('line', {
+      x1: x(ready.daysSince), x2: x(ready.daysSince), y1: pad.t, y2: pad.t + plotH, class: 'ready-mark',
+    }));
+    svg.append(text('ready', { x: x(ready.daysSince) + 4, y: pad.t + 8, class: 'label-target' }));
+  }
+
+  // Where you actually are on it.
+  const hereIdx = Math.min(curve.length - 1, here);
+  svg.append(svgEl('circle', { cx: x(here), cy: y(pcts[hereIdx]), r: 5, class: 'dot dot-last' }));
+  svg.append(text('today', { x: x(here), y: Math.max(pad.t + 8, y(pcts[hereIdx]) - 11), class: 'label-last', 'text-anchor': 'middle' }));
+
+  svg.append(svgEl('line', { x1: pad.l, x2: pad.l + plotW, y1: pad.t + plotH, y2: pad.t + plotH, class: 'axis' }));
+  for (const dd of [0, Math.round(days / 2), days]) {
+    svg.append(text(dd === 0 ? 'session' : `+${dd}d`, {
+      x: x(dd), y: height - 6, class: 'tick',
+      'text-anchor': dd === 0 ? 'start' : dd === days ? 'end' : 'middle',
+    }));
+  }
+
+  fig.append(el('div', { class: 'chart-plot' }, [svg]));
+  fig.append(el('figcaption', { class: 'chart-cap', text: readinessCaption(stats, ready) }));
+  return fig;
+}
+
+function readinessCaption(stats, ready) {
+  const r = stats.readiness;
+  if (!r) return 'How strong this lift is, against the session you last did.';
+  if (!r.recovered && ready) {
+    return `Still carrying the last session. Fit for a hard one again around day ${ready.daysSince}.`;
+  }
+  if (r.phase.key === 'detrained') return 'Past the grace period — the curve is on its way down, not up.';
+  if (r.phase.key === 'holding') return 'Recovered, and rest is no longer adding anything.';
+  return 'Recovered. The climb is the fitness the gap is earning you.';
+}
+
+function readinessLabel(stats, curve, ready, here) {
+  const now = ((curve[Math.min(curve.length - 1, here)].factor - 1) * 100).toFixed(1);
+  return `${stats.exercise.name} readiness against your last session. Today, day ${here}, ${now}%.`
+    + (ready ? ` Fit to train hard again on day ${ready.daysSince}.` : '');
 }

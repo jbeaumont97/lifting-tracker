@@ -636,6 +636,131 @@ function giveHistory(exerciseId, { weeks = 14, from = 72.5, perWeek = 1.15 } = {
   clearSelection();
 }
 
+/* --------------------------------------------- 6f. the trajectory chart */
+
+const charts = await import('../js/charts.js');
+const insights = await import('../js/insights.js');
+
+// --- the spread cone: only where there is a fit worth drawing one around ---
+{
+  reset();
+  const ex = store.getExercises()[0];
+  giveHistory(ex.id);
+  const cfg = store.getSettings();
+  const st = ctx().stats.find((s) => s.exercise.id === ex.id);
+
+  const band = insights.projectionBand(st, cfg, { todayIso: TODAY });
+  ok('a real fit has a measurable spread', band && band.sd > 0, String(band && band.sd));
+  ok('the band widens with distance', band.halfWidth(56) > band.halfWidth(0));
+  ok('but sublinearly — it is a spread, not a fan',
+    band.halfWidth(56) < band.halfWidth(0) * 3, `${band.halfWidth(0)} -> ${band.halfWidth(56)}`);
+
+  const fig = charts.progressionChart(st, cfg, { width: 340, todayIso: TODAY });
+  ok('the chart draws the cone', fig.querySelectorAll('.proj-cone').length === 1);
+  ok('and keeps the fitted line inside it', fig.querySelectorAll('.trend-proj').length === 1);
+  ok('the key says what the cone is',
+    /Spread your sessions sit in/.test(fig.textContent), fig.textContent);
+
+  // A thin fit must not get one.
+  reset();
+  const thin = ctx().stats.find((s) => s.entryCount > 0);
+  ok('a thin fit has no band', insights.projectionBand(thin, store.getSettings(), { todayIso: TODAY }) === null);
+  ok('and no cone is drawn',
+    charts.progressionChart(thin, store.getSettings(), { todayIso: TODAY })
+      .querySelectorAll('.proj-cone').length === 0);
+}
+
+// --- the running best, and the milestone the chart is climbing toward ---
+{
+  reset();
+  const ex = store.getExercises()[0];
+  giveHistory(ex.id);
+  const cfg = store.getSettings();
+  const st = ctx().stats.find((s) => s.exercise.id === ex.id);
+  const fig = charts.progressionChart(st, cfg, { width: 340, todayIso: TODAY });
+
+  ok('a climbing lift draws a running-best step', fig.querySelectorAll('.pr-step').length === 1);
+  ok('the milestone is drawn on the chart', fig.querySelectorAll('.ref-milestone').length === 1);
+  const label = fig.querySelector('.label-milestone').textContent;
+  ok('and labelled in kilos on the bar, not in score', /kg$/.test(label), label);
+
+  // The chart and the milestone track must not disagree about the target.
+  const run = insights.runway(st, cfg, { todayIso: TODAY });
+  ok('the chart line and the milestone track name the same target',
+    label === `${run.milestone.value} kg`, `${label} vs ${run.milestone.value} kg`);
+}
+
+// --- range clips the view without touching the fit ---
+{
+  reset();
+  const ex = store.getExercises()[0];
+  giveHistory(ex.id, { weeks: 30 });
+  const cfg = store.getSettings();
+  const st = ctx().stats.find((s) => s.exercise.id === ex.id);
+
+  const all = charts.progressionChart(st, cfg, { width: 340, todayIso: TODAY });
+  const eight = charts.progressionChart(st, cfg, { width: 340, todayIso: TODAY, range: 56 });
+  const dots = (f) => f.querySelectorAll('.dot').length;
+  ok('a shorter range draws fewer sessions', dots(eight) < dots(all), `${dots(eight)} vs ${dots(all)}`);
+  ok('but quotes the same trend',
+    /Trend [-\d.]+ kg\/wk/.exec(all.textContent)[0] === /Trend [-\d.]+ kg\/wk/.exec(eight.textContent)[0],
+    'clipping the axis changed the number the rest of the screen quotes');
+
+  openExercise(ex.id);
+  const view = renderProgress(ctx({ route: 'progress' }));
+  await settle();
+  ok('the range selector is offered once there is history to fill it',
+    view.querySelectorAll('.chart-range').length === 1);
+
+  // And withheld when there is not.
+  reset();
+  openExercise(store.getExercises()[0].id);
+  const thin = renderProgress(ctx({ route: 'progress' }));
+  await settle();
+  ok('and withheld on a short history', thin.querySelectorAll('.chart-range').length === 0);
+  clearSelection();
+}
+
+// --- the readiness model, finally drawn ---
+{
+  reset();
+  const ex = store.getExercises()[0];
+  giveHistory(ex.id);
+  const cfg = store.getSettings();
+  const st = ctx().stats.find((s) => s.exercise.id === ex.id);
+
+  const lane = charts.readinessLane(st, cfg, { width: 340, todayIso: TODAY });
+  ok('the readiness curve is drawn', !!lane);
+  ok('it marks where you are on it today', /today/.test(lane.textContent), lane.textContent);
+  ok('and where the lift is fit to be trained again',
+    lane.querySelectorAll('.ready-mark').length === 1);
+  ok('it is measured against your last session',
+    /last session/.test(lane.textContent));
+  ok('the curve describes itself for a screen reader',
+    /readiness against your last session/.test(lane.querySelector('.chart-svg').getAttribute('aria-label') || ''),
+    lane.querySelector('.chart-svg').getAttribute('aria-label'));
+
+  ok('with the model switched off there is no curve to draw',
+    charts.readinessLane(st, { ...cfg, readiness: 'off' }, { todayIso: TODAY }) === null);
+
+  openExercise(ex.id);
+  const view = renderProgress(ctx({ route: 'progress' }));
+  await settle();
+  ok('the lift detail shows it', view.querySelectorAll('.chart-readiness').length === 1);
+  clearSelection();
+}
+
+// --- a repaint is the same chart at a new size, not a new chart ---
+{
+  reset();
+  const st = ctx().stats.find((s) => s.entryCount > 0);
+  const cfg = store.getSettings();
+  const first = charts.progressionChart(st, cfg, { width: 340, todayIso: TODAY });
+  const again = charts.progressionChart(st, cfg, { width: 500, todayIso: TODAY, animate: false });
+  ok('the first draw animates in', !first.classList.contains('no-anim'));
+  ok('a resize repaint does not replay it', again.classList.contains('no-anim'));
+}
+
 /* ------------------------------------- 7. view state survives a reload */
 
 {
