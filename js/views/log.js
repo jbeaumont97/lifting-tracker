@@ -27,10 +27,13 @@ import { setTrace } from '../charts.js';
 import { sessionSets, sessionTimeline, typicalRest, sessionDuration } from '../insights.js';
 import * as ui from '../core/uistate.js';
 import { bind } from '../core/bind.js';
+import { countUp } from '../core/motion.js';
 
 const FORM = 'log.form';
 const NOTES_OPEN = 'log.showNotes';
 const LAST_SET = 'log.lastSetId';   // the entry the last set landed on, so undo is exact
+const SCORE_FROM = 'log.scoreFrom'; // the session score before the set just logged
+const PR_FLASH = 'log.prFlash';     // a PR was crossed by the set just logged
 
 let form = null;      // { exerciseId, date, weight, reps, sets, rir, notes, mode }
 
@@ -303,6 +306,14 @@ function entryForm(st, ctx, settings) {
     })
     : null;
 
+  // Set by set, the session score is the number that moves — so it moves rather
+  // than jumping. Only on the paint straight after a set lands: while a stepper
+  // is being scrubbed the value has to track the thumb exactly.
+  let scoreFrom = ui.get(SCORE_FROM, null);
+  const prFlash = ui.get(PR_FLASH, false);
+  if (scoreFrom !== null) ui.set(SCORE_FROM, undefined);
+  if (prFlash) ui.set(PR_FLASH, undefined);
+
   const paint = () => {
     const w = Number(form.weight), r = Number(form.reps), s = Number(form.sets);
     if (traceFig) traceFig.setPending(r);
@@ -322,9 +333,10 @@ function entryForm(st, ctx, settings) {
     const beatsBest = bestBefore > -Infinity && adj > bestBefore + 1e-9 && !alreadyBest;
     const work = volSoFar + volume(w, r, live ? 1 : s);
 
+    const scoreNum = el('span', { class: 'preview-num' });
     preview.replaceChildren(
       el('div', { class: 'preview-main' }, [
-        el('span', { class: 'preview-value' }, [fmt(adj, 1), el('small', { text: ' score' })]),
+        el('span', { class: 'preview-value' }, [scoreNum, el('small', { text: ' score' })]),
         band ? bandChip(band) : null,
         beatsBest ? prBadge() : null,
       ]),
@@ -336,6 +348,14 @@ function entryForm(st, ctx, settings) {
           + (target1rm ? ` · target ${fmt(target1rm, 1)} (${fmtSigned(adj - target1rm, 1)})` : '')
           + (bestBefore > -Infinity ? ` · best ${fmt(bestBefore, 1)}` : '') }),
     );
+
+    if (scoreFrom !== null && Math.abs(adj - scoreFrom) > 0.05) {
+      countUp(scoreNum, adj, { from: scoreFrom, format: (v) => fmt(v, 1) });
+    } else {
+      scoreNum.textContent = fmt(adj, 1);
+    }
+    scoreFrom = null;                    // the climb happens once, not per tick
+    preview.classList.toggle('is-pr', prFlash);
   };
 
   const weightStep = stepper({
@@ -474,7 +494,39 @@ function tracker(traceFig, doneSoFar, target, complete, ex, ctx) {
       }, ['Undo last set']) : null,
     ]),
     traceFig,
-    complete ? el('p', { class: 'set-track-note', text: `${ex.name} done — ${doneSoFar} set${doneSoFar === 1 ? '' : 's'}. Log another if you have one in you.` }) : null,
+    complete ? summary(doneSoFar, ex, ctx) : null,
+  ]);
+}
+
+/**
+ * What the lift just did, once the plan is complete.
+ *
+ * The toast says the same thing and then leaves; this stays on the screen you
+ * are standing in front of. Duration only appears where it was measured — a
+ * session written up afterwards has sets and tonnage and nothing else true to
+ * say about how long it took.
+ */
+function summary(doneSoFar, ex, ctx) {
+  const todays = store.entriesOn(ex.id, form.date);
+  const sets = sessionSets(todays);
+  const spent = sessionDuration(sets);
+  const rest = typicalRest(sets);
+  const work = todays.reduce((n, e) => n + volume(e.weight, e.reps, e.sets), 0);
+  const prs = (ctx.stats.find((s) => s.exercise.id === ex.id)?.entries || [])
+    .filter((e) => e.date === form.date && e.isPR).length;
+
+  const facts = [`${doneSoFar} set${doneSoFar === 1 ? '' : 's'}`, `${fmt(work, 0)} kg moved`];
+  if (spent !== null && spent >= 60) facts.push(`${Math.round(spent / 60)} min`);
+  if (rest !== null) facts.push(`${Math.floor(rest / 60)}:${String(rest % 60).padStart(2, '0')} rest`);
+
+  return el('div', { class: 'session-summary' }, [
+    el('p', { class: 'summary-head' }, [
+      el('span', { class: 'summary-tick', 'aria-hidden': 'true', text: '✓' }),
+      el('span', { text: `${ex.name} done` }),
+      prs ? prBadge({ compact: true }) : null,
+    ]),
+    el('ul', { class: 'summary-facts' }, facts.map((f) => el('li', { text: f }))),
+    el('p', { class: 'summary-note', text: 'Log another if you have one in you, or pick the next lift above.' }),
   ]);
 }
 
@@ -504,9 +556,14 @@ function logOneSet(st, ctx, settings) {
 
   // Once the session is past your best, every further set beats it again —
   // celebrate the crossing, not each step beyond it.
+  // Hand the next render the two things it cannot work out for itself: where
+  // the score was a moment ago, and whether this set was the one that crossed.
+  ui.set(SCORE_FROM, Number.isFinite(adjBefore) ? adjBefore : 0);
+
   const crossed = Number.isFinite(adj) && bestBefore > -Infinity
     && adj > bestBefore + 1e-9 && !(adjBefore > bestBefore + 1e-9);
   if (crossed) {
+    ui.set(PR_FLASH, true);
     celebrate();
     tap([30, 60, 30]);
     toast(`🏆 New best for ${st.exercise.name} — ${fmt(adj, 1)}`);
@@ -602,9 +659,22 @@ function history(ctx, settings) {
   return wrap;
 }
 
-/** One logged entry: tap to edit, swipe left to delete. */
+/**
+ * One logged entry: tap to edit, swipe left to delete.
+ *
+ * The swipe is a shortcut, not the route. It is pointer-only by nature, and the
+ * delete affordance behind the row is decorative — so the button says out loud
+ * what it opens, and the sheet it opens carries Delete. Anyone not swiping gets
+ * there in two presses rather than being told about a gesture they cannot make.
+ */
 function historyRow(entry, name, isPR, ctx, settings) {
-  const btn = el('button', { type: 'button', class: 'row-btn', onclick: () => editSheet(entry, ctx, settings) }, [
+  const rir = entry.rir !== null && entry.rir !== undefined ? `, RIR ${entry.rir}` : '';
+  const btn = el('button', {
+    type: 'button', class: 'row-btn',
+    'aria-label': `${name}, ${entry.sets} sets of ${entry.reps} at ${fmtWeight(entry.weight)} kilos${rir}`
+      + `${entry.notes ? `, noted: ${entry.notes}` : ''}. Edit or delete.`,
+    onclick: () => editSheet(entry, ctx, settings),
+  }, [
     el('span', { class: 'row-name' }, [accentDot(entry.exerciseId), name, isPR ? prBadge({ compact: true }) : null]),
     el('span', { class: 'row-set', text: `${entry.sets} × ${entry.reps} @ ${fmtWeight(entry.weight)} kg` }),
     el('span', { class: 'row-adj', text: fmt(adjE1rm(entry.weight, entry.reps, entry.sets, ctx.settings), 1) }),

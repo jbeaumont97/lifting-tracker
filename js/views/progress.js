@@ -4,6 +4,7 @@
 
 import { el, statTile, segmented, details, disclose, milestoneTrack, emptyState, chevron, accentDot, prBadge, tap } from '../ui.js';
 import { runway, tonnageSeries, consistency, balance, prTimeline } from '../insights.js';
+import { countUp } from '../core/motion.js';
 import { progressionChart, readinessLane, sparkline, setsMeter, weeklySetsChart,
   tonnageChart, consistencyGrid, balanceBars } from '../charts.js';
 import { fmt, fmtWeight, fmtSigned, fmtCompact, relativeDate, formatDate, dayNumber } from '../metrics.js';
@@ -272,11 +273,16 @@ function detailView(st, ctx) {
   }
 
   // --- the hero number: where this lift stands right now ---
+  // The number runs up on arrival. `from: 0` is explicit because the node is
+  // built empty, and countUp treats an empty node as having no previous value —
+  // otherwise the entrance would be a silent write.
+  const heroNum = el('span', { class: 'hero-num' });
   root.append(el('div', { class: 'hero' }, [
     el('span', { class: 'hero-label', text: 'Where this lift stands' }),
-    el('span', { class: 'hero-value' }, [fmt(st.lastAdj, 1), el('small', { text: ' kg' })]),
+    el('span', { class: 'hero-value' }, [heroNum, el('small', { text: ' kg' })]),
     el('span', { class: `hero-delta${trendClass(st)}`, text: heroTrendText(st) }),
   ]));
+  countUp(heroNum, st.lastAdj, { from: 0, format: (v) => fmt(v, 1) });
 
   // The hero is what you last lifted, which is a fact. After a layoff it is no
   // longer what you can lift, which is the more useful number and one the model

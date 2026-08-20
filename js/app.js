@@ -234,7 +234,7 @@ if ('serviceWorker' in navigator) {
         const sw = reg.installing;
         sw?.addEventListener('statechange', () => {
           if (sw.state === 'installed' && navigator.serviceWorker.controller) {
-            toast('A new version is ready.', { action: () => location.reload(), actionLabel: 'Reload', duration: 9000 });
+            toast('A new version is ready.', { action: () => location.reload(), actionLabel: 'Reload' });
           }
         });
       });
