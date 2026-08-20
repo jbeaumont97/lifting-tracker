@@ -275,6 +275,47 @@ export function etaTo(value, stats, { todayIso = isoToday(), maxDays = 730 } = {
 }
 
 /**
+ * How much room to leave around a projection.
+ *
+ * The trend is a straight line fitted through sessions that scatter around it,
+ * and drawing that line one pixel wide claims a precision it does not have. The
+ * spread of the sessions about the fit is the honest width, and it widens with
+ * distance because a line is least trustworthy furthest from the data.
+ *
+ * Deliberately not a confidence interval: a real prediction interval also
+ * carries the uncertainty in the slope itself, and the t-multiplier for it.
+ * This is the residual spread, widened in the same spirit — enough to stop the
+ * projection reading as a promise, and labelled in the UI as a spread rather
+ * than as a statistic it is not.
+ */
+export function projectionBand(stats, settings, { todayIso = isoToday(), z = 1 } = {}) {
+  if (!stats.trendReliable || !Number.isFinite(stats.trendPerDay)) return null;
+  const from = dayNumber(todayIso) - settings.lookbackDays;
+  const win = (stats.entries || []).filter((e) => e.day >= from && Number.isFinite(e.adj));
+  if (win.length < 3) return null;
+
+  const n = win.length;
+  const mx = win.reduce((t, e) => t + e.day, 0) / n;
+  const my = win.reduce((t, e) => t + e.adj, 0) / n;
+  let sxx = 0, sxy = 0;
+  for (const e of win) { sxx += (e.day - mx) ** 2; sxy += (e.day - mx) * (e.adj - my); }
+  if (!(sxx > 0)) return null;
+
+  const b = sxy / sxx;
+  const a = my - b * mx;
+  let ss = 0;
+  for (const e of win) { const r = e.adj - (a + b * e.day); ss += r * r; }
+  const sd = Math.sqrt(ss / Math.max(1, n - 2));
+  const span = Math.max(1, win[win.length - 1].day - win[0].day);
+
+  return {
+    sd, n, span,
+    /** Half the band's height, `days` past the last session. */
+    halfWidth(days) { return z * sd * Math.sqrt(1 + Math.max(0, days) / span); },
+  };
+}
+
+/**
  * The next milestone on the bar, and what it would take to get there.
  *
  * A weight milestone has to be converted before it can be dated: the trend is

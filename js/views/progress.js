@@ -4,7 +4,7 @@
 
 import { el, statTile, segmented, details, disclose, milestoneTrack, emptyState, chevron, accentDot, prBadge, tap } from '../ui.js';
 import { runway } from '../insights.js';
-import { progressionChart, sparkline, setsMeter, weeklySetsChart } from '../charts.js';
+import { progressionChart, readinessLane, sparkline, setsMeter, weeklySetsChart } from '../charts.js';
 import { fmt, fmtWeight, fmtSigned, fmtCompact, relativeDate, formatDate, dayNumber } from '../metrics.js';
 import * as ui from '../core/uistate.js';
 
@@ -12,6 +12,7 @@ import * as ui from '../core/uistate.js';
 // reload puts you back where you were rather than at the top of the list.
 const SELECTED = 'progress.selectedId';
 const MODE = 'progress.listMode';
+const RANGE = 'progress.range';
 
 const selected = () => ui.get(SELECTED, null);
 const listMode = () => ui.get(MODE, 'cards');
@@ -186,14 +187,55 @@ function detailView(st, ctx) {
   const run = runway(st, settings, { todayIso: ctx.today });
   if (run) root.append(milestoneTrack(run));
 
+  // How far back the chart looks. Only offer a window the lift has history to
+  // fill — "1 year" on three weeks of training is a joke at the user's expense.
+  const spanDays = st.sessions.length
+    ? st.sessions[st.sessions.length - 1].day - st.sessions[0].day : 0;
+  const RANGES = [
+    { value: '56', label: '8 wks', days: 56 },
+    { value: '182', label: '6 mths', days: 182 },
+    { value: '365', label: '1 yr', days: 365 },
+  ].filter((r) => spanDays > r.days);
+  const chosen = ui.get(RANGE, 'all');
+  const range = RANGES.find((r) => r.value === chosen) ? Number(chosen) : null;
+
   const chartHost = el('div', { class: 'chart-card' });
+  let drawn = false;
   const paintChart = () => {
     const width = chartHost.clientWidth || 340;
-    chartHost.replaceChildren(progressionChart(st, settings, { width, height: 220 }));
+    const parts = [progressionChart(st, settings, {
+      width, height: 220, range, todayIso: ctx.today, animate: !drawn,
+    })];
+    // Only offered once there is more history than the shortest window.
+    if (RANGES.length) {
+      parts.unshift(el('div', { class: 'chart-range' }, [segmented({
+        label: 'How far back', value: range === null ? 'all' : String(range),
+        options: [...RANGES.map((r) => ({ value: r.value, label: r.label })), { value: 'all', label: 'All' }],
+        onChange: (v) => { ui.set(RANGE, v); ctx.refresh(); },
+      })]));
+    }
+    chartHost.replaceChildren(...parts);
+    drawn = true;
   };
   root.append(chartHost);
   requestAnimationFrame(paintChart);
   ctx.onResize(paintChart);
+
+  // The fatigue model, as a shape rather than as today's scalar.
+  const laneHost = el('div', { class: 'chart-card' });
+  let laneDrawn = false;
+  const paintLane = () => {
+    const lane = readinessLane(st, settings, {
+      width: laneHost.clientWidth || 340, height: 104, todayIso: ctx.today,
+    });
+    if (!lane) { laneHost.remove(); return; }
+    if (laneDrawn) lane.classList.add('no-anim');
+    laneHost.replaceChildren(lane);
+    laneDrawn = true;
+  };
+  root.append(laneHost);
+  requestAnimationFrame(paintLane);
+  ctx.onResize(paintLane);
 
   root.append(el('div', { class: 'kpi-row kpi-row-2' }, [
     statTile({ label: 'Best ever', value: fmt(st.bestAdj, 1), unit: 'kg',
@@ -219,7 +261,7 @@ function detailView(st, ctx) {
   const volHost = el('div', { class: 'chart-card' }, [setsMeter(st)]);
   const paintVol = () => {
     const width = volHost.clientWidth || 340;
-    volHost.replaceChildren(setsMeter(st), weeklySetsChart(st, { width, height: 140 }));
+    volHost.replaceChildren(setsMeter(st), weeklySetsChart(st, { width, height: 140, todayIso: ctx.today }));
   };
   root.append(volHost);
   requestAnimationFrame(paintVol);
