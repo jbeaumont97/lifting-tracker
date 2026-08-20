@@ -519,6 +519,123 @@ for (const open of [false, true]) {
     && view.querySelector('.row-note').textContent === 'belt on, felt fast');
 }
 
+/* -------------------------------------------- 6e. paths to progression */
+
+const metrics = await import('../js/metrics.js');
+
+/** Replace one lift's history with a steady climb, so the fit is worth using. */
+function giveHistory(exerciseId, { weeks = 14, from = 72.5, perWeek = 1.15 } = {}) {
+  const entries = store.getEntries().filter((e) => e.exerciseId !== exerciseId);
+  let seq = 9000;
+  for (let w = weeks - 1; w >= 0; w--) {
+    for (const offset of [0, 3]) {
+      entries.push({
+        id: `h-${seq}`, date: metrics.isoAddDays(TODAY, -(w * 7 + offset)),
+        exerciseId, weight: Math.round((from + (weeks - 1 - w) * perWeek) / 2.5) * 2.5,
+        reps: 5, sets: 3, rir: offset ? 2 : 1, notes: '', seq: seq++,
+      });
+    }
+  }
+  store.importJSON(JSON.stringify({
+    exercises: store.getExercises(), entries, settings: store.getSettings(),
+  }));
+  select.invalidate();
+}
+
+// --- a thin fit publishes a destination but refuses to date it ---
+{
+  reset();
+  const c = ctx();
+  const st = c.stats.find((s) => s.entryCount > 0);
+  openExercise(st.exercise.id);
+  const view = renderProgress(ctx({ route: 'progress' }));
+
+  const track = view.querySelector('.milestone');
+  ok('the next milestone is always named', !!track);
+  ok('it is a round number on the bar', /\d+\s*kg/.test(track.querySelector('.milestone-value').textContent));
+  ok('a thin fit says why it cannot be dated',
+    /Needs a few more sessions/.test(track.querySelector('.milestone-eta').textContent),
+    track.querySelector('.milestone-eta').textContent);
+  ok('and the seed really is a thin fit', st.trendReliable === false);
+  clearSelection();
+
+  // The planner stays quiet rather than repeating "cannot say yet" per card.
+  const plan = renderPlan(ctx());
+  ok('no runway on the cards while nothing can be dated',
+    plan.querySelectorAll('.milestone').length === 0);
+}
+
+// --- a real fit turns the projection into a destination and a date ---
+{
+  reset();
+  const ex = store.getExercises()[0];
+  giveHistory(ex.id);
+  const c = ctx();
+  const st = c.stats.find((s) => s.exercise.id === ex.id);
+  ok('fourteen weeks of training is a fit worth extrapolating', st.trendReliable === true);
+
+  openExercise(ex.id);
+  const detail = renderProgress(ctx({ route: 'progress' }));
+  const eta = detail.querySelector('.milestone-eta').textContent;
+  ok('the milestone is now dated', /at this rate/.test(eta), eta);
+  ok('and counted in sessions, not just days', /session/.test(eta), eta);
+  const bar = detail.querySelector('.milestone-fill');
+  ok('the track shows how far along the climb you are', /width:\d/.test(bar.getAttribute('style') || ''));
+  clearSelection();
+
+  openCard(ex.id);
+  const plan = renderPlan(ctx());
+  const compact = plan.querySelectorAll('.milestone.is-compact');
+  ok('the planner card now carries a runway', compact.length === 1, String(compact.length));
+  ok('and it names the same target',
+    compact[0].querySelector('.milestone-value').textContent
+      === detail.querySelector('.milestone-value').textContent);
+
+  // Both screens must date it from the app's `today`, not the wall clock.
+  ok('the planner and the lift detail agree on the date',
+    compact[0].querySelector('.milestone-eta').textContent === eta,
+    `plan: ${compact[0].querySelector('.milestone-eta').textContent}\n     detail: ${eta}`);
+}
+
+// --- what a lift is worth today, once a layoff has taken something off it ---
+{
+  reset();
+  const ex = store.getExercises()[0];
+  // Train hard for months, then stop for three of them.
+  giveHistory(ex.id, { weeks: 14 });
+  const shifted = store.getEntries().map((e) => (e.exerciseId === ex.id
+    ? { ...e, date: metrics.isoAddDays(e.date, -90) } : e));
+  store.importJSON(JSON.stringify({
+    exercises: store.getExercises(), entries: shifted, settings: store.getSettings(),
+  }));
+  select.invalidate();
+
+  const st = ctx().stats.find((s) => s.exercise.id === ex.id);
+  ok('the lift reads as detraining', st.readiness.phase.key === 'detrained', st.readiness.phase.key);
+
+  openExercise(ex.id);
+  const view = renderProgress(ctx({ route: 'progress' }));
+  const note = view.querySelector('.baseline-note');
+  ok('a detrained lift says what it is worth today', !!note, 'readiness.baseline is still invisible');
+  ok('and that is less than what was last lifted',
+    st.readiness.baseline < st.lastAdj - 1e-9);
+  ok('the note gives the number', /\d+\.\d\s*kg/.test(note.textContent), note.textContent);
+  ok('and says how much time off cost', /% off it/.test(note.textContent), note.textContent);
+  clearSelection();
+}
+
+{
+  // A lift trained this week must not be told it has lost anything.
+  reset();
+  const ex = store.getExercises()[0];
+  giveHistory(ex.id);
+  openExercise(ex.id);
+  const view = renderProgress(ctx({ route: 'progress' }));
+  ok('a lift in regular training gets no layoff note',
+    view.querySelectorAll('.baseline-note').length === 0);
+  clearSelection();
+}
+
 /* ------------------------------------- 7. view state survives a reload */
 
 {

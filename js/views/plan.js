@@ -9,7 +9,8 @@
 // also get the full trade-off grid the spreadsheet drew, colour-banded against
 // your target.
 
-import { el, stepper, segmented, bandChip, toast, details, disclose, chevron, accentDot, tap } from '../ui.js';
+import { el, stepper, segmented, bandChip, toast, details, disclose, milestoneTrack, chevron, accentDot, tap } from '../ui.js';
+import { runway } from '../insights.js';
 import * as ui from '../core/uistate.js';
 import {
   planFor,
@@ -250,6 +251,12 @@ function card(stats, ctx, settings) {
       }),
     ]));
   }
+
+  // Where this lift is heading, with somewhere to be heading to. Only when the
+  // fit is good enough to date — a milestone with "cannot say yet" under it on
+  // all seven cards is noise, and the Progress screen carries that case.
+  const run = runway(stats, settings, { todayIso: ctx.today });
+  if (run && run.eta && !run.eta.tooFar) body.append(milestoneTrack(run, { compact: true }));
 
   const actions = el('div', { class: 'card-actions' }, [
     el('button', {

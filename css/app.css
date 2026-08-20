@@ -1263,3 +1263,48 @@ h1 .accent-dot { width: 11px; height: 11px; margin-right: 9px; vertical-align: m
   font-size: var(--text-2xs); font-weight: var(--fw-semi); color: var(--text-secondary);
   font-variant-numeric: tabular-nums; white-space: nowrap;
 }
+
+/* -------------------------------------------------------------- milestone */
+
+/* A destination for the trend line. The projections were always there; what
+   was missing was something to be projecting toward. */
+.milestone {
+  display: flex; flex-direction: column; gap: var(--space-2);
+  padding: var(--space-4); border-radius: var(--radius-sm);
+  background: var(--surface-2); border: 1px solid var(--border);
+}
+.milestone.is-compact { padding: var(--space-2) var(--space-3); gap: var(--space-1); }
+.milestone-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); }
+.milestone-label {
+  font-size: var(--text-2xs); font-weight: var(--fw-semi); color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.05em;
+}
+.milestone-value {
+  font-size: var(--text-xl); font-weight: var(--fw-bold); color: var(--text-primary);
+  font-variant-numeric: tabular-nums; line-height: 1;
+}
+.milestone-value small { font-size: var(--text-2xs); font-weight: var(--fw-medium); color: var(--muted); }
+.milestone.is-compact .milestone-value { font-size: var(--text-lg); }
+.milestone-track {
+  height: 6px; border-radius: var(--radius-pill);
+  background: var(--neutral-tint); overflow: hidden;
+}
+.milestone-fill {
+  display: block; height: 100%; border-radius: var(--radius-pill);
+  background: var(--series-1);
+  transition: width var(--dur-slow) var(--ease-out);
+}
+.milestone-foot {
+  display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3);
+  font-size: var(--text-2xs); color: var(--text-secondary);
+}
+.milestone-from { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.milestone-eta { text-align: right; }
+
+/* What a lift is worth today, when that is not what you last lifted. Only ever
+   shown while a layoff is actually discounting it. */
+.baseline-note {
+  display: flex; align-items: baseline; gap: var(--space-2);
+  font-size: var(--text-xs); color: var(--warn-ink);
+}
+.baseline-note strong { font-variant-numeric: tabular-nums; font-weight: var(--fw-semi); }

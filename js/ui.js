@@ -3,6 +3,7 @@
 // dropdowns, and numeric keypads on every number field.
 
 import { el } from './charts.js';
+import { fmtWeight, formatDate } from './metrics.js';
 export { el };
 
 /** A labelled number field with big decrement/increment buttons. */
@@ -203,6 +204,60 @@ export function bandChip(band, { compact = false } = {}) {
     el('span', { class: 'band-glyph', 'aria-hidden': 'true', text: band.glyph }),
     compact ? null : el('span', { text: band.label }),
   ]);
+}
+
+/* -------------------------------------------------------------- milestone */
+
+/**
+ * The next round number, and what it would take to get there.
+ *
+ * The app has always had the maths for this — a fitted trend and a median
+ * training interval — and has only ever shown it as "Projected +12 wks", a
+ * number with no destination attached. Nobody trains toward 118.3. They train
+ * toward a hundred on the bar.
+ *
+ * The estimate is shown only when metrics.js considers the fit worth
+ * extrapolating; otherwise the milestone still appears, with the reason it
+ * cannot be dated yet. A destination with an honest "not yet knowable" beats a
+ * confident date built on two sessions.
+ */
+export function milestoneTrack(run, { compact = false } = {}) {
+  if (!run || !run.milestone) return null;
+  const { milestone: m, eta } = run;
+  const from = m.value - m.step;
+  const pct = Math.max(2, Math.min(100, run.progress * 100));
+
+  const detail = !eta
+    ? 'Needs a few more sessions before the rate is worth reading.'
+    : eta.reached ? 'Within reach of your last session.'
+    : eta.tooFar ? 'A long way off at the rate you are going.'
+    : eta.sessions
+      ? `About ${plural(eta.sessions, 'session')} at this rate — around ${formatDate(eta.date)}.`
+      : `About ${plural(eta.days, 'day')} at this rate — around ${formatDate(eta.date)}.`;
+
+  return el('div', { class: `milestone${compact ? ' is-compact' : ''}` }, [
+    el('div', { class: 'milestone-head' }, [
+      el('span', { class: 'milestone-label', text: 'Next milestone' }),
+      el('span', { class: 'milestone-value' }, [fmtWeight(m.value), el('small', { text: ' kg' })]),
+    ]),
+    el('div', {
+      class: 'milestone-track', role: 'meter',
+      'aria-valuenow': String(Math.round(run.progress * 100)),
+      'aria-valuemin': '0', 'aria-valuemax': '100',
+      'aria-label': `Progress from ${fmtWeight(from)} to ${fmtWeight(m.value)} kg`,
+    }, [
+      el('span', { class: 'milestone-fill', style: `width:${pct}%` }),
+    ]),
+    el('div', { class: 'milestone-foot' }, [
+      el('span', { class: 'milestone-from', text: `${fmtWeight(m.from)} kg best` }),
+      el('span', { class: 'milestone-eta', text: detail }),
+    ]),
+  ]);
+}
+
+function plural(n, word) {
+  const v = Math.max(1, Math.round(n));
+  return `${v} ${word}${v === 1 ? '' : 's'}`;
 }
 
 /* ------------------------------------------------------------------ toast */
