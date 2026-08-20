@@ -1357,3 +1357,93 @@ h1 .accent-dot { width: 11px; height: 11px; margin-right: 9px; vertical-align: m
 .key-mark.key-milestone {
   background: repeating-linear-gradient(90deg, var(--series-1) 0 5px, transparent 5px 9px); opacity: 0.8;
 }
+
+/* ========================================================== whole body */
+
+/* --- consistency: every day, shaded by the work it carried --- */
+.heat-wrap { display: flex; flex-direction: column; gap: var(--space-3); }
+.heat { display: flex; gap: var(--space-1); overflow-x: auto; scrollbar-width: none; }
+.heat::-webkit-scrollbar { display: none; }
+.heat-days {
+  display: grid; grid-template-rows: repeat(7, 12px); gap: 2px; flex: none;
+  font-size: var(--text-3xs); color: var(--muted); align-items: center;
+}
+.heat-cells {
+  display: grid; grid-template-rows: repeat(7, 12px); grid-auto-flow: column;
+  grid-auto-columns: 12px; gap: 2px; flex: none;
+}
+.heat-cell { display: block; width: 12px; height: 12px; border-radius: 3px; background: var(--neutral-tint); }
+.heat-cell.is-blank { background: none; }
+
+/* A magnitude, so one hue getting darker — never a rainbow. The date and set
+   count ride on every cell, so the shade is never the only thing saying it. */
+.heat-cell.is-l0 { background: var(--neutral-tint); }
+.heat-cell.is-l1 { background: color-mix(in srgb, var(--series-1) 26%, var(--surface-2)); }
+.heat-cell.is-l2 { background: color-mix(in srgb, var(--series-1) 48%, var(--surface-2)); }
+.heat-cell.is-l3 { background: color-mix(in srgb, var(--series-1) 72%, var(--surface-2)); }
+.heat-cell.is-l4 { background: var(--series-1); }
+
+.heat-key {
+  display: flex; align-items: center; gap: var(--space-1);
+  font-size: var(--text-3xs); color: var(--muted);
+}
+.heat-key span:first-child { margin-right: var(--space-1); }
+.heat-key span:last-child { margin-left: var(--space-1); }
+
+/* --- balance: where the work went --- */
+.balance-wrap { display: flex; flex-direction: column; gap: var(--space-3); }
+.balance { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.balance-row {
+  display: grid; grid-template-columns: minmax(78px, 1fr) 2fr auto auto;
+  align-items: center; gap: var(--space-3);
+}
+.balance-name {
+  display: flex; align-items: center; gap: var(--space-2); min-width: 0;
+  font-size: var(--text-2xs); font-weight: var(--fw-medium); color: var(--text-primary);
+}
+.balance-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.balance-track {
+  position: relative; height: 8px; border-radius: var(--radius-pill);
+  background: var(--neutral-tint); overflow: visible;
+}
+.balance-fill {
+  display: block; height: 100%; border-radius: var(--radius-pill); background: var(--series-1);
+  transition: width var(--dur-slow) var(--ease-out);
+}
+.balance-fill.is-under { background: color-mix(in srgb, var(--series-1) 55%, var(--surface-2)); }
+.balance-fill.is-over { background: var(--warning); }
+.balance-mark {
+  position: absolute; top: -3px; bottom: -3px; width: 2px; border-radius: 1px;
+  background: var(--axis);
+}
+.balance-count {
+  font-size: var(--text-2xs); font-weight: var(--fw-semi); color: var(--text-secondary);
+  font-variant-numeric: tabular-nums; min-width: 20px; text-align: right;
+}
+
+/* --- the PR timeline --- */
+.pr-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.pr-event {
+  display: grid; grid-template-columns: auto 1fr auto; align-items: baseline;
+  gap: var(--space-1) var(--space-3); padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--border);
+}
+.pr-event:last-child { border-bottom: 0; }
+.pr-when {
+  grid-column: 1 / -1; font-size: var(--text-3xs); color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.05em; order: -1;
+}
+.pr-lift {
+  display: flex; align-items: center; gap: var(--space-2);
+  font-size: var(--text-sm); font-weight: var(--fw-semi); color: var(--text-primary);
+}
+.pr-set { font-size: var(--text-2xs); color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.pr-gain {
+  font-size: var(--text-2xs); font-weight: var(--fw-semi); color: var(--good-ink);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+
+/* The Lifts / Body switch sits above everything on the Progress tab. */
+.view-switch { margin-bottom: var(--space-4); }
+.view-switch .segmented { width: 100%; }
+.view-switch .seg { flex: 1; }

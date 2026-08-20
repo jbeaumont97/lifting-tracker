@@ -3,7 +3,7 @@
 // a 2px surface ring, solid hairline gridlines, a 10% area wash, and labels only
 // on the points that carry the story (last, best, projection, target).
 
-import { fmt, fmtWeight, formatDate, formatDateShort, dayNumber, isoAddDays, isoToday } from './metrics.js';
+import { fmt, fmtWeight, fmtCompact, formatDate, formatDateShort, dayNumber, isoAddDays, isoToday } from './metrics.js';
 import { projectionBand, runway, readinessCurve } from './insights.js';
 
 const SVG = 'http://www.w3.org/2000/svg';
@@ -745,4 +745,176 @@ function readinessLabel(stats, curve, ready, here) {
   const now = ((curve[Math.min(curve.length - 1, here)].factor - 1) * 100).toFixed(1);
   return `${stats.exercise.name} readiness against your last session. Today, day ${here}, ${now}%.`
     + (ready ? ` Fit to train hard again on day ${ready.daysSince}.` : '');
+}
+
+/* ============================================================ whole body */
+
+/**
+ * Weekly tonnage across every lift.
+ *
+ * The app has counted volume per lift since the spreadsheet; what it has never
+ * shown is the total, which is the number that says whether a week was heavy or
+ * light. A median line rather than a target, because there is no such thing as
+ * a correct tonnage — only more or less than you usually do.
+ */
+export function tonnageChart(series, { width = 340, height = 150 } = {}) {
+  const fig = el('figure', { class: 'chart chart-sm' });
+  if (!series.length) return null;
+
+  const pad = { t: 16, r: 10, b: 22, l: 34 };
+  const w = Math.max(240, width);
+  const plotW = w - pad.l - pad.r;
+  const plotH = height - pad.t - pad.b;
+
+  const vols = series.map((b) => b.volume);
+  const worked = vols.filter((v) => v > 0).sort((a, b) => a - b);
+  const mid = worked.length
+    ? (worked.length % 2 ? worked[(worked.length - 1) / 2]
+      : (worked[worked.length / 2 - 1] + worked[worked.length / 2]) / 2)
+    : 0;
+
+  const { ticks, lo, hi } = niceTicks(0, Math.max(...vols, 1), 3);
+  const y = (v) => pad.t + plotH - ((v - lo) / (hi - lo || 1)) * plotH;
+
+  const svg = svgEl('svg', {
+    viewBox: `0 0 ${w} ${height}`, width: '100%', height, class: 'chart-svg',
+    role: 'img', 'aria-label': `Total weight moved per week over the last ${series.length} weeks`,
+  });
+
+  for (const t of ticks) {
+    if (t < lo - 1e-9 || t > hi + 1e-9) continue;
+    svg.append(svgEl('line', { x1: pad.l, x2: pad.l + plotW, y1: y(t), y2: y(t), class: 'grid' }));
+    svg.append(text(fmtCompact(t), { x: pad.l - 5, y: y(t) + 3.5, class: 'tick', 'text-anchor': 'end' }));
+  }
+
+  const band = plotW / series.length;
+  const barW = Math.min(22, band - 5);
+  for (const [i, b] of series.entries()) {
+    const bx = pad.l + i * band + (band - barW) / 2;
+    const top = y(b.volume);
+    const h = Math.max(b.volume > 0 ? 2 : 0, pad.t + plotH - top);
+    if (h > 0) {
+      svg.append(svgEl('path', {
+        d: roundedTop(bx, top, barW, h, 3),
+        class: i === series.length - 1 ? 'bar bar-current' : 'bar',
+        style: `animation-delay:${i * 30}ms`,
+      }));
+    }
+    if ((series.length - 1 - i) % 3 === 0) {
+      svg.append(text(i === series.length - 1 ? 'now' : formatDateShort(b.end), {
+        x: bx + barW / 2, y: height - 7, class: 'tick', 'text-anchor': 'middle',
+      }));
+    }
+  }
+
+  if (mid > 0) {
+    svg.append(svgEl('line', { x1: pad.l, x2: pad.l + plotW, y1: y(mid), y2: y(mid), class: 'ref-target' }));
+    svg.append(text(`usual ${fmtCompact(mid)}`, {
+      x: pad.l + plotW, y: y(mid) - 5, class: 'tick', 'text-anchor': 'end',
+    }));
+  }
+  svg.append(svgEl('line', { x1: pad.l, x2: pad.l + plotW, y1: pad.t + plotH, y2: pad.t + plotH, class: 'axis' }));
+
+  fig.append(el('div', { class: 'chart-plot' }, [svg]));
+  fig.append(el('figcaption', { class: 'chart-cap', text: 'Total weight moved each week, every lift together. The line is your usual week.' }));
+  return fig;
+}
+
+/**
+ * Every day of the last few months, shaded by how much work it carried.
+ *
+ * Data, not a streak: there is no counter, nothing to break, and a rest day is
+ * drawn as a rest day rather than as a gap in something. One hue getting darker
+ * with the work, because this is a magnitude — and every cell carries its date
+ * and set count in words, so nothing here rests on the shade alone.
+ */
+export function consistencyGrid(days, { weekdayLabels = true } = {}) {
+  if (!days.length) return null;
+
+  const worked = days.filter((d) => d.sets > 0).map((d) => d.sets).sort((a, b) => a - b);
+  const q = (f) => (worked.length ? worked[Math.min(worked.length - 1, Math.floor(worked.length * f))] : 0);
+  const cuts = [q(0.25), q(0.5), q(0.75)];
+  const level = (n) => {
+    if (!(n > 0)) return 0;
+    if (n <= cuts[0]) return 1;
+    if (n <= cuts[1]) return 2;
+    if (n <= cuts[2]) return 3;
+    return 4;
+  };
+
+  // Monday-first columns, so a week reads as a week.
+  const weekdayOf = (iso) => (new Date(`${iso}T00:00:00Z`).getUTCDay() + 6) % 7;
+  const cells = [];
+  for (let i = 0; i < weekdayOf(days[0].date); i++) cells.push(null);
+  cells.push(...days);
+
+  const grid = el('div', { class: 'heat', role: 'img', 'aria-label': heatLabel(days) });
+  if (weekdayLabels) {
+    const rows = el('div', { class: 'heat-days', 'aria-hidden': 'true' });
+    for (const d of ['M', '', 'W', '', 'F', '', '']) rows.append(el('span', { text: d }));
+    grid.append(rows);
+  }
+  const cellHost = el('div', { class: 'heat-cells' });
+  for (const c of cells) {
+    if (!c) { cellHost.append(el('i', { class: 'heat-cell is-blank', 'aria-hidden': 'true' })); continue; }
+    cellHost.append(el('i', {
+      class: `heat-cell is-l${level(c.sets)}`,
+      title: `${formatDate(c.date)} — ${c.sets ? `${c.sets} set${c.sets === 1 ? '' : 's'} across ${c.lifts} lift${c.lifts === 1 ? '' : 's'}` : 'rest'}`,
+    }));
+  }
+  grid.append(cellHost);
+
+  const key = el('div', { class: 'heat-key' }, [
+    el('span', { text: 'Rest' }),
+    ...[0, 1, 2, 3, 4].map((l) => el('i', { class: `heat-cell is-l${l}`, 'aria-hidden': 'true' })),
+    el('span', { text: 'Hardest' }),
+  ]);
+  return el('div', { class: 'heat-wrap' }, [grid, key]);
+}
+
+function heatLabel(days) {
+  const trained = days.filter((d) => d.sets > 0).length;
+  const sets = days.reduce((n, d) => n + d.sets, 0);
+  return `${trained} training days out of the last ${days.length}, ${sets} working sets in total.`;
+}
+
+/**
+ * Where the work went, lift by lift, against what each one asks for.
+ *
+ * Per lift and not per muscle, and the caption says so: exercises carry no
+ * muscle-group taxonomy, so anything claiming to weigh push against pull would
+ * be inventing the mapping rather than reading it.
+ */
+export function balanceBars(rows, { weeks = 4 } = {}) {
+  const worked = rows.filter((r) => r.sets > 0);
+  if (!worked.length) return null;
+  const max = Math.max(...worked.map((r) => Math.max(r.sets, r.target || 0)), 1);
+
+  const list = el('ul', { class: 'balance' });
+  for (const r of worked) {
+    const glyph = r.status === 'under' ? '↓' : r.status === 'over' ? '↑' : '✓';
+    list.append(el('li', { class: 'balance-row' }, [
+      el('span', { class: 'balance-name' }, [accentDotFor(r.exerciseId), el('span', { text: r.name })]),
+      el('div', { class: 'balance-track' }, [
+        el('span', { class: `balance-fill is-${(r.status || 'none').replace(' ', '-')}`, style: `width:${(r.sets / max) * 100}%` }),
+        r.target ? el('i', { class: 'balance-mark', style: `left:${Math.min(100, (r.target / max) * 100)}%`, title: `${r.target} sets asked for` }) : null,
+      ]),
+      el('span', { class: 'balance-count', text: `${r.sets}` }),
+      r.status ? el('span', { class: `status-chip is-${r.status.replace(' ', '-')}` }, [
+        el('span', { class: 'status-glyph', 'aria-hidden': 'true', text: glyph }),
+        el('span', { text: r.status === 'on target' ? 'On target' : r.status === 'under' ? 'Under' : 'Over' }),
+      ]) : null,
+    ]));
+  }
+  return el('div', { class: 'balance-wrap' }, [
+    list,
+    el('p', { class: 'chart-cap', text: `Working sets over the last ${weeks} weeks against what each lift asks for. Per lift, not per muscle — the app does not know which muscles a lift trains.` }),
+  ]);
+}
+
+/** The accent dot, without importing ui.js and making a cycle of it. */
+function accentDotFor(id) {
+  let h = 0;
+  for (const ch of String(id)) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return el('span', { class: `accent-dot accent-${h % 8}`, 'aria-hidden': 'true' });
 }

@@ -761,6 +761,85 @@ const insights = await import('../js/insights.js');
   ok('a resize repaint does not replay it', again.classList.contains('no-anim'));
 }
 
+/* ------------------------------------------- 6g. the whole-body screen */
+
+{
+  reset();
+  const ex = store.getExercises()[0];
+  giveHistory(ex.id);
+  const cfg = store.getSettings();
+  const all = ctx().stats;
+
+  // --- the analytics behind it ---
+  const tons = insights.tonnageSeries(all, { weeks: 12, todayIso: TODAY });
+  ok('tonnage is one bucket per week', tons.length === 12);
+  ok('and the recent weeks carry work', tons.slice(-4).every((b) => b.volume > 0));
+
+  const days = insights.consistency(all, { days: 112, todayIso: TODAY });
+  ok('consistency covers every day, trained or not', days.length === 112);
+  ok('a rest day is a zero rather than a gap', days.some((d) => d.sets === 0));
+  ok('and it ends today', days[days.length - 1].date === TODAY);
+
+  const bal = insights.balance(all, { weeks: 4, todayIso: TODAY });
+  ok('balance covers every lift', bal.length === all.length);
+
+  // --- the screen ---
+  clearSelection();
+  uistate.set('progress.view', 'body');
+  const view = renderProgress(ctx({ route: 'progress' }));
+  await settle();
+
+  ok('the whole-body screen renders', view.classList.contains('view-body'));
+  ok('the tonnage chart is drawn', view.querySelectorAll('.chart-svg').length >= 1);
+  ok('the consistency grid is drawn', view.querySelectorAll('.heat-cells').length === 1);
+  ok('one cell per day', view.querySelectorAll('.heat-cell').length >= 112);
+  ok('the balance bars are drawn', view.querySelectorAll('.balance-row').length > 0);
+  ok('the PR timeline is drawn', view.querySelectorAll('.pr-event').length > 0);
+
+  // Shade is a magnitude, and never the only thing saying what a day was.
+  const cells = view.querySelectorAll('.heat-cell').filter((n) => !n.classList.contains('is-blank'));
+  ok('every day says in words what it was',
+    cells.filter((n) => n.hasAttribute('title')).length >= 112,
+    'a day identified by shade alone is unreadable');
+  ok('a rest day says rest', cells.some((n) => /rest/.test(n.getAttribute('title') || '')));
+  ok('a trained day says how many sets',
+    cells.some((n) => /\d+ sets? across \d+ lift/.test(n.getAttribute('title') || '')));
+  ok('the grid describes itself for a screen reader',
+    /training days out of the last 112/.test(view.querySelector('.heat').getAttribute('aria-label') || ''),
+    view.querySelector('.heat').getAttribute('aria-label'));
+
+  // Balance carries a glyph and a word, not just a bar length.
+  ok('each lift gets a verdict in words',
+    view.querySelectorAll('.balance-row .status-chip').length === view.querySelectorAll('.balance-row').length);
+  ok('and the screen says the balance is per lift, not per muscle',
+    /not per muscle/.test(view.textContent), 'the missing taxonomy has to be stated');
+
+  // The switch, and that it is remembered.
+  const seg = view.querySelector('.view-switch');
+  ok('the Lifts / Everything switch is on the screen', !!seg);
+  ok('the whole-body mode is the one selected',
+    seg.querySelectorAll('.seg').find((n) => n.getAttribute('aria-selected') === 'true').textContent === 'Everything');
+
+  uistate.set('progress.view', 'lifts');
+  const back = renderProgress(ctx({ route: 'progress' }));
+  ok('switching back returns to the lift list', back.classList.contains('view-progress'));
+  ok('and the switch is still offered there', back.querySelectorAll('.view-switch').length === 1);
+}
+
+{
+  // Nothing logged: the whole-body screen must invite rather than draw empties.
+  reset();
+  store.clearAll();
+  select.invalidate();
+  uistate.set('progress.view', 'body');
+  const view = renderProgress(ctx({ route: 'progress' }));
+  await settle();
+  ok('an empty log gets an invitation, not four blank charts',
+    view.textContent.includes('Nothing to show yet')
+    && view.querySelectorAll('.heat-cells').length === 0);
+  uistate.set('progress.view', 'lifts');
+}
+
 /* ------------------------------------- 7. view state survives a reload */
 
 {

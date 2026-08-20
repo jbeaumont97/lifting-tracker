@@ -177,24 +177,50 @@ class Element_ extends Node_ {
   getBoundingClientRect() { return { left: 0, top: 0, width: 360, height: 220, right: 360, bottom: 220 }; }
 }
 
-/** Supports the selector shapes the app actually uses: tag, .class, #id, [attr], and comma lists. */
+/**
+ * Supports the selector shapes the app actually uses: tag, .class, #id, [attr],
+ * descendant chains, and comma lists.
+ *
+ * Descendants matter more than they look. Without them `.a .b` matched nothing,
+ * which is not an error — it is an empty NodeList, so a test asserting one of
+ * those is absent passes for the wrong reason and never says so.
+ */
 function matches(node, selector) {
-  return String(selector).split(',').some((partRaw) => {
-    const part = partRaw.trim();
-    if (!part) return false;
-    return part.split(/(?=[.#[])/).every((tok) => {
-      if (!tok) return true;
-      if (tok.startsWith('.')) return node.classList.contains(tok.slice(1));
-      if (tok.startsWith('#')) return node.getAttribute('id') === tok.slice(1);
-      if (tok.startsWith('[')) {
-        const m = /^\[([^\]=]+)(?:=["']?([^\]"']*)["']?)?\]$/.exec(tok);
-        if (!m) return false;
-        const has = node.hasAttribute(m[1]);
-        return m[2] === undefined ? has : node.getAttribute(m[1]) === m[2];
-      }
-      if (tok.startsWith(':')) return true;                 // :not(...) etc — treat as a pass
-      return node.localName === tok.toLowerCase();
-    });
+  return String(selector).split(',').some((part) => matchChain(node, part.trim()));
+}
+
+/** The node matches the last step, and some ancestor chain matches the rest. */
+function matchChain(node, sel) {
+  if (!sel) return false;
+  const steps = sel.split(/\s+/).filter(Boolean);
+  if (!matchStep(node, steps[steps.length - 1])) return false;
+  let n = node.parentNode;
+  for (let i = steps.length - 2; i >= 0; i--) {
+    let found = false;
+    while (n && n.nodeType === 1) {
+      const hit = matchStep(n, steps[i]);
+      n = n.parentNode;
+      if (hit) { found = true; break; }
+    }
+    if (!found) return false;
+  }
+  return true;
+}
+
+function matchStep(node, step) {
+  return step.split(/(?=[.#[])/).every((tok) => {
+    if (!tok) return true;
+    if (tok.startsWith('.')) return node.classList.contains(tok.slice(1));
+    if (tok.startsWith('#')) return node.getAttribute('id') === tok.slice(1);
+    if (tok.startsWith('[')) {
+      const m = /^\[([^\]=]+)(?:=["']?([^\]"']*)["']?)?\]$/.exec(tok);
+      if (!m) return false;
+      const has = node.hasAttribute(m[1]);
+      return m[2] === undefined ? has : node.getAttribute(m[1]) === m[2];
+    }
+    if (tok === '*') return true;
+    if (tok.startsWith(':')) return true;                 // :not(...) etc — treat as a pass
+    return node.localName === tok.toLowerCase();
   });
 }
 
