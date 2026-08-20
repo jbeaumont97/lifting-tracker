@@ -610,6 +610,189 @@ function fresh() {
     && M.readinessMaths({ enabled: true, days: null }) === '');
 }
 
+/* ---------------------------------------- 5c. schema v2: the per-set log */
+
+// The whole design rests on one claim: the per-set log is detail hung off the
+// side, and no figure the app publishes comes from it. If that ever stops being
+// true the spreadsheet fixture above stops meaning anything, so it is checked
+// directly rather than assumed.
+{
+  fresh();
+  ok('the document declares schema 2', store.getDoc().schema === 2, String(store.getDoc().schema));
+
+  const cfg = store.getSettings();
+  const withLog = M.allStats(store.getExercises(), store.getEntries(), cfg, TODAY);
+  const stripped = M.allStats(
+    store.getExercises(),
+    store.getEntries().map(({ log, ...rest }) => rest),
+    cfg, TODAY,
+  );
+  // Compare what the app publishes, not the object graph — the stats carry the
+  // entries themselves, so those legitimately differ by the log being on them.
+  const PUBLISHED = ['lastAdj', 'bestAdj', 'lastReps', 'lastSets', 'daysSince', 'prCount',
+    'trendPerWeek', 'trendPerDay', 'trendReliable', 'proj4', 'proj12',
+    'baseTarget', 'nextTarget', 'volume7', 'sets7', 'setStatus', 'sessionCount', 'entryCount'];
+  const published = (list) => list.map((s) => {
+    const row = { name: s.exercise.name };
+    for (const k of PUBLISHED) row[k] = s[k];
+    row.readiness = s.readiness && {
+      fatigue: s.readiness.fatigue, accrual: s.readiness.accrual,
+      retention: s.readiness.retention, factor: s.readiness.factor,
+      target: s.readiness.target, phase: s.readiness.phase.key, severity: s.readiness.severity,
+    };
+    row.plan = (() => { const p = M.planFor(s, cfg, {}); return p.ready ? [p.weight, p.score, p.band.key] : null; })();
+    return row;
+  });
+  ok('stripping the per-set log changes not one published number',
+    JSON.stringify(published(withLog)) === JSON.stringify(published(stripped)),
+    'the log is feeding into scoring, which it must never do');
+}
+
+// --- a v1 document backfills honestly rather than inventing detail ---
+{
+  fresh();
+  const e = store.getEntries().find((x) => x.sets === 3);
+  ok('a pre-v2 block gets one record per set', e && e.log.length === 3, `${e && e.log.length}`);
+  ok('backfilled records carry no timestamp', e.log.every((r) => r.at === null));
+  ok('backfilled records carry no per-set RIR', e.log.every((r) => r.rir === null),
+    'padding with the block RIR would claim every set was equally hard');
+  ok('the block keeps its own RIR regardless', e.rir !== undefined);
+}
+
+// --- logging set by set is the one path that knows when a set happened ---
+{
+  const ex = fresh();
+  const day = '2026-08-18';
+  store.logSet({ exerciseId: ex, date: day, weight: 100, reps: 5, rir: 3 });
+  store.logSet({ exerciseId: ex, date: day, weight: 100, reps: 5, rir: 1 });
+  const row = store.entriesOn(ex, day).find((x) => x.weight === 100 && x.reps === 5);
+
+  ok('the block still merges to one row', row.sets === 2);
+  ok('the block still keeps the hardest RIR', row.rir === 1);
+  ok('but the log keeps each set is own RIR', row.log.map((r) => r.rir).join() === '3,1',
+    row.log.map((r) => r.rir).join());
+  ok('every logged set is timestamped', row.log.every((r) => Number.isFinite(r.at) && r.at > 0));
+  ok('the timestamps do not run backwards', row.log[1].at >= row.log[0].at);
+
+  store.undo();
+  const back = store.entriesOn(ex, day).find((x) => x.weight === 100);
+  ok('undo takes the log record off with the set', back.sets === 1 && back.log.length === 1);
+  ok('and leaves the first set untouched', back.log[0].rir === 3);
+}
+
+// --- the log has to keep describing the block it belongs to ---
+{
+  const ex = fresh();
+  const day = '2026-08-18';
+  store.logSet({ exerciseId: ex, date: day, weight: 70, reps: 8, rir: 2 });
+  const id = store.entriesOn(ex, day).find((x) => x.weight === 70).id;
+
+  store.updateEntry(id, { sets: 4 });
+  let row = store.getEntries().find((x) => x.id === id);
+  ok('editing the count up pads the log', row.log.length === 4);
+  ok('the padding is honest about being padding',
+    row.log.slice(1).every((r) => r.at === null && r.rir === null));
+  ok('and the measured set survives the edit', Number.isFinite(row.log[0].at) && row.log[0].rir === 2);
+
+  store.updateEntry(id, { sets: 2 });
+  row = store.getEntries().find((x) => x.id === id);
+  ok('editing the count down truncates it', row.log.length === 2);
+
+  store.undo();
+  ok('undo restores the log it truncated',
+    store.getEntries().find((x) => x.id === id).log.length === 4);
+}
+
+// --- undo must never hand back a shared array ---
+{
+  const ex = fresh();
+  const day = '2026-08-18';
+  store.logSet({ exerciseId: ex, date: day, weight: 55, reps: 6, rir: 4 });
+  const id = store.entriesOn(ex, day).find((x) => x.weight === 55).id;
+
+  store.deleteEntry(id);
+  store.undo();
+  const back = store.getEntries().find((x) => x.id === id);
+  ok('deleting and undoing restores the log', back && back.log.length === 1 && back.log[0].rir === 4);
+
+  // Mutating the restored entry must not reach into the undo stack's copy.
+  back.log[0].rir = 99;
+  store.deleteEntry(id);
+  store.undo();
+  ok('the restored log is a copy, not a shared reference',
+    store.getEntries().find((x) => x.id === id).log[0].rir === 99);
+}
+
+// --- removeLastSet pops the set that was actually last ---
+{
+  const ex = fresh();
+  const day = '2026-08-18';
+  store.logSet({ exerciseId: ex, date: day, weight: 60, reps: 5, rir: 3 });
+  store.logSet({ exerciseId: ex, date: day, weight: 60, reps: 5, rir: 0 });
+  store.removeLastSet(ex, day);
+  let row = store.entriesOn(ex, day).find((x) => x.weight === 60);
+  ok('removeLastSet drops one log record', row.log.length === 1);
+  ok('and drops the newest one', row.log[0].rir === 3, String(row.log[0].rir));
+  store.undo();
+  row = store.entriesOn(ex, day).find((x) => x.weight === 60);
+  ok('undo puts the record back', row.log.length === 2 && row.log[1].rir === 0);
+}
+
+// --- junk in the log is discarded rather than trusted ---
+{
+  fresh();
+  const doc = JSON.parse(store.exportJSON());
+  const target = doc.entries[0];
+  target.sets = 3;
+  target.log = [
+    { at: -5, rir: 'x', note: 7 },      // nonsense timestamp and RIR
+    'not an object',
+    { at: 1755590400000, rir: 2 },
+    { at: 1, rir: 1 }, { at: 2, rir: 1 },  // more records than there are sets
+  ];
+  const back = store.importJSON(JSON.stringify(doc)).entries.find((e) => e.id === target.id);
+  ok('the log is trimmed to the set count', back.log.length === 3, String(back.log.length));
+  ok('a nonsense timestamp becomes "not measured"', back.log[0].at === null);
+  ok('a nonsense RIR becomes "not known"', back.log[0].rir === null || Number.isNaN(back.log[0].rir));
+  ok('a note is always a string', typeof back.log[0].note === 'string');
+  // The string is skipped rather than kept, so the good record lands at 1.
+  ok('a good record survives intact', back.log[1].at === 1755590400000 && back.log[1].rir === 2,
+    JSON.stringify(back.log));
+}
+
+// --- a v1 backup still imports, and an old client can still read v2 ---
+{
+  fresh();
+  const v1 = JSON.parse(store.exportJSON());
+  v1.schema = 1;
+  for (const e of v1.entries) delete e.log;
+  const after = store.importJSON(JSON.stringify(v1));
+  ok('a v1 backup imports', after.entries.length === v1.entries.length);
+  ok('and comes back with a log', after.entries.every((e) => e.log.length === e.sets));
+
+  // The stale-client guard: everything a pre-v2 build reads is untouched.
+  const v2 = JSON.parse(store.exportJSON());
+  const fields = ['id', 'date', 'exerciseId', 'weight', 'reps', 'sets', 'rir', 'notes', 'seq'];
+  ok('every field an older build reads is still there',
+    v2.entries.every((e) => fields.every((f) => e[f] !== undefined)));
+}
+
+// --- the CSV gains timing without changing its shape ---
+{
+  const ex = fresh();
+  store.logSet({ exerciseId: ex, date: '2026-08-18', weight: 100, reps: 5, rir: 2 });
+  const csv = store.exportCSV();
+  const head = csv.split('\n')[0].split(',');
+  ok('the original CSV columns are untouched',
+    head.slice(0, 7).join() === 'Date,Exercise,Weight (kg),Reps,Sets,RIR,Notes', head.slice(0, 7).join());
+  ok('and timing is added on the end',
+    head.slice(7).join() === 'Started,Finished,Median rest (s)', head.slice(7).join());
+  ok('every row has the same column count',
+    csv.split('\n').every((r) => r.split(',').length === head.length));
+  const measured = csv.split('\n').find((r) => r.includes(',100,5,1,2,'));
+  ok('a measured set reports when it started', /,\d{2}:\d{2},/.test(measured), measured);
+}
+
 /* ------------------------------------- 6. the memo layer (js/core/select.js) */
 
 // The memo is only allowed to change WHEN the maths runs, never WHAT it says.
@@ -730,6 +913,231 @@ const select = await import('../js/core/select.js');
   const expect = col.length ? col.reduce((a, b) => (b.score < a.score ? b : a)) : null;
   close('gentlest picks the same cell the grid would', plan.gentlest?.score ?? 0, expect?.score ?? 0, 1e-12);
   ok('gentlest picks the same rep scheme', (plan.gentlest?.reps ?? 0) === (expect?.reps ?? 0));
+}
+
+/* -------------------------------------------- 7. insights (js/insights.js) */
+
+const I = await import('../js/insights.js');
+
+// Hand-built entries, because these are pure functions and the interesting
+// cases (a measured session, a backfilled one, one of each) are easier to state
+// than to arrange through the store.
+const T0 = Date.parse('2026-08-18T18:00:00Z');
+const at = (mins) => T0 + mins * 60000;
+const rec = (m, rir = null, note = '') => ({ at: m === null ? null : at(m), rir, note });
+function block(o) {
+  const sets = o.sets ?? (o.log ? o.log.length : 1);
+  return {
+    id: o.id ?? 'e1', exerciseId: o.exerciseId ?? 'x', date: o.date ?? '2026-08-18',
+    weight: o.weight ?? 100, reps: o.reps ?? 5, sets, rir: o.rir ?? null,
+    notes: '', seq: o.seq ?? 1,
+    log: o.log ?? Array.from({ length: sets }, () => rec(null)),
+  };
+}
+
+// --- ordering: the reason the timestamps exist at all ---
+{
+  // Squat, bench, squat again. logSet merges the second squat set into the
+  // first squat entry, so entry order alone puts both squats first.
+  const squat = block({ id: 'sq', exerciseId: 'squat', weight: 100, reps: 5, seq: 1,
+    log: [rec(0, 3), rec(6, 2)] });
+  const bench = block({ id: 'bp', exerciseId: 'squat', weight: 60, reps: 8, seq: 2,
+    log: [rec(3, 4)] });
+  const sets = I.sessionSets([squat, bench]);
+  ok('sessionSets flattens to one record per physical set', sets.length === 3, String(sets.length));
+  ok('and puts them in the order they actually happened',
+    sets.map((s) => s.weight).join() === '100,60,100', sets.map((s) => s.weight).join());
+  ok('each set carries its own RIR', sets.map((s) => s.rir).join() === '3,4,2');
+  ok('measured sets are marked as measured', sets.every((s) => s.measured));
+}
+
+{
+  const backfilled = block({ sets: 3, rir: 1 });
+  const sets = I.sessionSets([backfilled]);
+  ok('a backfilled block still yields one record per set', sets.length === 3);
+  ok('and none of them claims to be measured', sets.every((s) => !s.measured && s.at === null));
+  ok('hasTiming is false without timestamps', I.hasTiming(sets) === false);
+  ok('hasPerSetRir is false without per-set RIR', I.hasPerSetRir(sets) === false);
+}
+
+// --- rest ---
+{
+  const sets = I.sessionSets([block({ log: [rec(0), rec(2), rec(4.5), rec(60), rec(62)] })]);
+  const gaps = I.restIntervals(sets).map((r) => r.seconds);
+  ok('rest is the gap between consecutive sets', gaps.join() === '120,150,3330,120', gaps.join());
+  ok('typicalRest is the median of the plausible gaps', I.typicalRest(sets) === 120, String(I.typicalRest(sets)));
+  ok('a 55-minute gap is not counted as rest', I.typicalRest(sets) < 1200);
+  ok('sessionDuration spans first to last', I.sessionDuration(sets) === 62 * 60);
+
+  const mixed = I.sessionSets([block({ log: [rec(0), rec(null), rec(4)] })]);
+  ok('a backfilled set breaks the chain rather than inventing a gap',
+    I.restIntervals(mixed).length === 0, JSON.stringify(I.restIntervals(mixed)));
+  ok('typicalRest says nothing when it knows nothing', I.typicalRest(mixed) === null);
+  ok('sessionDuration still spans the two it did measure', I.sessionDuration(mixed) === 240);
+  ok('one measured set is not a duration', I.sessionDuration(I.sessionSets([block({ log: [rec(0)] })])) === null);
+}
+
+// --- the timeline ---
+{
+  const sets = I.sessionSets([block({ weight: 100, reps: 5, log: [rec(0, 3), rec(3, 2), rec(6, 0)] })]);
+  const tl = I.sessionTimeline(sets, settings);
+  ok('the timeline runs one row per set', tl.length === 3);
+  close('cumulative volume accumulates', tl[2].cumVolume, 1500, 1e-9);
+  ok('the first set has no rest before it', tl[0].restBefore === null);
+  ok('the rest before each later set is measured', tl[1].restBefore === 180 && tl[2].restBefore === 180);
+  close('each set carries its own e1RM', tl[0].e1rm, M.e1rm(100, 5, settings.formula), 1e-9);
+}
+
+// --- the fade inside a session ---
+{
+  const falling = I.sessionTimeline(
+    I.sessionSets([
+      block({ id: 'a', weight: 100, reps: 5, seq: 1, log: [rec(0, 3)] }),
+      block({ id: 'b', weight: 100, reps: 5, seq: 2, log: [rec(3, 2)] }),
+      block({ id: 'c', weight: 100, reps: 4, seq: 3, log: [rec(6, 1)] }),
+      block({ id: 'd', weight: 100, reps: 3, seq: 4, log: [rec(9, 0)] }),
+    ]), settings);
+  const fade = I.withinSessionFade(falling);
+  ok('reps falling away shows as a negative slope', fade.repDrop < 0, String(fade.repDrop));
+  ok('RIR closing on zero shows as a negative slope', fade.rirDrop < 0, String(fade.rirDrop));
+  ok('and the fit is flagged reliable at four sets', fade.reliable === true);
+
+  const steady = I.sessionTimeline(I.sessionSets([block({ reps: 5, log: [rec(0, 2), rec(3, 2), rec(6, 2)] })]), settings);
+  close('a steady session has no rep drop', I.withinSessionFade(steady).repDrop, 0, 1e-9);
+
+  const thin = I.sessionTimeline(I.sessionSets([block({ log: [rec(0, 2), rec(3, 1)] })]), settings);
+  ok('two sets is not a trend', I.withinSessionFade(thin).repDrop === null && thin.length === 2);
+  ok('and it says so', I.withinSessionFade(thin).reliable === false);
+}
+
+// --- severity, read off the real trajectory instead of the block minimum ---
+{
+  const exercise = { setsPerSession: 5 };
+  const sets = I.sessionSets([block({ sets: 5, log: [rec(0, 4), rec(3, 3), rec(6, 2), rec(9, 1), rec(12, 0)] })]);
+  const v2 = I.sessionSeverityV2(sets, exercise);
+  // The block stores min(RIR) = 0, which reads as "taken to failure throughout".
+  const v1 = M.sessionSeverity({ sets: 5, best: { rir: 0 } }, exercise);
+  ok('the block minimum overstates a session that faded to failure', v1 > v2, `${v1} vs ${v2}`);
+  close('the mean RIR of 2 is what severity should see', v2, 1.25 - 0.12 * 2, 1e-9);
+
+  const allHard = I.sessionSets([block({ sets: 3, log: [rec(0, 0), rec(3, 0), rec(6, 0)] })]);
+  ok('a session that really was all-out still scores high',
+    I.sessionSeverityV2(allHard, { setsPerSession: 3 }) > v2);
+  ok('no per-set RIR falls back to a normal session',
+    I.sessionSeverityV2(I.sessionSets([block({ sets: 3 })]), { setsPerSession: 3 }) === 1);
+  ok('severity stays inside its bounds',
+    [0.4, 1.8].every((_, i) => v2 >= 0.4 && v2 <= 1.8));
+}
+
+/* ------------------------------------------------------- paths to progression */
+
+{
+  ok('under a hundred, milestones are every 5 kg', I.milestoneStep(60) === 5 && I.milestoneStep(99) === 5);
+  ok('past a hundred, every 10', I.milestoneStep(100) === 10 && I.milestoneStep(199) === 10);
+  ok('past two hundred, every 25', I.milestoneStep(200) === 25);
+}
+
+const fakeStats = {
+  exercise: { id: 'x', name: 'Bench Press', setsPerSession: 3 },
+  entries: [{ weight: 92.5 }, { weight: 97.5 }, { weight: 95 }],
+  bestAdj: 118.3, lastAdj: 115, lastReps: 5, lastSets: 3,
+  trendPerDay: 0.1, trendReliable: true, gainPerWeek: 0.0075,
+  readiness: { typicalInterval: 3.5 },
+  sessions: [],
+};
+
+{
+  ok('bestWeight is the heaviest ever moved', I.bestWeight(fakeStats) === 97.5);
+  const ms = I.milestones(fakeStats);
+  const w = ms.find((m) => m.kind === 'weight');
+  const e = ms.find((m) => m.kind === 'e1rm');
+  ok('the next milestone on the bar is the next round number up', w.value === 100, String(w.value));
+  ok('it is measured from your best, not your last', w.from === 97.5);
+  ok('the next score milestone rounds by its own magnitude', e.value === 120, String(e.value));
+  ok('a lift with no history has no milestone',
+    I.milestones({ entries: [], bestAdj: null }).length === 0);
+}
+
+{
+  const eta = I.etaTo(120, fakeStats, { todayIso: TODAY });
+  ok('an ETA counts the days at the fitted rate', eta.days === 50, String(eta.days));
+  ok('and turns them into a date', eta.date === M.isoAddDays(TODAY, 50), eta.date);
+  ok('and into sessions, at your own training rhythm', eta.sessions === 14, String(eta.sessions));
+
+  ok('a target already passed reads as reached', I.etaTo(100, fakeStats, { todayIso: TODAY }).reached === true);
+  ok('a provisional fit publishes no ETA at all',
+    I.etaTo(120, { ...fakeStats, trendReliable: false }, { todayIso: TODAY }) === null,
+    'an ETA off two points is a guess wearing a date');
+  ok('a lift going nowhere publishes no ETA',
+    I.etaTo(120, { ...fakeStats, trendPerDay: 0 }, { todayIso: TODAY }) === null);
+  ok('a lift going backwards publishes no ETA',
+    I.etaTo(120, { ...fakeStats, trendPerDay: -0.1 }, { todayIso: TODAY }) === null);
+  const far = I.etaTo(400, fakeStats, { todayIso: TODAY });
+  ok('an absurd horizon is flagged rather than dated', far.tooFar === true && far.date === null);
+}
+
+{
+  const r = I.runway(fakeStats, settings, { todayIso: TODAY });
+  ok('the runway aims at the next round number on the bar', r.milestone.value === 100);
+  close('converted into what that weight would score at your reps and sets',
+    r.scoreNeeded, 100 * M.repFactor(5, settings.formula) * M.setBonus(3, settings.setBonusK), 1e-9);
+  close('progress along the climb from 95 to 100', r.progress, 0.5, 1e-9);
+  ok('with an ETA on the converted score', r.eta && r.eta.days > 0);
+  ok('a lift with no history has no runway', I.runway({ ...fakeStats, entries: [] }, settings) === null);
+}
+
+// --- the fatigue model, drawn rather than reported ---
+{
+  fresh();
+  const cfg = store.getSettings();
+  const st = M.allStats(store.getExercises(), store.getEntries(), cfg, TODAY).find((s) => s.entryCount > 0);
+  const curve = I.readinessCurve(st, cfg, { days: 30 });
+  ok('the curve runs a point per day', curve.length === 31, String(curve.length));
+  ok('fatigue is highest on the day of the session', curve[0].fatigue >= curve[1].fatigue);
+  ok('fatigue decays to nothing', curve[14].fatigue === 0);
+  ok('the target climbs as fatigue clears', curve[7].target > curve[0].target);
+  ok('the curve knows when the lift is fit again',
+    curve[0].recovered === false && curve[curve.length - 1].recovered === true);
+  close('day zero agrees with the model on the card',
+    curve[0].factor, M.readinessFor({ ...st, daysSince: 0 }, cfg).factor, 1e-9);
+  ok('with the model off there is no curve',
+    I.readinessCurve(st, { ...cfg, readiness: 'off' }, { days: 10 }).length === 0);
+}
+
+/* ------------------------------------------------------------- whole body */
+
+{
+  fresh();
+  const cfg = store.getSettings();
+  const all = M.allStats(store.getExercises(), store.getEntries(), cfg, TODAY);
+
+  const tons = I.tonnageSeries(all, { weeks: 12, todayIso: TODAY });
+  ok('tonnage runs a bucket per week', tons.length === 12);
+  ok('the buckets run oldest to newest', tons[0].start < tons[11].start);
+  const inWindow = all.flatMap((s) => s.entries)
+    .filter((e) => e.day > M.dayNumber(TODAY) - 84 && e.day <= M.dayNumber(TODAY));
+  close('and account for every set inside the window without double counting',
+    tons.reduce((n, b) => n + b.sets, 0),
+    inWindow.reduce((n, e) => n + (Number(e.sets) > 0 ? Number(e.sets) : 1), 0), 1e-9);
+
+  const prs = I.prTimeline(all);
+  ok('the PR timeline is in date order', prs.every((p, i) => i === 0 || prs[i - 1].day <= p.day));
+  ok('every PR names its lift', prs.every((p) => typeof p.name === 'string' && p.name.length));
+  ok('every PR after the first says what it beat', prs.filter((p) => p.delta !== null).every((p) => p.delta > 0));
+  close('the count matches what exerciseStats marked',
+    prs.length, all.reduce((n, s) => n + s.prCount, 0), 1e-9);
+
+  const grid = I.consistency(all, { days: 28, todayIso: TODAY });
+  ok('consistency runs a row per day', grid.length === 28);
+  ok('it ends today', grid[grid.length - 1].date === TODAY);
+  ok('a day with no training is a zero, not a gap', grid.every((g) => Number.isFinite(g.sets)));
+
+  const bal = I.balance(all, { weeks: 4, todayIso: TODAY });
+  ok('balance covers every lift', bal.length === all.length);
+  ok('heaviest share first', bal.every((r, i) => i === 0 || bal[i - 1].sets >= r.sets));
+  close('the shares add up to one', bal.reduce((n, r) => n + r.share, 0), bal.some((r) => r.sets) ? 1 : 0, 1e-9);
+  ok('a lift with a weekly target gets a verdict',
+    bal.filter((r) => r.target).every((r) => ['under', 'over', 'on target'].includes(r.status)));
 }
 
 /* ------------------------------------------------------------------ report */
