@@ -86,7 +86,10 @@ const px = (rem) => {
  * otherwise the chart cards come out empty and the preview quietly understates
  * what the screen shows.
  */
-const settle = () => new Promise((r) => setTimeout(r, 30));
+// Long enough for the charts' animation frame AND for a count-up to finish —
+// serialising mid-animation would freeze a hero number at some fraction of
+// itself and make the preview lie about what the screen says.
+const settle = () => new Promise((r) => setTimeout(r, 450));
 
 async function screen(name, node, note) {
   await settle();
@@ -118,9 +121,9 @@ const screens = [];
     store.logSet({ exerciseId: b.id, date: TODAY, weight: 60, reps: 8, rir: 3, notes: 'belt on, felt fast' });
   }, 165000);
   select.invalidate();
-  setPrefill({ exerciseId: a.id, date: TODAY, mode: 'sets' });
+  setPrefill({ exerciseId: a.id, date: TODAY, mode: 'sets', sets: 3 });
   screens.push(await screen('Log', renderLog(ctx({ route: 'log' })),
-    'Mid-session: the rail across the top is every lift today, the trace under the form is this lift set by set with its RIR and real rest between sets, and the third squat set shows short against the plan.'));
+    'Mid-session with the squats finished: the rail across the top is every lift today, the trace is this lift set by set with its RIR and the real rest between sets, the third set reads short against the plan, and the summary underneath is what the lift just did.'));
   for (let i = 0; i < 4; i++) store.undo();
   select.invalidate();
 }

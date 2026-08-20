@@ -264,22 +264,53 @@ function plural(n, word) {
 
 let toastHost = null;
 
-export function toast(message, { action, actionLabel, duration = 4200 } = {}) {
+/**
+ * A brief message, optionally with one thing you can do about it.
+ *
+ * A toast carrying an action is a different object from a toast carrying news.
+ * Four seconds is fine to read "Saved"; it is not enough to hear a message
+ * announced, find the Undo button and press it, and the old behaviour pulled
+ * the button out from under anyone doing that. So an actionable toast waits
+ * longer, and stops counting down entirely while it is being pointed at,
+ * hovered or focused — a countdown that ignores you reaching for it is the
+ * whole problem.
+ */
+export function toast(message, { action, actionLabel, duration } = {}) {
   if (!toastHost) {
     toastHost = el('div', { class: 'toast-host', role: 'status', 'aria-live': 'polite' });
     document.body.append(toastHost);
   }
-  const node = el('div', { class: 'toast' }, [
+  const wait = duration ?? (action ? 9000 : 4200);
+
+  const node = el('div', { class: `toast${action ? ' has-action' : ''}` }, [
     el('span', { class: 'toast-msg', text: message }),
-    action ? el('button', { type: 'button', class: 'toast-action', onclick: () => { action(); dismiss(); } }, [actionLabel || 'Undo']) : null,
+    action ? el('button', {
+      type: 'button', class: 'toast-action',
+      'aria-label': `${actionLabel || 'Undo'} — ${message}`,
+      onclick: () => { action(); dismiss(); },
+    }, [actionLabel || 'Undo']) : null,
   ]);
+
+  let timer = null;
+  let gone = false;
   const dismiss = () => {
+    if (gone) return;
+    gone = true;
+    clearTimeout(timer);
     node.classList.add('is-leaving');
     setTimeout(() => node.remove(), 200);
   };
+  const hold = () => clearTimeout(timer);
+  const resume = () => { if (!gone) { clearTimeout(timer); timer = setTimeout(dismiss, wait); } };
+
+  if (action) {
+    for (const ev of ['pointerenter', 'focusin']) node.addEventListener(ev, hold);
+    for (const ev of ['pointerleave', 'focusout']) node.addEventListener(ev, resume);
+  }
+
   toastHost.append(node);
   requestAnimationFrame(() => node.classList.add('is-in'));
-  setTimeout(dismiss, duration);
+  timer = setTimeout(dismiss, wait);
   return dismiss;
 }
 

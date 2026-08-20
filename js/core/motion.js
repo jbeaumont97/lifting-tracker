@@ -77,6 +77,11 @@ export function countUp(node, to, { from, duration, format = (v) => v.toFixed(1)
     return;
   }
 
+  // Paint the starting value before yielding to the first frame. Without this
+  // the node sits empty until the animation begins, which is a visible blank on
+  // arrival — the very moment the count-up exists to decorate.
+  node.textContent = format(start);
+
   const span = duration ?? durations.slow;
   const t0 = performance.now();
   const step = (now) => {

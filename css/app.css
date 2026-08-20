@@ -513,7 +513,12 @@ table.grid td.cell.is-pick { box-shadow: inset 0 0 0 2px var(--series-1); }
   border-radius: var(--radius); padding: var(--space-6) 16px; box-shadow: var(--shadow);
 }
 .hero-label { font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: var(--fw-semi); }
-.hero-value { font-size: var(--display); font-weight: var(--fw-bold); line-height: 1.05; letter-spacing: -0.025em; }
+/* tabular-nums matters more here than anywhere: without it the digits change
+   width as the number runs up and the whole line jitters. */
+.hero-value {
+  font-size: var(--display); font-weight: var(--fw-bold); line-height: 1.05;
+  letter-spacing: -0.025em; font-variant-numeric: tabular-nums;
+}
 .hero-value small { font-size: var(--text-xl); font-weight: var(--fw-medium); color: var(--text-secondary); }
 .hero-delta { font-size: var(--text-sm); color: var(--text-secondary); }
 .hero-delta.is-good { color: var(--good-ink); }
@@ -1447,3 +1452,47 @@ h1 .accent-dot { width: 11px; height: 11px; margin-right: 9px; vertical-align: m
 .view-switch { margin-bottom: var(--space-4); }
 .view-switch .segmented { width: 100%; }
 .view-switch .seg { flex: 1; }
+
+/* ========================================================== kinetic pass */
+
+.hero-num, .preview-num { font-variant-numeric: tabular-nums; }
+
+/* The set that takes a session past its best. The confetti is the celebration;
+   this is the number acknowledging it. */
+.preview.is-pr .preview-value { animation: pr-flash var(--dur-slow) var(--ease-spring) both; }
+@keyframes pr-flash {
+  0%   { transform: scale(1); color: var(--text-primary); }
+  40%  { transform: scale(1.06); color: var(--good-ink); }
+  100% { transform: scale(1); color: var(--text-primary); }
+}
+.preview-value { display: inline-block; transform-origin: left center; }
+
+/* --- what the lift just did --- */
+.session-summary {
+  display: flex; flex-direction: column; gap: var(--space-2);
+  padding: var(--space-4); margin-top: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--good) 7%, var(--surface-2));
+  border: 1px solid color-mix(in srgb, var(--good) 22%, transparent);
+  animation: detail-in var(--dur-base) var(--ease-out) both;
+}
+.summary-head {
+  display: flex; align-items: center; gap: var(--space-2);
+  font-size: var(--text-md); font-weight: var(--fw-semi); color: var(--good-ink);
+}
+.summary-tick {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; border-radius: var(--radius-pill);
+  background: var(--good); color: var(--surface-1);
+  font-size: var(--text-3xs); font-weight: var(--fw-bold); flex: none;
+}
+.summary-facts {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-4);
+  font-size: var(--text-xs); color: var(--text-secondary); font-variant-numeric: tabular-nums;
+}
+.summary-facts li { display: flex; align-items: center; gap: var(--space-2); }
+.summary-facts li + li::before {
+  content: '·'; color: var(--muted); margin-right: var(--space-2);
+}
+.summary-note { font-size: var(--text-2xs); color: var(--muted); }

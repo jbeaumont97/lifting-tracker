@@ -18,6 +18,7 @@ const store = await import('../js/store.js');
 const select = await import('../js/core/select.js');
 const bindings = await import('../js/core/bind.js');
 const uistate = await import('../js/core/uistate.js');
+const { stopRest } = await import('../js/timer.js');
 const ui = uistate;
 const { renderPlan, openCard } = await import('../js/views/plan.js');
 const { renderLog, setPrefill, clearForm } = await import('../js/views/log.js');
@@ -52,6 +53,9 @@ let ticks = 0;
 /** Let any queued animation frame run, the way the browser would. */
 const settle = () => new Promise((r) => setTimeout(r, 10));
 
+/** The app formats to one decimal through toLocaleString; match it exactly. */
+const fmtOf = (v) => Number(v).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+
 function ctx(over = {}) {
   const settings = store.getSettings();
   return {
@@ -70,6 +74,9 @@ function ctx(over = {}) {
 
 /** A fresh page load: empty storage, and no module holding on to view state. */
 function reset() {
+  // Logging a live set starts the rest clock, and its interval keeps the Node
+  // event loop alive for ever. A page load would not carry one over either.
+  stopRest({ quiet: true });
   globalThis.localStorage.clear();
   globalThis.sessionStorage.clear();
   uistate.clearAll();
@@ -840,6 +847,147 @@ const insights = await import('../js/insights.js');
   uistate.set('progress.view', 'lifts');
 }
 
+/* ------------------------------------------- 6h. the kinetic pass */
+
+const uiKit = await import('../js/ui.js');
+const motion2 = await import('../js/core/motion.js');
+
+// --- an actionable toast has to outlast the reach for it ---
+{
+  reset();
+  const doc = globalThis.document;
+  for (const t of doc.body.querySelectorAll('.toast')) t.remove();
+
+  uiKit.toast('Saved');
+  const plain = doc.body.querySelector('.toast');
+  ok('a plain message toasts', !!plain);
+  ok('and carries no action', plain.querySelectorAll('.toast-action').length === 0);
+  plain.remove();
+
+  let undone = false;
+  uiKit.toast('Entry deleted', { action: () => { undone = true; }, actionLabel: 'Undo' });
+  const actionable = doc.body.querySelector('.toast.has-action');
+  ok('an actionable toast is marked as one', !!actionable);
+  const btn = actionable.querySelector('.toast-action');
+  ok('its button says what it undoes, not just "Undo"',
+    /Undo — Entry deleted/.test(btn.getAttribute('aria-label') || ''), btn.getAttribute('aria-label'));
+
+  // It must still be there well past the 4.2s a plain toast gets.
+  actionable.dispatchEvent({ type: 'focusin' });
+  await new Promise((r) => setTimeout(r, 60));
+  ok('holding focus stops the countdown', actionable.isConnected !== false);
+  btn.click();
+  ok('and the action still runs', undone === true);
+}
+
+// --- a swipe is a shortcut; the row has to say what else it does ---
+{
+  reset();
+  const ex = store.getExercises()[0];
+  store.logSet({ exerciseId: ex.id, date: TODAY, weight: 90, reps: 5, rir: 2, notes: 'tough' });
+  select.invalidate();
+  setPrefill({ exerciseId: ex.id, date: TODAY });
+  const view = renderLog(ctx({ route: 'log' }));
+  const row = view.querySelector('.row-btn');
+  const label = row.getAttribute('aria-label') || '';
+  ok('a history row announces its lift and set', /5 at 90 kilos/.test(label), label);
+  ok('it announces the RIR', /RIR 2/.test(label), label);
+  ok('it reads the note out', /noted: tough/.test(label), label);
+  ok('and says the route that is not a swipe', /Edit or delete/.test(label), label);
+  ok('the swipe affordance itself stays decorative',
+    view.querySelector('.swipe-action').getAttribute('aria-hidden') === 'true');
+}
+
+// --- numbers arrive rather than appearing ---
+{
+  reset();
+  const st = ctx().stats.find((s) => s.entryCount > 0);
+  openExercise(st.exercise.id);
+  const view = renderProgress(ctx({ route: 'progress' }));
+  const num = view.querySelector('.hero-num');
+  ok('the hero number paints its start value synchronously', num.textContent === '0.0', num.textContent);
+  await new Promise((r) => setTimeout(r, 700));
+  ok('and lands exactly on the real figure', num.textContent === fmtOf(st.lastAdj), num.textContent);
+  ok('the unit is not eaten by the animation',
+    view.querySelector('.hero-value').textContent.endsWith(' kg'));
+  clearSelection();
+}
+
+// --- the session score climbs when a set lands, and only then ---
+{
+  reset();
+  const ex = store.getExercises()[0];
+  setPrefill({ exerciseId: ex.id, date: TODAY, weight: 100, reps: 5, sets: 3, mode: 'sets' });
+  renderLog(ctx({ route: 'log' }));
+
+  // No set logged yet: nothing to climb from.
+  ok('no climb is queued before anything is logged',
+    uistate.get('log.scoreFrom', null) === null);
+
+  const c = ctx({ route: 'log' });
+  const first = renderLog(c);
+  first.querySelector('.btn-save').click();
+  ok('logging a set records where the score was', uistate.get('log.scoreFrom', null) !== null);
+
+  select.invalidate();
+  const after = renderLog(ctx({ route: 'log' }));
+  const scoreNum = after.querySelector('.preview-num');
+  ok('the score node exists to be animated', !!scoreNum);
+  await new Promise((r) => setTimeout(r, 700));
+  ok('and settles on the session score', /\d/.test(scoreNum.textContent), scoreNum.textContent);
+  ok('the climb is consumed, not repeated', uistate.get('log.scoreFrom', null) === null);
+}
+
+// --- what the lift just did, once the plan is done ---
+{
+  reset();
+  const ex = store.getExercises()[0];
+  for (let i = 0; i < 3; i++) store.logSet({ exerciseId: ex.id, date: TODAY, weight: 100, reps: 5, rir: 2 });
+  select.invalidate();
+  setPrefill({ exerciseId: ex.id, date: TODAY, weight: 100, reps: 5, sets: 3, mode: 'sets' });
+  const view = renderLog(ctx({ route: 'log' }));
+
+  const sum = view.querySelector('.session-summary');
+  ok('finishing the plan puts a summary on the screen', !!sum);
+  ok('it counts the sets', /3 sets/.test(sum.textContent), sum.textContent);
+  ok('it says what was moved', /kg moved/.test(sum.textContent), sum.textContent);
+  ok('and it names the lift', sum.textContent.includes(ex.name));
+}
+
+// --- everything decorative stands down when asked ---
+{
+  reset();
+  const realMatch = globalThis.window.matchMedia;
+  globalThis.window.matchMedia = (q) => ({
+    matches: /prefers-reduced-motion/.test(q), media: q,
+    addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
+  });
+  globalThis.matchMedia = globalThis.window.matchMedia;
+
+  ok('reduced motion is reported', motion2.prefersReducedMotion() === true);
+
+  const node = globalThis.document.createElement('span');
+  motion2.countUp(node, 118.3, { from: 0, format: (v) => v.toFixed(1) });
+  ok('a count-up writes the answer straight out instead of running',
+    node.textContent === '118.3', node.textContent);
+
+  const before = globalThis.document.body.querySelectorAll('.confetti-host').length;
+  uiKit.celebrate();
+  ok('and there is no confetti',
+    globalThis.document.body.querySelectorAll('.confetti-host').length === before);
+
+  const st = ctx().stats.find((s) => s.entryCount > 0);
+  openExercise(st.exercise.id);
+  const view = renderProgress(ctx({ route: 'progress' }));
+  ok('the hero number is simply correct on arrival',
+    view.querySelector('.hero-num').textContent === fmtOf(st.lastAdj),
+    view.querySelector('.hero-num').textContent);
+  clearSelection();
+
+  globalThis.window.matchMedia = realMatch;
+  globalThis.matchMedia = realMatch;
+}
+
 /* ------------------------------------- 7. view state survives a reload */
 
 {
@@ -1041,6 +1189,8 @@ const insights = await import('../js/insights.js');
 }
 
 /* ------------------------------------------------------------------ report */
+
+stopRest({ quiet: true });
 
 console.log(`\n${pass} view checks passed`);
 if (failures.length) {
