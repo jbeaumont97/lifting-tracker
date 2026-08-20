@@ -27,6 +27,7 @@ const select = await import('../js/core/select.js');
 const { renderPlan, openCard } = await import('../js/views/plan.js');
 const { renderLog, setPrefill } = await import('../js/views/log.js');
 const { renderProgress, openExercise, clearSelection } = await import('../js/views/progress.js');
+const uistate = await import('../js/core/uistate.js');
 const { renderSetup } = await import('../js/views/setup.js');
 
 const TODAY = '2026-08-18';
@@ -165,6 +166,11 @@ const screens = [];
   clearSelection();
   screens.push(await screen('Next, with history', renderPlan(ctx()),
     'The same history on the planner: the top card now carries a runway to the next round number on the bar, which stays hidden while the fit is too thin to date.'));
+
+  uistate.set('progress.view', 'body');
+  screens.push(await screen('Everything', renderProgress(ctx({ route: 'progress' })),
+    'The whole log read across rather than down: weekly tonnage against your usual week, every day of the last sixteen weeks shaded by the work it carried, where the sets went lift by lift, and every personal best in order.'));
+  uistate.set('progress.view', 'lifts');
 }
 
 {

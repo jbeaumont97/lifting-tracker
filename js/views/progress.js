@@ -3,8 +3,9 @@
 // progression chart, weekly work, and full session history.
 
 import { el, statTile, segmented, details, disclose, milestoneTrack, emptyState, chevron, accentDot, prBadge, tap } from '../ui.js';
-import { runway } from '../insights.js';
-import { progressionChart, readinessLane, sparkline, setsMeter, weeklySetsChart } from '../charts.js';
+import { runway, tonnageSeries, consistency, balance, prTimeline } from '../insights.js';
+import { progressionChart, readinessLane, sparkline, setsMeter, weeklySetsChart,
+  tonnageChart, consistencyGrid, balanceBars } from '../charts.js';
 import { fmt, fmtWeight, fmtSigned, fmtCompact, relativeDate, formatDate, dayNumber } from '../metrics.js';
 import * as ui from '../core/uistate.js';
 
@@ -13,6 +14,9 @@ import * as ui from '../core/uistate.js';
 const SELECTED = 'progress.selectedId';
 const MODE = 'progress.listMode';
 const RANGE = 'progress.range';
+const VIEW = 'progress.view';      // 'lifts' | 'body'
+
+const viewMode = () => ui.get(VIEW, 'lifts');
 
 const selected = () => ui.get(SELECTED, null);
 const listMode = () => ui.get(MODE, 'cards');
@@ -29,7 +33,16 @@ export function renderProgress(ctx) {
     if (st) return detailView(st, ctx);
     clearSelection();                    // the lift was deleted underneath us
   }
-  return listView(ctx);
+  return viewMode() === 'body' ? bodyView(ctx) : listView(ctx);
+}
+
+/** One lift at a time, or all of them at once. */
+function viewSwitch(ctx) {
+  return el('div', { class: 'view-switch' }, [segmented({
+    label: 'What to show', value: viewMode(),
+    options: [{ value: 'lifts', label: 'Your lifts' }, { value: 'body', label: 'Everything' }],
+    onChange: (v) => { ui.set(VIEW, v); ctx.refresh({ transition: true }); },
+  })]);
 }
 
 function listView(ctx) {
@@ -39,6 +52,8 @@ function listView(ctx) {
     el('h1', { text: 'Progress' }),
     el('p', { class: 'view-sub', text: 'One number per lift, and which way it is going. Tap a lift for its chart and history.' }),
   ]));
+
+  root.append(viewSwitch(ctx));
 
   const trained = stats.filter((s) => s.entryCount > 0);
   if (!trained.length) {
@@ -89,6 +104,102 @@ function listView(ctx) {
       el('p', { text: 'Volume (weight × reps × sets) is tracked separately because it measures a different thing. Weekly sets is a plain count of working sets, because sets per week is the unit training is actually prescribed in — commonly 10–20 per muscle per week, spread across every lift that trains it.' }),
       el('p', { text: 'Trend is a least-squares fit of adjusted e1RM against date over the lookback window. Projections extend that straight line; real progress decelerates, so treat +12 weeks as an optimistic ceiling rather than a forecast.' }),
     ], { open: ctx.numbersOpen }),
+  ]));
+  return root;
+}
+
+/**
+ * Everything at once.
+ *
+ * Every other screen in the app is one lift at a time, which is the right shape
+ * for deciding what to do next and the wrong one for asking whether the
+ * training as a whole is going anywhere. Nothing here is per-lift maths added
+ * up on the fly — it is the same log read across instead of down.
+ */
+function bodyView(ctx) {
+  const { stats, settings } = ctx;
+  const root = el('section', { class: 'view view-body' });
+  root.append(el('header', { class: 'view-head' }, [
+    el('h1', { text: 'Everything' }),
+    el('p', { class: 'view-sub', text: 'Your whole log at once: how much work you are doing, how often, where it is going, and what you have beaten.' }),
+  ]));
+  root.append(viewSwitch(ctx));
+
+  const trained = stats.filter((s) => s.entryCount > 0);
+  if (!trained.length) {
+    root.append(emptyState('Nothing to show yet', 'Log a few sessions and the whole picture appears here.', 'Go to Log', () => ctx.goTo('log')));
+    return root;
+  }
+
+  const opts = { todayIso: ctx.today };
+
+  /* ---- how much work, week by week ---- */
+  const tons = tonnageSeries(stats, { weeks: 12, ...opts });
+  const tonHost = el('div', { class: 'chart-card' });
+  let tonDrawn = false;
+  const paintTons = () => {
+    const chart = tonnageChart(tons, { width: tonHost.clientWidth || 340, height: 150 });
+    if (!chart) { tonHost.remove(); return; }
+    if (tonDrawn) chart.classList.add('no-anim');
+    tonHost.replaceChildren(el('h2', { class: 'section-title', text: 'Work' }), chart);
+    tonDrawn = true;
+  };
+  root.append(tonHost);
+  requestAnimationFrame(paintTons);
+  ctx.onResize(paintTons);
+
+  /* ---- how often ---- */
+  const days = consistency(stats, { days: 112, ...opts });
+  const trainedDays = days.filter((d) => d.sets > 0).length;
+  const grid = consistencyGrid(days);
+  if (grid) {
+    root.append(el('div', { class: 'chart-card' }, [
+      el('div', { class: 'section-head' }, [
+        el('h2', { class: 'section-title', text: 'Turning up' }),
+        el('span', { class: 'rail-sub', text: `${trainedDays} of the last ${days.length} days` }),
+      ]),
+      grid,
+    ]));
+  }
+
+  /* ---- where it went ---- */
+  const bars = balanceBars(balance(stats, { weeks: 4, ...opts }), { weeks: 4 });
+  if (bars) {
+    root.append(el('div', { class: 'chart-card' }, [
+      el('h2', { class: 'section-title', text: 'Where the work went' }),
+      bars,
+    ]));
+  }
+
+  /* ---- what you have beaten ---- */
+  const prs = prTimeline(stats).reverse();
+  if (prs.length) {
+    const shown = prs.slice(0, 12);
+    const list = el('ul', { class: 'pr-list' });
+    for (const p of shown) {
+      list.append(el('li', { class: 'pr-event' }, [
+        el('span', { class: 'pr-when', text: relativeDate(p.date, ctx.today) }),
+        el('span', { class: 'pr-lift' }, [accentDot(p.exerciseId), el('span', { text: p.name })]),
+        el('span', { class: 'pr-set', text: `${p.sets} × ${p.reps} @ ${fmtWeight(p.weight)} kg` }),
+        el('span', { class: 'pr-gain', text: p.delta !== null ? `+${fmt(p.delta, 1)}` : 'first' }),
+      ]));
+    }
+    root.append(el('div', { class: 'chart-card' }, [
+      el('div', { class: 'section-head' }, [
+        el('h2', { class: 'section-title', text: 'Personal bests' }),
+        el('span', { class: 'rail-sub', text: `${prs.length} so far` }),
+      ]),
+      list,
+      prs.length > shown.length
+        ? el('p', { class: 'chart-cap', text: `The ${shown.length} most recent. Older ones are in each lift\u2019s own history.` })
+        : null,
+    ]));
+  }
+
+  root.append(details('What this screen is and is not', [
+    el('p', { text: 'Work is every lift\u2019s volume added together \u2014 weight times reps times sets. It answers whether a week was heavy or light against your own usual, not against anybody else\u2019s.' }),
+    el('p', { text: 'Turning up is a plain count of working sets per day. There is no streak here and nothing to break: a rest day is drawn as a rest day, because rest is part of training rather than a failure to train.' }),
+    el('p', { text: 'Where the work went is per lift, and only per lift. Balancing push against pull, or upper against lower, would need to know which muscles each lift trains, and the app does not \u2014 so it does not pretend to.' }),
   ]));
   return root;
 }
