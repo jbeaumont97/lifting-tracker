@@ -21,6 +21,7 @@ const out = resolve(process.argv[2] || join(root, 'preview.html'));
 
 installDom();
 
+const M = await import('../js/metrics.js');
 const store = await import('../js/store.js');
 const select = await import('../js/core/select.js');
 const { renderPlan, openCard } = await import('../js/views/plan.js');
@@ -135,6 +136,35 @@ const screens = [];
   screens.push(await screen('One lift', renderProgress(ctx({ route: 'progress' })),
     'The hero number, the progression chart with its trend and projection, the sets meter, the eight-week bars and the full session table.'));
   clearSelection();
+}
+
+// A lift with enough history to have a trend worth extrapolating. The seed is
+// twelve entries, so nothing in it clears metrics.js's bar for a reliable fit —
+// which is correct, and also means the projection, the milestone ETA and the
+// readiness curve are all invisible on seed data alone.
+{
+  const ex = store.getExercises()[0];
+  const entries = store.getEntries().filter((e) => e.exerciseId !== ex.id);
+  let seq = 5000;
+  for (let w = 13; w >= 0; w--) {
+    for (const offset of [0, 3]) {
+      const date = M.isoAddDays(TODAY, -(w * 7 + offset));
+      const weight = Math.round((72.5 + (13 - w) * 1.15) / 2.5) * 2.5;
+      entries.push({
+        id: `h-${seq}`, date, exerciseId: ex.id, weight, reps: 5, sets: 3,
+        rir: offset ? 2 : 1, notes: '', seq: seq++,
+      });
+    }
+  }
+  store.importJSON(JSON.stringify({ exercises: store.getExercises(), entries, settings: store.getSettings() }));
+  select.invalidate();
+  openExercise(ex.id);
+  screens.push(await screen('One lift, with history',
+    renderProgress(ctx({ route: 'progress' })),
+    'Fourteen weeks of squats twice a week. Only with a fit this long does the app publish a projection at all — so this is the screen where the trend cone, the next milestone and its estimated date are actually visible.'));
+  clearSelection();
+  screens.push(await screen('Next, with history', renderPlan(ctx()),
+    'The same history on the planner: the top card now carries a runway to the next round number on the bar, which stays hidden while the fit is too thin to date.'));
 }
 
 {

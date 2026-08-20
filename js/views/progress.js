@@ -2,9 +2,10 @@
 // phone could never give you. The list is the overview; tap a lift for its
 // progression chart, weekly work, and full session history.
 
-import { el, statTile, segmented, details, disclose, emptyState, chevron, accentDot, prBadge, tap } from '../ui.js';
+import { el, statTile, segmented, details, disclose, milestoneTrack, emptyState, chevron, accentDot, prBadge, tap } from '../ui.js';
+import { runway } from '../insights.js';
 import { progressionChart, sparkline, setsMeter, weeklySetsChart } from '../charts.js';
-import { fmt, fmtWeight, fmtSigned, fmtCompact, relativeDate, formatDate, isoToday } from '../metrics.js';
+import { fmt, fmtWeight, fmtSigned, fmtCompact, relativeDate, formatDate, dayNumber } from '../metrics.js';
 import * as ui from '../core/uistate.js';
 
 // Which lift is drilled into, and how the list is drawn. Kept in uistate so a
@@ -48,7 +49,7 @@ function listView(ctx) {
   const sets7 = stats.reduce((n, s) => n + s.sets7, 0);
   const vol7 = stats.reduce((n, s) => n + s.volume7, 0);
   const days7 = new Set();
-  for (const s of stats) for (const e of s.entries) if (e.day >= dayOf(isoToday()) - 7) days7.add(e.date);
+  for (const s of stats) for (const e of s.entries) if (e.day >= dayNumber(ctx.today) - 7) days7.add(e.date);
   const rising = trained.filter((s) => (s.trendPerWeek ?? 0) > 0).length;
 
   root.append(el('div', { class: 'kpi-row' }, [
@@ -101,7 +102,7 @@ function trendClass(st) {
 function exerciseRow(st, ctx) {
   const trendGood = st.trendPerWeek == null || Math.abs(st.trendPerWeek) < FLAT ? null : st.trendPerWeek > 0;
   const spark = sparkline(st.sessions.map((s) => s.best.adj));
-  const stale = st.lastDate ? dayOf(isoToday()) - dayOf(st.lastDate) : null;
+  const stale = st.lastDate ? dayNumber(ctx.today) - dayNumber(st.lastDate) : null;
 
   return el('article', {
     class: 'card card-row',
@@ -164,6 +165,26 @@ function detailView(st, ctx) {
     el('span', { class: 'hero-value' }, [fmt(st.lastAdj, 1), el('small', { text: ' kg' })]),
     el('span', { class: `hero-delta${trendClass(st)}`, text: heroTrendText(st) }),
   ]));
+
+  // The hero is what you last lifted, which is a fact. After a layoff it is no
+  // longer what you can lift, which is the more useful number and one the model
+  // has always computed and never shown. Only worth a line while it differs.
+  const r = st.readiness;
+  if (r && r.enabled && r.retention < 1 - 1e-9 && Number.isFinite(r.baseline)) {
+    root.append(el('p', { class: 'baseline-note' }, [
+      el('span', { 'aria-hidden': 'true', text: r.phase.glyph }),
+      el('span', {}, [
+        'Worth about ',
+        el('strong', { text: `${fmt(r.baseline, 1)} kg` }),
+        ` today — ${Math.round(r.days)} days off has taken roughly `
+          + `${((1 - r.retention) * 100).toFixed(0)}% off it.`,
+      ]),
+    ]));
+  }
+
+  // The destination the chart's projection is heading toward.
+  const run = runway(st, settings, { todayIso: ctx.today });
+  if (run) root.append(milestoneTrack(run));
 
   const chartHost = el('div', { class: 'chart-card' });
   const paintChart = () => {
@@ -297,6 +318,3 @@ function cssName(id) {
   return String(id).replace(/[^a-zA-Z0-9_-]/g, '_');
 }
 
-function dayOf(iso) {
-  return Math.round((Date.parse(iso + 'T00:00:00Z') - Date.parse('2020-01-01T00:00:00Z')) / 86400000);
-}
