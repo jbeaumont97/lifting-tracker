@@ -408,6 +408,117 @@ for (const open of [false, true]) {
   ok('reduced-motion is reported', motion.prefersReducedMotion() === false);
 }
 
+/* ------------------------------------------- 6d. in-workout momentum */
+
+// The session rail: the first view in the app of a session as a whole rather
+// than one lift at a time.
+{
+  reset();
+  const [a, b] = store.getExercises();
+  store.logSet({ exerciseId: a.id, date: TODAY, weight: 100, reps: 5, rir: 3 });
+  store.logSet({ exerciseId: a.id, date: TODAY, weight: 100, reps: 5, rir: 2 });
+  store.logSet({ exerciseId: b.id, date: TODAY, weight: 60, reps: 8, rir: 2 });
+  select.invalidate();
+  setPrefill({ exerciseId: b.id, date: TODAY });
+
+  const view = renderLog(ctx({ route: 'log' }));
+  const rail = view.querySelector('.rail');
+  ok('the rail appears once a session is under way', !!rail);
+
+  const segs = rail.querySelectorAll('.rail-seg');
+  ok('one segment per lift in the session', segs.length === 2, String(segs.length));
+  ok('the lift you are on is the current one',
+    segs.filter((n) => n.classList.contains('is-current')).length === 1);
+  ok('and it is the right one',
+    segs.find((n) => n.classList.contains('is-current')).textContent.includes(b.name));
+
+  // The identity hues are not pairwise separable under deuteranopia, so a dot
+  // may never be the only thing saying which lift a segment is.
+  ok('every segment names its lift in words',
+    segs.every((n) => n.querySelectorAll('.rail-seg-name').length === 1
+      && n.querySelector('.rail-seg-name').textContent.trim().length > 1),
+    'a segment identified by colour alone is unreadable to some users');
+
+  ok('each segment counts its sets', segs.every((n) => /\d+/.test(n.querySelector('.rail-seg-count').textContent)));
+  ok('the session total is a meter', rail.querySelectorAll('.rail-total-track').length === 1);
+  ok('and it counts every set logged today', rail.textContent.includes('3 of'), rail.textContent.slice(0, 120));
+
+  // Ordering is by when the first set actually happened, which is only knowable
+  // because of the per-set log.
+  ok('the lift trained first comes first', segs[0].textContent.includes(a.name),
+    segs.map((n) => n.querySelector('.rail-seg-name').textContent).join(' | '));
+
+  const was = refreshes;
+  segs[0].click();
+  ok('tapping a segment switches lift', refreshes > was);
+  ok('and the form follows it', uistate.get('log.form', {}).exerciseId === a.id);
+}
+
+{
+  reset();
+  setPrefill({});
+  const bare = renderLog(ctx({ route: 'log' }));
+  ok('no session and no lift chosen means no rail', bare.querySelectorAll('.rail').length === 0);
+}
+
+// The set trace: the pill row with an axis on it.
+{
+  reset();
+  const ex = store.getExercises()[0];
+  store.logSet({ exerciseId: ex.id, date: TODAY, weight: 100, reps: 5, rir: 3 });
+  store.logSet({ exerciseId: ex.id, date: TODAY, weight: 100, reps: 4, rir: 1 });
+  select.invalidate();
+  // The fixture date is in the past, and the live tracker is only for a session
+  // happening now, so the mode is stated rather than inferred from the date.
+  setPrefill({ exerciseId: ex.id, date: TODAY, weight: 100, reps: 5, sets: 4, mode: 'sets' });
+
+  const c = ctx({ route: 'log' });
+  const view = renderLog(c);
+  const trace = view.querySelector('.chart-trace');
+  ok('the trace replaces the pill row', !!trace && view.querySelectorAll('.set-pills').length === 0);
+
+  const done = trace.querySelectorAll('.trace-bar').filter((n) => !n.classList.contains('is-next'));
+  ok('one bar per set already done', done.length === 2, String(done.length));
+  ok('a set that came up short of the plan is marked',
+    done.filter((n) => n.classList.contains('is-short')).length === 1,
+    'the 4-rep set against a 5-rep plan should read as short');
+  ok('the set you are about to do is an outline',
+    trace.querySelectorAll('.trace-bar.is-next').length === 1);
+  ok('the sets still planned after it are placeholders',
+    trace.querySelectorAll('.trace-slot').length === 1, String(trace.querySelectorAll('.trace-slot').length));
+
+  ok('each set shows its RIR', trace.textContent.includes('RIR 3') && trace.textContent.includes('RIR 1'));
+  ok('the rest between sets is shown', /\ds|\d:\d\d/.test(trace.textContent), trace.textContent);
+  ok('the chart describes itself for a screen reader',
+    /\d sets? of \d planned/.test(trace.querySelector('.trace-svg').getAttribute('aria-label') || ''),
+    trace.querySelector('.trace-svg').getAttribute('aria-label'));
+
+  // The pending bar follows the stepper without a re-render, same as the
+  // preview and the button label.
+  const nextBar = trace.querySelector('.trace-bar.is-next');
+  const before = nextBar.getAttribute('d');
+  const plus = view.querySelectorAll('.stepper-btn').find((n) => /Increase Reps/.test(n.getAttribute('aria-label') || ''));
+  const refreshesBefore = refreshes;
+  plus.click();
+  await settle();
+  ok('nudging the reps moves the pending bar', nextBar.getAttribute('d') !== before);
+  ok('without re-rendering the view', refreshes === refreshesBefore);
+  ok('and it is still the same node', view.querySelector('.trace-bar.is-next') === nextBar);
+}
+
+// Notes have been stored since the first version and never shown.
+{
+  reset();
+  const ex = store.getExercises()[0];
+  store.logSet({ exerciseId: ex.id, date: TODAY, weight: 80, reps: 5, notes: 'belt on, felt fast' });
+  select.invalidate();
+  setPrefill({ exerciseId: ex.id, date: TODAY });
+  const view = renderLog(ctx({ route: 'log' }));
+  ok('a note written at the rack is readable afterwards',
+    view.querySelectorAll('.row-note').length === 1
+    && view.querySelector('.row-note').textContent === 'belt on, felt fast');
+}
+
 /* ------------------------------------- 7. view state survives a reload */
 
 {

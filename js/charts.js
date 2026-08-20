@@ -410,3 +410,158 @@ function roundedTop(x, y, w, h, r) {
   const rr = Math.min(r, w / 2, h);
   return `M${x} ${y + h} L${x} ${y + rr} Q${x} ${y} ${x + rr} ${y} L${x + w - rr} ${y} Q${x + w} ${y} ${x + w} ${y + rr} L${x + w} ${y + h} Z`;
 }
+
+/* ========================================================= the session so far */
+
+/**
+ * The set-by-set trace: what you have done this session, and what is left.
+ *
+ * This is the set-pill row grown a y-axis. A pill told you a set happened and
+ * how many reps it was; a bar says the same thing and also shows the shape —
+ * reps holding or falling away, how close to failure each set went, and how
+ * long you actually rested between them. None of that was recordable before
+ * the per-set log existed.
+ *
+ * One measure on the axis (reps) and one series, so there is no legend and no
+ * second scale: RIR and rest ride along as direct labels rather than as a
+ * second y, which is the one thing a chart like this must never do.
+ *
+ * `node.setPending(reps)` moves the dashed bar for the set you are about to do
+ * without rebuilding anything, so a stepper can drive it at 60fps.
+ */
+export function setTrace(timeline, {
+  width = 340, height = 148, planReps = null, planSets = 0, pendingReps = null,
+} = {}) {
+  const done = timeline.length;
+  const slots = Math.max(done + (pendingReps != null ? 1 : 0), planSets || 0, 1);
+
+  const pad = { t: 20, r: 6, b: 32, l: 6 };
+  const w = Math.max(220, width);
+  const plotW = w - pad.l - pad.r;
+  const plotH = height - pad.t - pad.b;
+
+  const ceiling = Math.max(planReps || 0, ...timeline.map((t) => t.reps), pendingReps || 0, 1);
+  const y = (reps) => pad.t + plotH - (reps / (ceiling * 1.15)) * plotH;
+
+  const band = plotW / slots;
+  const barW = Math.min(38, Math.max(14, band - 10));
+  const cx = (i) => pad.l + i * band + band / 2;
+
+  const svg = svgEl('svg', {
+    viewBox: `0 0 ${w} ${height}`, width: '100%', height, class: 'chart-svg trace-svg',
+    role: 'img', preserveAspectRatio: 'xMidYMid meet',
+    'aria-label': traceLabel(timeline, planSets, planReps),
+  });
+
+  // The rep scheme you set out to do, so a short set reads as short.
+  if (planReps > 0) {
+    svg.append(svgEl('line', {
+      x1: pad.l, x2: pad.l + plotW, y1: y(planReps), y2: y(planReps), class: 'ref-target',
+    }));
+    svg.append(text(`${planReps} reps`, { x: pad.l + plotW, y: y(planReps) - 5, class: 'tick', 'text-anchor': 'end' }));
+  }
+
+  // --- the sets you have done ---
+  for (const [i, t] of timeline.entries()) {
+    const top = y(t.reps);
+    const h = Math.max(3, pad.t + plotH - top);
+    const short = planReps > 0 && t.reps < planReps;
+    svg.append(svgEl('path', {
+      d: roundedTop(cx(i) - barW / 2, top, barW, h, 4),
+      class: `bar trace-bar${i === done - 1 ? ' bar-current' : ''}${short ? ' is-short' : ''}`,
+      style: `animation-delay:${Math.min(240, i * 40)}ms`,
+    }));
+    // The rep count rides on the bar: this is still a set tracker first.
+    svg.append(text(String(t.reps), { x: cx(i), y: top - 6, class: 'trace-reps', 'text-anchor': 'middle' }));
+    // RIR under the axis, where it cannot be mistaken for the value.
+    svg.append(text(t.rir === null ? '·' : `RIR ${t.rir}`, {
+      x: cx(i), y: height - 18, class: 'trace-rir', 'text-anchor': 'middle',
+    }));
+    // Rest sits in the gap it describes, and only where it was measured.
+    if (t.restBefore !== null && i > 0) {
+      svg.append(text(restLabel(t.restBefore), {
+        x: (cx(i - 1) + cx(i)) / 2, y: height - 5, class: 'trace-rest', 'text-anchor': 'middle',
+      }));
+    }
+  }
+
+  // --- the set you are about to do, and anything still planned after it ---
+  let pendingBar = null;
+  let pendingLabel = null;
+  if (pendingReps != null) {
+    const i = done;
+    pendingBar = svgEl('path', { class: 'trace-bar is-next', d: '' });
+    pendingLabel = text('', { x: cx(i), y: 0, class: 'trace-reps is-next', 'text-anchor': 'middle' });
+    svg.append(pendingBar, pendingLabel);
+  }
+  for (let i = done + (pendingReps != null ? 1 : 0); i < slots; i++) {
+    svg.append(svgEl('line', {
+      x1: cx(i) - barW / 2, x2: cx(i) + barW / 2, y1: pad.t + plotH, y2: pad.t + plotH,
+      class: 'trace-slot',
+    }));
+  }
+
+  svg.append(svgEl('line', { x1: pad.l, x2: pad.l + plotW, y1: pad.t + plotH, y2: pad.t + plotH, class: 'axis' }));
+
+  const fig = el('figure', { class: 'chart chart-trace' }, [el('div', { class: 'chart-plot' }, [svg])]);
+
+  /** Move the dashed bar without touching anything else. */
+  fig.setPending = (reps) => {
+    if (!pendingBar) return;
+    const r = Number(reps);
+    if (!(r > 0)) { pendingBar.setAttribute('d', ''); pendingLabel.textContent = ''; return; }
+    const capped = Math.min(r, ceiling * 1.15);
+    const top = y(capped);
+    const h = Math.max(3, pad.t + plotH - top);
+    pendingBar.setAttribute('d', roundedTop(cx(done) - barW / 2, top, barW, h, 4));
+    pendingLabel.setAttribute('y', String(top - 6));
+    pendingLabel.textContent = String(Math.round(r));
+  };
+  fig.setPending(pendingReps);
+  return fig;
+}
+
+/** "1:30" for a rest gap, "45s" under a minute. */
+function restLabel(seconds) {
+  const s = Math.max(0, Math.round(seconds));
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+function traceLabel(timeline, planSets, planReps) {
+  if (!timeline.length) return 'No sets logged yet this session';
+  const reps = timeline.map((t) => t.reps).join(', ');
+  const of = planSets ? ` of ${planSets} planned` : '';
+  return `${timeline.length} set${timeline.length === 1 ? '' : 's'}${of} this session`
+    + `${planReps ? `, planned at ${planReps} reps` : ''}. Reps: ${reps}.`;
+}
+
+/* ================================================================ rest ring */
+
+/**
+ * A countdown drawn as a ring rather than a bar.
+ *
+ * Rest is the one thing in the app that is genuinely circular — a clock face —
+ * and the ring reads at arm's length from across a rack in a way a 3px bar does
+ * not. Returns the node with a `set(fraction)` that moves only the arc.
+ */
+export function restRing({ size = 30 } = {}) {
+  const r = (size - 4) / 2;
+  const circ = 2 * Math.PI * r;
+  const svg = svgEl('svg', {
+    viewBox: `0 0 ${size} ${size}`, width: size, height: size,
+    class: 'rest-ring', 'aria-hidden': 'true', focusable: 'false',
+  });
+  svg.append(svgEl('circle', { cx: size / 2, cy: size / 2, r, class: 'rest-ring-track' }));
+  const arc = svgEl('circle', {
+    cx: size / 2, cy: size / 2, r, class: 'rest-ring-arc',
+    'stroke-dasharray': circ.toFixed(2),
+    'stroke-dashoffset': circ.toFixed(2),
+    transform: `rotate(-90 ${size / 2} ${size / 2})`,
+  });
+  svg.append(arc);
+  svg.set = (fraction) => {
+    const f = Math.max(0, Math.min(1, Number(fraction) || 0));
+    arc.setAttribute('stroke-dashoffset', (circ * (1 - f)).toFixed(2));
+  };
+  return svg;
+}

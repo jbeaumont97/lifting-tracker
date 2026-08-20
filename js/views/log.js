@@ -23,6 +23,8 @@ import {
   adjE1rm, e1rm, volume, planFor, bandFor, exerciseStats, sessionAdjWith,
 } from '../metrics.js';
 import { bandChip } from '../ui.js';
+import { setTrace } from '../charts.js';
+import { sessionSets, sessionTimeline, typicalRest, sessionDuration } from '../insights.js';
 import * as ui from '../core/uistate.js';
 import { bind } from '../core/bind.js';
 
@@ -143,6 +145,9 @@ export function renderLog(ctx) {
     picker,
   ]));
 
+  const rail = sessionRail(ctx);
+  if (rail) root.append(rail);
+
   if (form.exerciseId) {
     const st = stats.find((s) => s.exercise.id === form.exerciseId)
       || exerciseStats(store.getExercise(form.exerciseId), store.getEntries(), settings);
@@ -157,6 +162,94 @@ export function renderLog(ctx) {
 
 function setCount(entry) {
   return Number(entry.sets) > 0 ? Number(entry.sets) : 1;
+}
+
+/**
+ * Today's session, all of it.
+ *
+ * Every other view in the app is one lift at a time; standing in the gym the
+ * question is usually "what is left", across everything. Lifts appear in the
+ * order their first set actually happened — which only became knowable with
+ * the per-set log, since merging a repeat set leaves the entry's own ordering
+ * where the block started.
+ */
+function sessionRail(ctx) {
+  const date = form.date;
+  const byLift = new Map();
+  for (const e of store.getEntries()) {
+    if (e.date !== date) continue;
+    if (!byLift.has(e.exerciseId)) byLift.set(e.exerciseId, []);
+    byLift.get(e.exerciseId).push(e);
+  }
+  // The lift you are about to start belongs in the session even with no sets.
+  if (form.exerciseId && !byLift.has(form.exerciseId)) byLift.set(form.exerciseId, []);
+  if (!byLift.size) return null;
+
+  const rows = [];
+  for (const [id, entries] of byLift) {
+    const ex = store.getExercise(id);
+    if (!ex) continue;
+    const done = entries.reduce((n, e) => n + setCount(e), 0);
+    const target = id === form.exerciseId && Number(form.sets) > 0
+      ? Math.round(Number(form.sets))
+      : (Number(ex.setsPerSession) > 0 ? Math.round(Number(ex.setsPerSession)) : 0);
+    const started = sessionSets(entries).find((x) => x.measured);
+    rows.push({
+      ex, done, target,
+      startedAt: started ? started.at : Infinity,
+      seq: entries.length ? Math.min(...entries.map((e) => e.seq || 0)) : Infinity,
+    });
+  }
+  if (!rows.length) return null;
+  rows.sort((a, b) => a.startedAt - b.startedAt || a.seq - b.seq);
+
+  const totalDone = rows.reduce((n, r) => n + r.done, 0);
+  const totalTarget = rows.reduce((n, r) => n + r.target, 0);
+  const complete = totalTarget > 0 && totalDone >= totalTarget;
+
+  const track = el('div', { class: 'rail-track', role: 'tablist', 'aria-label': 'Lifts in this session' });
+  for (const r of rows) {
+    const id = r.ex.id;
+    const isCurrent = id === form.exerciseId;
+    const filled = r.target > 0 ? Math.min(100, (r.done / r.target) * 100) : (r.done ? 100 : 0);
+    track.append(el('button', {
+      type: 'button', role: 'tab',
+      class: `rail-seg${isCurrent ? ' is-current' : ''}${r.target && r.done >= r.target ? ' is-complete' : ''}`,
+      'aria-selected': isCurrent ? 'true' : 'false',
+      onclick: () => { tap(); setPrefill({ exerciseId: id, date: form.date, mode: form.mode }); ctx.refresh({ transition: true }); },
+    }, [
+      el('span', { class: 'rail-seg-name' }, [accentDot(id), el('span', { text: r.ex.name })]),
+      el('span', { class: 'rail-seg-count', text: r.target ? `${r.done} of ${r.target} sets` : `${r.done} set${r.done === 1 ? '' : 's'}` }),
+      el('div', { class: 'rail-seg-bar', 'aria-hidden': 'true' }, [
+        el('span', { class: 'rail-seg-fill', style: `width:${filled}%` }),
+      ]),
+    ]));
+  }
+
+  const sets = sessionSets(store.getEntries().filter((e) => e.date === date));
+  const mins = sessionDuration(sets);
+  const facts = [];
+  if (mins !== null) facts.push(`${Math.max(1, Math.round(mins / 60))} min`);
+  const rest = typicalRest(sets);
+  if (rest !== null) facts.push(`${Math.floor(rest / 60)}:${String(rest % 60).padStart(2, '0')} rest`);
+
+  return el('section', { class: 'rail', 'aria-label': 'This session' }, [
+    el('div', { class: 'rail-head' }, [
+      el('span', { class: 'rail-title', text: date === isoToday() ? 'This session' : formatDate(date) }),
+      facts.length ? el('span', { class: 'rail-sub', text: facts.join(' · ') }) : null,
+    ]),
+    totalTarget > 0 ? el('div', { class: `rail-total${complete ? ' is-complete' : ''}` }, [
+      el('div', {
+        class: 'rail-total-track', role: 'meter',
+        'aria-valuenow': totalDone, 'aria-valuemin': '0', 'aria-valuemax': totalTarget,
+        'aria-label': 'Sets done in this session',
+      }, [
+        el('span', { class: 'rail-total-fill', style: `width:${Math.min(100, (totalDone / totalTarget) * 100)}%` }),
+      ]),
+      el('span', { class: 'rail-total-value', text: complete ? `${totalDone} sets — done` : `${totalDone} of ${totalTarget} sets` }),
+    ]) : null,
+    track,
+  ]);
 }
 
 function quickDate(label, iso, current, onPick) {
@@ -199,12 +292,20 @@ function entryForm(st, ctx, settings) {
   });
 
   const preview = el('div', { class: 'preview' });
-  const nextPill = el('span', { class: 'set-pill is-next' });
+
+  // The rep scheme this session set out to do: the first set is the intent,
+  // and every bar after it is measured against that line.
+  const planReps = todays.length ? Math.round(Number(todays[0].reps))
+    : (plan?.ready ? plan.reps : Math.round(Number(form.reps)) || null);
+  const traceFig = live
+    ? setTrace(sessionTimeline(sessionSets(todays), settings), {
+      planReps, planSets: target, pendingReps: Math.round(Number(form.reps)) || null,
+    })
+    : null;
 
   const paint = () => {
     const w = Number(form.weight), r = Number(form.reps), s = Number(form.sets);
-    nextPill.textContent = r > 0 ? String(Math.round(r)) : '·';
-    nextPill.title = w > 0 ? `next: ${Math.round(r)} reps @ ${fmtWeight(w)} kg` : 'next set';
+    if (traceFig) traceFig.setPending(r);
     if (!(w > 0) || !(r > 0)) { preview.replaceChildren(el('span', { class: 'preview-hint', text: 'Enter a weight and reps.' })); return; }
 
     // In live mode the number that matters is what the SESSION will be worth
@@ -291,7 +392,7 @@ function entryForm(st, ctx, settings) {
     ]) : null,
     el('div', { class: 'lever-row lever-row-wide' }, [weightStep]),
     el('div', { class: 'lever-row' }, [repsStep, setsStep]),
-    live ? tracker(todays, doneSoFar, target, complete, nextPill, ex, ctx) : null,
+    live ? tracker(traceFig, doneSoFar, target, complete, ex, ctx) : null,
     preview,
     el('div', { class: 'field-block' }, [
       el('span', { class: 'field-label', text: live
@@ -340,24 +441,20 @@ function entryForm(st, ctx, settings) {
   ]);
 }
 
+/** Total weight moved across a set of entries. */
+function volSoFarAfter(entries) {
+  return entries.reduce((n, e) => n + volume(e.weight, e.reps, e.sets), 0);
+}
+
 /* ------------------------------------------------------------- tracker */
 
-/** The session so far: one pill per set done, then the one you are about to do. */
-function tracker(todays, doneSoFar, target, complete, nextPill, ex, ctx) {
-  const pills = [];
-  for (const e of todays) {
-    for (let i = 0; i < setCount(e); i++) {
-      pills.push(el('span', {
-        class: 'set-pill is-done', text: String(e.reps),
-        title: `${e.reps} reps @ ${fmtWeight(e.weight)} kg`,
-      }));
-    }
-  }
-  pills.push(nextPill);
-  for (let i = pills.length; i < target; i++) {
-    pills.push(el('span', { class: 'set-pill', text: '·', 'aria-hidden': 'true' }));
-  }
-
+/**
+ * The session so far. The pills grew an axis: same one-mark-per-set idea, now
+ * also showing whether the reps held up, how close to failure each set went and
+ * how long you actually rested — none of which was recordable before the
+ * per-set log.
+ */
+function tracker(traceFig, doneSoFar, target, complete, ex, ctx) {
   return el('div', { class: `set-track${complete ? ' is-complete' : ''}` }, [
     el('div', { class: 'set-track-head' }, [
       el('span', { class: 'set-track-label', text: !target ? `Set ${doneSoFar + 1}`
@@ -376,7 +473,7 @@ function tracker(todays, doneSoFar, target, complete, nextPill, ex, ctx) {
         },
       }, ['Undo last set']) : null,
     ]),
-    el('div', { class: 'set-pills', role: 'list', 'aria-label': 'Sets this session' }, pills),
+    traceFig,
     complete ? el('p', { class: 'set-track-note', text: `${ex.name} done — ${doneSoFar} set${doneSoFar === 1 ? '' : 's'}. Log another if you have one in you.` }) : null,
   ]);
 }
@@ -419,7 +516,11 @@ function logOneSet(st, ctx, settings) {
   // is a decision to keep training, so the clock comes back.
   if (target && doneAfter === target) {
     stopRest();
-    toast(`${st.exercise.name} done · ${doneAfter} set${doneAfter === 1 ? '' : 's'}`, {
+    const spent = sessionDuration(sessionSets(after));
+    const bits = [`${doneAfter} set${doneAfter === 1 ? '' : 's'}`];
+    if (spent !== null && spent >= 60) bits.push(`${Math.round(spent / 60)} min`);
+    bits.push(`${fmt(volSoFarAfter(after), 0)} kg`);
+    toast(`${st.exercise.name} done · ${bits.join(' · ')}`, {
       action: () => { store.undo(); setLastSetId(null); ctx.refresh(); }, actionLabel: 'Undo',
     });
   } else {
@@ -427,6 +528,8 @@ function logOneSet(st, ctx, settings) {
     const ofTarget = target && doneAfter + 1 <= target ? ` of ${target}` : '';
     startRest(settings.restSeconds, {
       label: `${st.exercise.name} · set ${doneAfter + 1}${ofTarget} next`,
+      // What this lift has actually been getting today, rather than the setting.
+      usual: typicalRest(sessionSets(after)),
     });
   }
   ctx.refresh();
@@ -506,6 +609,9 @@ function historyRow(entry, name, isPR, ctx, settings) {
     el('span', { class: 'row-set', text: `${entry.sets} × ${entry.reps} @ ${fmtWeight(entry.weight)} kg` }),
     el('span', { class: 'row-adj', text: fmt(adjE1rm(entry.weight, entry.reps, entry.sets, ctx.settings), 1) }),
     entry.rir !== null && entry.rir !== undefined ? el('span', { class: 'row-rir', text: `RIR ${entry.rir}` }) : null,
+    // Notes have been captured, merged and exported since the first version and
+    // shown nowhere. If it was worth typing at the rack it is worth reading back.
+    entry.notes ? el('span', { class: 'row-note', text: entry.notes }) : null,
   ]);
   const li = el('li', { class: 'swipe-row' }, [
     el('div', { class: 'swipe-action', 'aria-hidden': 'true' }, [el('span', { text: 'Delete' })]),

@@ -33,8 +33,17 @@
   --radius-sm: 10px;
   --tap: 44px;
 
-  /* Identity only — a lift's dot. Never the sole carrier of meaning, so these
-     are chosen to stay distinguishable rather than to hit text contrast. */
+  /* Identity only — a lift's dot. Never the sole carrier of meaning.
+     That constraint is not a preference, it is forced: eight categorical hues
+     cannot be told apart pairwise under deuteranopia. Measured with the
+     dataviz palette validator, the worst pair here is #d03b6b vs #1f9e6e at
+     deutan dE 2.6, and an evenly spaced eight-hue wheel does no better — the
+     best reachable is 2.6, against a target of 8. Only four hues clear it.
+     accentIndex() hashes the exercise id, so any two of these can end up side
+     by side; anything showing a dot must therefore show the lift's name with
+     it. Two slots are also weak on their own terms and worth re-stepping if
+     the set is ever revisited: --accent-5 sits under 3:1 on the light surface,
+     and --accent-7 is close enough to grey to fail the chroma floor. */
   --accent-0: #2a78d6;  --accent-1: #d4622a;  --accent-2: #1f9e6e;  --accent-3: #9457c9;
   --accent-4: #d03b6b;  --accent-5: #c79a12;  --accent-6: #2f9fbd;  --accent-7: #7a879a;
 
@@ -568,6 +577,12 @@ table.grid td.cell.is-pick { box-shadow: inset 0 0 0 2px var(--series-1); }
 .row-set { font-size: var(--text-md); font-variant-numeric: tabular-nums; text-align: right; }
 .row-adj { font-size: var(--text-2xs); color: var(--muted); font-variant-numeric: tabular-nums; }
 .row-rir { font-size: var(--text-2xs); color: var(--muted); text-align: right; }
+/* Spans both columns so a long note wraps under the row rather than squeezing
+   the numbers, and sits in quote-ish italics so it reads as your words. */
+.row-note {
+  grid-column: 1 / -1; font-size: var(--text-2xs); font-style: italic;
+  color: var(--text-secondary); margin-top: var(--space-0);
+}
 
 /* --------------------------------------------------------------- charts */
 
@@ -952,11 +967,10 @@ h1 .accent-dot { width: 11px; height: 11px; margin-right: 9px; vertical-align: m
 .rest.is-in { opacity: 1; transform: none; }
 .rest.is-leaving { opacity: 0; transform: translateY(8px); }
 
-.rest-fill {
-  position: absolute; left: 0; top: 0; bottom: 0; width: 0;
-  background: var(--series-wash); transition: width 0.5s linear;
-}
-.rest.is-done .rest-fill { background: var(--good-tint); }
+/* The linear fill that used to wash across the dock is now the ring on the
+   left — see restRing() in charts.js. Kept: the tint when rest is up, which is
+   what makes the dock readable from across the room. */
+.rest.is-done { background: color-mix(in srgb, var(--good) 8%, var(--surface-1)); }
 .rest-main { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .rest-label {
   font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: 0.05em;
@@ -1137,3 +1151,115 @@ h1 .accent-dot { width: 11px; height: 11px; margin-right: 9px; vertical-align: m
 }
 .disclose-body .fact-value,
 .disclose-body .fact-label { font-variant-numeric: tabular-nums; }
+
+/* -------------------------------------------------- the session so far */
+
+.chart-trace { margin: var(--space-2) 0 0; }
+
+/* Done sets are solid; the one you are about to do is an outline, the same
+   language the set pills used before they grew an axis. */
+.chart-svg .trace-bar { fill: var(--series-1); opacity: 0.6; }
+.chart-svg .trace-bar.bar-current { opacity: 1; }
+/* A set that came up short of the plan. The dashed reference line above it is
+   what carries the meaning; the lighter fill only seconds it. */
+.chart-svg .trace-bar.is-short { fill: var(--warning); opacity: 0.75; }
+.chart-svg .trace-bar.is-next {
+  fill: none; stroke: var(--series-1); stroke-width: 1.5; stroke-dasharray: 3 3; animation: none;
+}
+.chart-svg .trace-slot { stroke: var(--border-strong); stroke-width: 2; stroke-linecap: round; }
+
+.chart-svg .trace-reps {
+  fill: var(--text-primary); font: var(--fw-bold) var(--text-2xs) var(--font);
+  font-variant-numeric: tabular-nums;
+}
+.chart-svg .trace-reps.is-next { fill: var(--series-1); }
+.chart-svg .trace-rir {
+  fill: var(--muted); font: var(--fw-medium) var(--text-3xs) var(--font);
+  font-variant-numeric: tabular-nums;
+}
+.chart-svg .trace-rest {
+  fill: var(--axis); font: var(--fw-medium) var(--text-3xs) var(--font);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------ rest ring */
+
+.rest-ring { flex: none; display: block; }
+.rest-ring-track { fill: none; stroke: var(--border-strong); stroke-width: 2.5; }
+.rest-ring-arc {
+  fill: none; stroke: var(--series-1); stroke-width: 2.5; stroke-linecap: round;
+  transition: stroke-dashoffset var(--dur-base) linear;
+}
+.rest.is-done .rest-ring-arc { stroke: var(--good); }
+
+/* ------------------------------------------------------------ session rail */
+
+/* The first view of a session as a whole rather than one lift at a time. */
+.rail {
+  display: flex; flex-direction: column; gap: var(--space-2);
+  padding: var(--space-4); margin-bottom: var(--space-4);
+  background: var(--surface-1); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+}
+.rail-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); }
+.rail-title { font-size: var(--text-sm); font-weight: var(--fw-semi); color: var(--text-primary); }
+.rail-sub {
+  font-size: var(--text-2xs); color: var(--muted); font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.rail-track {
+  display: flex; gap: var(--space-1); overflow-x: auto; padding-bottom: var(--space-0);
+  scrollbar-width: none; -webkit-overflow-scrolling: touch;
+}
+.rail-track::-webkit-scrollbar { display: none; }
+
+/* A segment names its lift. It has to: the identity hues cannot be told apart
+   pairwise under deuteranopia, so the dot is never the only thing saying which
+   lift this is. See the note on --accent-* in the token block. */
+.rail-seg {
+  flex: 1 0 auto; min-width: 82px; max-width: 148px;
+  display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-0);
+  padding: var(--space-2) var(--space-2) var(--space-2);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface-2); color: var(--text-secondary);
+  text-align: left; cursor: pointer; touch-action: manipulation;
+  transition: border-color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+}
+.rail-seg.is-current {
+  border-color: var(--series-1); background: var(--series-wash); color: var(--text-primary);
+}
+.rail-seg.is-complete .rail-seg-count { color: var(--good-ink); }
+.rail-seg-name {
+  display: flex; align-items: center; gap: var(--space-1);
+  font-size: var(--text-2xs); font-weight: var(--fw-semi); color: var(--text-primary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+}
+.rail-seg-count {
+  font-size: var(--text-3xs); font-weight: var(--fw-medium); color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.rail-seg-bar {
+  width: 100%; height: 4px; border-radius: var(--radius-pill);
+  background: var(--neutral-tint); overflow: hidden; margin-top: var(--space-0);
+}
+.rail-seg-fill {
+  display: block; height: 100%; border-radius: var(--radius-pill);
+  background: var(--series-1); transition: width var(--dur-slow) var(--ease-out);
+}
+.rail-seg.is-complete .rail-seg-fill { background: var(--good); }
+
+/* The session total, in the same meter language as the weekly sets meter. */
+.rail-total { display: flex; align-items: center; gap: var(--space-3); }
+.rail-total-track {
+  flex: 1; height: 6px; border-radius: var(--radius-pill);
+  background: var(--neutral-tint); overflow: hidden;
+}
+.rail-total-fill {
+  display: block; height: 100%; border-radius: var(--radius-pill);
+  background: var(--series-1); transition: width var(--dur-slow) var(--ease-out);
+}
+.rail-total.is-complete .rail-total-fill { background: var(--good); }
+.rail-total-value {
+  font-size: var(--text-2xs); font-weight: var(--fw-semi); color: var(--text-secondary);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
