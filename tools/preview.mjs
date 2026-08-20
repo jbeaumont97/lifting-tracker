@@ -104,17 +104,22 @@ const screens = [];
     'The card is open, so this shows the prescription, the verdict, the readiness note, both disclosures and the full trade-off grid.'));
 }
 
-// Log, mid-session, with sets already down.
+// Log, mid-session: two lifts under way, sets already down, the rest between
+// them real rather than backfilled.
 {
-  const ex = store.getExercises()[0];
-  store.logSet({ exerciseId: ex.id, date: TODAY, weight: 100, reps: 5, rir: 3 });
-  store.logSet({ exerciseId: ex.id, date: TODAY, weight: 100, reps: 5, rir: 2 });
+  const [a, b] = store.getExercises();
+  const spaced = (fn, gapMs) => { const t = Date.now; let n = t(); Date.now = () => n; fn(() => { n += gapMs; }); Date.now = t; };
+  spaced((tick) => {
+    store.logSet({ exerciseId: a.id, date: TODAY, weight: 100, reps: 5, rir: 3 }); tick();
+    store.logSet({ exerciseId: a.id, date: TODAY, weight: 100, reps: 5, rir: 2 }); tick();
+    store.logSet({ exerciseId: a.id, date: TODAY, weight: 100, reps: 4, rir: 0 }); tick();
+    store.logSet({ exerciseId: b.id, date: TODAY, weight: 60, reps: 8, rir: 3, notes: 'belt on, felt fast' });
+  }, 165000);
   select.invalidate();
-  setPrefill({ exerciseId: ex.id, date: TODAY });
+  setPrefill({ exerciseId: a.id, date: TODAY, mode: 'sets' });
   screens.push(await screen('Log', renderLog(ctx({ route: 'log' })),
-    'Two sets already logged, so the set-pill tracker, the live score preview and the save button label are all in their working state.'));
-  store.undo();
-  store.undo();
+    'Mid-session: the rail across the top is every lift today, the trace under the form is this lift set by set with its RIR and real rest between sets, and the third squat set shows short against the plan.'));
+  for (let i = 0; i < 4; i++) store.undo();
   select.invalidate();
 }
 

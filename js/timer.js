@@ -6,10 +6,12 @@
 // never accumulated, so a backgrounded tab does not lose count.
 
 import { el, tap } from './ui.js';
+import { restRing } from './charts.js';
 
-let state = null;                 // { startedAt, target, label, tick }
+let state = null;                 // { startedAt, target, label, usual, tick }
 let host = null;
 let bar = null;
+let ring = null;
 
 function dockHost() {
   if (!host || !host.isConnected) {
@@ -37,14 +39,17 @@ export function isResting() { return state !== null; }
  * the clock keeps counting past it, because knowing you have rested four
  * minutes is more useful than a timer that silently stopped at three.
  */
-export function startRest(seconds, { label = 'Rest' } = {}) {
+export function startRest(seconds, { label = 'Rest', usual = null } = {}) {
   const target = Number(seconds) > 0 ? Number(seconds) : 0;
   if (!target) return;
   stopRest({ quiet: true });
-  state = { startedAt: Date.now(), target, label, rang: false, tick: null };
+  state = { startedAt: Date.now(), target, label, usual, rang: false, tick: null };
 
+  // A clock face rather than a 3px bar: rest is the one genuinely circular
+  // thing in the app, and a ring reads from across a rack.
+  ring = restRing({ size: 30 });
   bar = el('div', { class: 'rest', role: 'timer', 'aria-live': 'off' }, [
-    el('div', { class: 'rest-fill', 'aria-hidden': 'true' }),
+    ring,
     el('div', { class: 'rest-main' }, [
       el('span', { class: 'rest-label', text: label }),
       el('span', { class: 'rest-time', text: '0:00' }),
@@ -71,12 +76,16 @@ function add(seconds) {
 function paint() {
   if (!state || !bar) return;
   const elapsed = (Date.now() - state.startedAt) / 1000;
-  const pct = Math.max(0, Math.min(100, (elapsed / state.target) * 100));
-  bar.querySelector('.rest-fill').style.width = `${pct}%`;
+  if (ring) ring.set(elapsed / state.target);
   bar.querySelector('.rest-time').textContent = mmss(elapsed);
-  bar.querySelector('.rest-label').textContent = elapsed >= state.target
-    ? `${state.label} — ready`
-    : `${state.label} · ${mmss(state.target - elapsed)} left`;
+  // Once rest is up the countdown has nothing left to say, so the line turns
+  // into what this rest is worth: how it compares with how long this lift
+  // usually gets. Only when that is actually known.
+  bar.querySelector('.rest-label').textContent = elapsed < state.target
+    ? `${state.label} · ${mmss(state.target - elapsed)} left`
+    : state.usual > 0
+      ? `Ready — you usually rest ${mmss(state.usual)} here`
+      : `${state.label} — ready`;
   bar.setAttribute('aria-label', `${state.label}, ${mmss(elapsed)} elapsed of ${mmss(state.target)}`);
   if (!state.rang && elapsed >= state.target) {
     state.rang = true;
@@ -88,6 +97,7 @@ function paint() {
 }
 
 export function stopRest({ quiet = false } = {}) {
+  ring = null;
   if (state) { clearInterval(state.tick); state = null; }
   if (bar) {
     const leaving = bar;
