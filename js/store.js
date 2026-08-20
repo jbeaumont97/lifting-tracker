@@ -5,10 +5,11 @@
 
 import { SEED } from './seed.js';
 import { isoToday, setKey, READINESS_DEFAULTS } from './metrics.js';
+import { sessionSets, typicalRest } from './insights.js';
 
 const KEY = 'liftingTracker.v1';
 const THEME_KEY = 'liftingTracker.theme';
-const SCHEMA = 1;
+const SCHEMA = 2;   // v2 hangs a per-set log off each entry; see normaliseLog()
 
 export const DEFAULT_SETTINGS = {
   formula: 'epley',        // 'epley' | 'brzycki'
@@ -79,6 +80,7 @@ function normalise(raw) {
   d.entries = (raw.entries || [])
     .filter((e) => e && e.date && known.has(e.exerciseId) && Number.isFinite(Number(e.weight)) && Number(e.reps) > 0)
     .map((e, i) => ({
+      log: e.log,
       id: String(e.id ?? `en-${i}`),
       date: String(e.date).slice(0, 10),
       exerciseId: String(e.exerciseId),
@@ -88,7 +90,8 @@ function normalise(raw) {
       rir: e.rir === null || e.rir === undefined || e.rir === '' ? null : Number(e.rir),
       notes: String(e.notes ?? ''),
       seq: Number(e.seq) || i + 1,
-    }));
+    }))
+    .map((e) => ({ ...e, log: normaliseLog(e.log, e) }));
   // A spread over every entry blows the call stack on a long log; fold instead.
   d.seq = d.entries.reduce((m, e) => (e.seq + 1 > m ? e.seq + 1 : m), 1);
   d.schema = SCHEMA;
@@ -98,6 +101,57 @@ function normalise(raw) {
 function num(v, fallback) {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
+}
+
+/**
+ * One record per physical set — schema v2.
+ *
+ * The block fields stay canonical: every number the app publishes still comes
+ * from weight/reps/sets, so nothing here can move a figure the spreadsheet
+ * fixture checks. This is detail hung off the side, and it is the only place
+ * that knows WHEN a set happened and how close to failure it was on its own
+ * rather than merged into the block's minimum.
+ *
+ *   at    epoch ms, or null when the record was backfilled rather than measured
+ *   rir   this set's own reps in reserve, or null when it was never known
+ *   note  anything said about this set in particular
+ *
+ * The null is the important part. Padding a pre-v2 block with the block's RIR
+ * would claim every set in it was taken equally close to failure, and inventing
+ * timestamps would make rest intervals up. Unknown is recorded as unknown.
+ *
+ * The array is reconciled to the set count on every load, so editing a block
+ * from three sets to five leaves two honest blanks rather than a broken pair.
+ */
+function normaliseLog(raw, entry) {
+  const want = Number(entry.sets) > 0 ? Math.round(Number(entry.sets)) : 1;
+  const out = [];
+  for (const r of Array.isArray(raw) ? raw : []) {
+    if (out.length >= want) break;
+    if (!r || typeof r !== 'object') continue;
+    const at = Number(r.at);
+    out.push({
+      at: Number.isFinite(at) && at > 0 ? at : null,
+      rir: r.rir === null || r.rir === undefined || r.rir === '' ? null : Number(r.rir),
+      note: String(r.note ?? ''),
+    });
+  }
+  while (out.length < want) out.push({ at: null, rir: null, note: '' });
+  return out;
+}
+
+/** A fresh record for a set happening right now. */
+function setRecord({ rir = null, note = '' } = {}) {
+  return {
+    at: Date.now(),
+    rir: rir === '' || rir === null || rir === undefined ? null : Number(rir),
+    note: String(note || ''),
+  };
+}
+
+/** Entries carry an array; a shallow copy would hand undo a shared reference. */
+function cloneEntry(e) {
+  return { ...e, log: (e.log || []).map((r) => ({ ...r })) };
 }
 
 export function seedDoc() {
@@ -258,6 +312,9 @@ export function addEntry(entry) {
       notes: String(entry.notes || ''),
       seq: d.seq++,
     };
+    // Writing up a session that is already over: the sets are real, the times
+    // are not known, and guessing them would poison the rest-interval maths.
+    created.log = normaliseLog(null, created);
     d.entries.push(created);
     const id = created.id;
     record((u) => { u.entries = u.entries.filter((e) => e.id !== id); });
@@ -293,8 +350,9 @@ export function logSet(set) {
     const key = setKey(candidate);
     const match = d.entries.find((e) => e.exerciseId === set.exerciseId && e.date === date && setKey(e) === key);
     if (match) {
-      const prev = { id: match.id, sets: match.sets, rir: match.rir, notes: match.notes };
+      const prev = { id: match.id, sets: match.sets, rir: match.rir, notes: match.notes, logLen: match.log.length };
       match.sets += 1;
+      match.log.push(setRecord({ rir: candidate.rir, note: candidate.notes }));
       // The block keeps the hardest set's RIR — the one closest to failure is
       // what the number is for — and collects any notes rather than losing one.
       if (candidate.rir !== null) match.rir = match.rir === null ? candidate.rir : Math.min(match.rir, candidate.rir);
@@ -304,11 +362,17 @@ export function logSet(set) {
       created = match;
       record((u) => {
         const m = u.entries.find((e) => e.id === prev.id);
-        if (m) { m.sets = prev.sets; m.rir = prev.rir; m.notes = prev.notes; }
+        if (m) {
+          m.sets = prev.sets; m.rir = prev.rir; m.notes = prev.notes;
+          m.log.length = prev.logLen;
+        }
       });
       return;
     }
-    created = { id: uid('en'), date, exerciseId: set.exerciseId, ...candidate, sets: 1, seq: d.seq++ };
+    created = {
+      id: uid('en'), date, exerciseId: set.exerciseId, ...candidate, sets: 1, seq: d.seq++,
+      log: [setRecord({ rir: candidate.rir, note: candidate.notes })],
+    };
     d.entries.push(created);
     const id = created.id;
     record((u) => { u.entries = u.entries.filter((e) => e.id !== id); });
@@ -331,10 +395,14 @@ export function removeLastSet(exerciseId, date, preferId = null) {
     if (target.sets > 1) {
       const id = target.id;
       target.sets -= 1;
-      record((u) => { const m = u.entries.find((e) => e.id === id); if (m) m.sets += 1; });
+      const dropped = target.log.pop() || null;
+      record((u) => {
+        const m = u.entries.find((e) => e.id === id);
+        if (m) { m.sets += 1; if (dropped) m.log.push(dropped); }
+      });
     } else {
       const idx = d.entries.indexOf(target);
-      const copy = { ...target };
+      const copy = cloneEntry(target);
       d.entries = d.entries.filter((e) => e.id !== target.id);
       record((u) => { u.entries.splice(Math.min(idx, u.entries.length), 0, copy); });
     }
@@ -349,6 +417,7 @@ export function updateEntry(id, patch) {
     const prev = {
       date: e.date, weight: e.weight, reps: e.reps, sets: e.sets,
       rir: e.rir, notes: e.notes, exerciseId: e.exerciseId,
+      log: (e.log || []).map((r) => ({ ...r })),
     };
     record((u) => { const t = u.entries.find((x) => x.id === id); if (t) Object.assign(t, prev); });
     Object.assign(e, {
@@ -360,6 +429,9 @@ export function updateEntry(id, patch) {
       notes: patch.notes ?? e.notes,
       exerciseId: patch.exerciseId ?? e.exerciseId,
     });
+    // Editing three sets up to five leaves two honest blanks rather than a
+    // log that no longer describes the block it belongs to.
+    e.log = normaliseLog(e.log, e);
   }, { undoable: true, label: 'entry edited' });
 }
 
@@ -367,7 +439,7 @@ export function deleteEntry(id) {
   commit((d, record) => {
     const idx = d.entries.findIndex((e) => e.id === id);
     if (idx < 0) return;
-    const copy = { ...d.entries[idx] };
+    const copy = cloneEntry(d.entries[idx]);
     d.entries.splice(idx, 1);
     record((u) => { u.entries.splice(Math.min(idx, u.entries.length), 0, copy); });
   }, { undoable: true, label: 'entry deleted' });
@@ -453,9 +525,27 @@ export function exportCSV() {
     const s = String(v ?? '');
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
-  const rows = [['Date', 'Exercise', 'Weight (kg)', 'Reps', 'Sets', 'RIR', 'Notes']];
+  // Local wall-clock, because the Date column already carries the day and
+  // nobody reconciles a UTC timestamp against their own training log.
+  const hhmm = (ms) => {
+    const t = new Date(ms);
+    return `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`;
+  };
+
+  // One row per block, exactly as before — a shape that already lives in
+  // people's spreadsheets. The three new columns are block facts derived from
+  // the per-set log, and stay blank for anything logged before it existed.
+  const rows = [['Date', 'Exercise', 'Weight (kg)', 'Reps', 'Sets', 'RIR', 'Notes',
+    'Started', 'Finished', 'Median rest (s)']];
   for (const e of [...d.entries].sort((a, b) => a.date.localeCompare(b.date) || a.seq - b.seq)) {
-    rows.push([e.date, names.get(e.exerciseId) || '', e.weight, e.reps, e.sets, e.rir ?? '', e.notes]);
+    const sets = sessionSets([e]).filter((x) => x.measured);
+    const rest = typicalRest(sessionSets([e]));
+    rows.push([
+      e.date, names.get(e.exerciseId) || '', e.weight, e.reps, e.sets, e.rir ?? '', e.notes,
+      sets.length ? hhmm(sets[0].at) : '',
+      sets.length > 1 ? hhmm(sets[sets.length - 1].at) : '',
+      rest ?? '',
+    ]);
   }
   return rows.map((r) => r.map(q).join(',')).join('\n');
 }
