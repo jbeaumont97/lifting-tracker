@@ -1047,10 +1047,10 @@ const fakeStats = {
 };
 
 {
-  ok('bestWeight is the heaviest ever moved', I.bestWeight(fakeStats) === 97.5);
+  ok('bestLoad is the heaviest ever moved', I.bestLoad(fakeStats) === 97.5);
   const ms = I.milestones(fakeStats);
   const w = ms.find((m) => m.kind === 'weight');
-  const e = ms.find((m) => m.kind === 'e1rm');
+  const e = ms.find((m) => m.kind === 'score');
   ok('the next milestone on the bar is the next round number up', w.value === 100, String(w.value));
   ok('it is measured from your best, not your last', w.from === 97.5);
   ok('the next score milestone rounds by its own magnitude', e.value === 120, String(e.value));
@@ -1138,6 +1138,145 @@ const fakeStats = {
   close('the shares add up to one', bal.reduce((n, r) => n + r.share, 0), bal.some((r) => r.sets) ? 1 : 0, 1e-9);
   ok('a lift with a weekly target gets a verdict',
     bal.filter((r) => r.target).every((r) => ['under', 'over', 'on target'].includes(r.status)));
+}
+
+/* ------------------------------------------ 8. lifts with nothing to load */
+
+// A press-up has no weight to put on it, so it is measured in reps. The shape
+// of the number is deliberately the same as a weighted lift's, which is what
+// lets the trend, the bands, the planner and the readiness model all work on
+// one without knowing it is one.
+{
+  const repsEx = { id: 'pu', name: 'Press-ups', kind: 'reps', setsPerSession: 3, gainPerWeek: 0.015, setsPerWeek: 12, step: 1, base: 0 };
+  const rows = [
+    { id: 'r1', date: '2026-08-04', exerciseId: 'pu', weight: 0, reps: 10, sets: 3, rir: 2, notes: '', seq: 1 },
+    { id: 'r2', date: '2026-08-08', exerciseId: 'pu', weight: 0, reps: 11, sets: 3, rir: 2, notes: '', seq: 2 },
+    { id: 'r3', date: '2026-08-12', exerciseId: 'pu', weight: 0, reps: 12, sets: 3, rir: 1, notes: '', seq: 3 },
+  ];
+  const st = M.exerciseStats(repsEx, rows, settings, TODAY);
+
+  close('a reps set is worth its reps, with the set bonus',
+    st.lastAdj, 12 * M.setBonus(3, settings.setBonusK), 1e-9);
+  ok('a reps lift is recognised as one', M.isReps(repsEx) === true);
+  ok('and a normal lift is not', M.isReps({ name: 'Squat' }) === false);
+  close('a reps lift moves no tonnage', st.entries[0].volume, 0, 1e-9);
+  close('and none of it reaches the weekly total', st.volume7, 0, 1e-9);
+  ok('but its sets still count', st.sets7 > 0);
+  ok('the trend still fits', st.trendPerWeek > 0);
+
+  // Solving for reps is the same job as solving for weight, on the integers.
+  close('the fewest reps that clear a target', M.repsForTarget(12.85, 3, settings), 13, 1e-9);
+  ok('never fewer than one', M.repsForTarget(0.1, 3, settings) === 1);
+  const need = M.repsForTarget(20, 4, settings);
+  ok('and the answer really does clear it', need * M.setBonus(4, settings.setBonusK) >= 20 - 1e-9);
+  ok('by the smallest whole rep', (need - 1) * M.setBonus(4, settings.setBonusK) < 20);
+
+  const plan = M.planFor(st, { ...settings, readiness: 'off' }, {});
+  ok('the plan knows what kind of lift it is', plan.kind === 'reps');
+  ok('and asks for no weight at all', plan.weight === null);
+  ok('it prescribes a rep count', plan.reps > 0 && Number.isInteger(plan.reps));
+  close('scored on the reps scale', plan.score, plan.reps * M.setBonus(plan.sets, settings.setBonusK), 1e-9);
+  ok('it still gets a verdict', !!plan.band);
+
+  ok('there is no rep-scheme grid to trade against', plan.grid.length === 0);
+  ok('the choice is how many sets', plan.options.length === M.SET_COLUMNS.length);
+  ok('each option clears the target',
+    plan.options.every((o) => o.score >= plan.target - 1e-9), JSON.stringify(plan.options.map((o) => o.score)));
+  ok('more sets never asks for more reps',
+    plan.options.every((o, i) => i === 0 || o.reps <= plan.options[i - 1].reps),
+    plan.options.map((o) => `${o.sets}x${o.reps}`).join(' '));
+  ok('one option is the one currently picked', plan.options.filter((o) => o.isPick).length === 1);
+  ok('the gentlest option overshoots less than the default',
+    plan.gentlest === null || plan.gentlest.score < plan.score);
+
+  // The comeback rule is about doing less than you were, and on a reps lift
+  // "less" is fewer reps rather than lighter.
+  close('last load is the reps, not the weight', M.lastSessionLoad(st), 12, 1e-9);
+  close('and on a weighted lift it is still the weight',
+    M.lastSessionLoad(M.exerciseStats(SEED.exercises[0], SEED.entries, settings, TODAY)),
+    M.lastSessionWeight(M.exerciseStats(SEED.exercises[0], SEED.entries, settings, TODAY)), 1e-9);
+
+  // Display helpers.
+  ok('a reps lift reads without a weight', M.describeSet(repsEx, 3, 12, 0) === '3 × 12 reps');
+  ok('a weighted one still reads with one', M.describeSet({ name: 'Squat' }, 3, 5, 100) === '3 × 5 @ 100 kg');
+  ok('units follow the lift', M.loadUnit(repsEx) === 'reps' && M.loadUnit({}) === 'kg');
+
+  // Milestones are chased in fives, and converted without a rep factor.
+  const ms = I.milestones(st);
+  const rm = ms.find((m) => m.kind === 'reps');
+  ok('the next milestone is a rep count', !!rm && rm.value === 15, JSON.stringify(rm));
+  ok('measured from the best set ever done', rm.from === 12);
+  ok('there is no weight milestone on a reps lift', !ms.some((m) => m.kind === 'weight'));
+  const run = I.runway(st, settings, { todayIso: TODAY });
+  close('the runway converts by the set bonus alone',
+    run.scoreNeeded, 15 * M.setBonus(run.sets, settings.setBonusK), 1e-9);
+}
+
+// The spreadsheet fixture must be untouched by any of it.
+{
+  const untouched = M.allStats(SEED.exercises, SEED.entries, settings, TODAY);
+  for (const row of fixture.dashboard) {
+    const st = untouched.find((x) => x.exercise.name === row.name);
+    if (!st) continue;
+    close(`reps support left ${row.name} alone`, st.lastAdj, row.lastAdj, 0.01);
+  }
+}
+
+/* ------------------------------------------------ 9. how fast a lift moves */
+
+{
+  ok('there are three levels', I.LEVELS.length === 3);
+  ok('and they get slower', I.LEVELS.every((l, i) => i === 0 || l.gainPerWeek < I.LEVELS[i - 1].gainPerWeek));
+  ok('and ask for more volume as they go',
+    I.LEVELS.every((l, i) => i === 0 || l.setsPerWeek >= I.LEVELS[i - 1].setsPerWeek));
+  ok('every level explains itself', I.LEVELS.every((l) => l.hint.length > 20));
+
+  ok('a lift set to a preset reports it',
+    I.levelOf({ gainPerWeek: 0.015 }).key === 'beginner');
+  ok('a lift tuned by hand reports nothing rather than the nearest',
+    I.levelOf({ gainPerWeek: 0.0075 }) === null,
+    'the shipped default sits between two presets and must read as Custom');
+
+  ok('1.31%/wk looks like a beginner', I.nearestLevel(0.0131).key === 'beginner');
+  ok('0.40%/wk looks intermediate', I.nearestLevel(0.0040).key === 'intermediate');
+  ok('0.10%/wk looks advanced', I.nearestLevel(0.0010).key === 'advanced');
+  ok('no measurable gain falls to the slowest', I.nearestLevel(0).key === 'advanced');
+
+  const base = {
+    exercise: { gainPerWeek: 0.005 }, gainPerWeek: 0.005,
+    trendReliable: true, lastAdj: 100, trendPerWeek: 1.31, trendWindowDays: 98,
+  };
+  const sug = I.suggestLevel(base);
+  ok('a lift moving much faster than its setting says so', sug && sug.level.key === 'beginner');
+  close('and reports the rate it measured', sug.measured, 0.0131, 1e-9);
+  ok('with the window it measured over', sug.weeks === 14);
+
+  ok('a lift moving at roughly its setting says nothing',
+    I.suggestLevel({ ...base, trendPerWeek: 0.52 }) === null);
+  ok('a thin fit says nothing', I.suggestLevel({ ...base, trendReliable: false }) === null);
+  ok('a lift going backwards says nothing', I.suggestLevel({ ...base, trendPerWeek: -0.4 }) === null);
+  ok('a lift with no history says nothing', I.suggestLevel({ ...base, lastAdj: null }) === null);
+  ok('and it never suggests what is already set',
+    I.suggestLevel({ ...base, exercise: { gainPerWeek: 0.015 }, gainPerWeek: 0.015 }) === null);
+}
+
+// --- the store keeps the kind, and defaults it safely ---
+{
+  fresh();
+  const made = store.addExercise({ name: 'Pull-ups', kind: 'reps' });
+  ok('a lift can be created with nothing to load', made.kind === 'reps');
+  ok('and an ordinary one still is not', store.addExercise({ name: 'Row' }).kind === 'weight');
+  ok('junk falls back to a weighted lift', store.addExercise({ name: 'X', kind: 'nonsense' }).kind === 'weight');
+
+  store.updateExercise(made.id, { kind: 'weight' });
+  ok('the kind can be changed', store.getExercise(made.id).kind === 'weight');
+  store.undo();
+  ok('and undone', store.getExercise(made.id).kind === 'reps');
+
+  const doc = JSON.parse(store.exportJSON());
+  for (const e of doc.exercises) delete e.kind;
+  ok('a document written before any of this loads as weighted',
+    store.importJSON(JSON.stringify(doc)).exercises.every((e) => e.kind === 'weight'));
 }
 
 /* ------------------------------------------------------------------ report */

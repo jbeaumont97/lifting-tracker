@@ -101,12 +101,18 @@ const screens = [];
 // Next, with the top card open so the grid and the disclosures are visible.
 {
   store.reload();
+
+  // A lift with nothing to load, so the reps-only prescription is on the page.
+  const pu = store.addExercise({ name: 'Press-ups', kind: 'reps', setsPerSession: 3, gainPerWeek: 0.015, setsPerWeek: 12 });
+  for (const [i, reps] of [10, 11, 12, 12].entries()) {
+    store.addEntry({ exerciseId: pu.id, date: M.isoAddDays(TODAY, -14 + i * 4), weight: 0, reps, sets: 3, rir: 2 });
+  }
   select.invalidate();
   const c = ctx();
   const trained = c.stats.find((s) => s.entryCount > 0);
   openCard(trained.exercise.id);
   screens.push(await screen('Next', renderPlan(ctx()),
-    'The card is open, so this shows the prescription, the verdict, the readiness note, both disclosures and the full trade-off grid.'));
+    'The card is open, so this shows the prescription, the verdict, the readiness note, both disclosures and the full trade-off grid. Press-ups near the bottom is a lift with nothing to load: it is prescribed in reps, and its trade-off is one row of set counts rather than a grid.'));
 }
 
 // Log, mid-session: two lifts under way, sets already down, the rest between
@@ -177,8 +183,11 @@ const screens = [];
 }
 
 {
+  // Open a lift so the kind switch and the level picker are on the page.
+  uistate.set('setup.openExerciseId', store.getExercises()[0].id);
   screens.push(await screen('Setup', renderSetup(ctx({ route: 'setup' })),
-    'The disclosure switch that replaced the simple/detailed toggle, plus the per-lift and coefficient cards folded away.'));
+    'The training level that new lifts inherit, and the open lift card showing what changes between sessions, that lift\u2019s own level, and the numbers the presets fill in. The coefficient cards stay folded away.'));
+  uistate.set('setup.openExerciseId', null);
 }
 
 /* ---------------------------------------------------------------- the page */

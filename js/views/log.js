@@ -20,7 +20,7 @@ import { startRest, stopRest } from '../timer.js';
 import * as store from '../store.js';
 import {
   isoToday, isoAddDays, relativeDate, formatDate, fmt, fmtWeight, fmtSigned,
-  adjE1rm, e1rm, volume, planFor, bandFor, exerciseStats, sessionAdjWith,
+  adjE1rm, e1rm, volume, planFor, bandFor, exerciseStats, sessionAdjWith, isReps,
 } from '../metrics.js';
 import { bandChip } from '../ui.js';
 import { setTrace } from '../charts.js';
@@ -275,8 +275,13 @@ function entryForm(st, ctx, settings) {
   // Prefill order: what you are already doing today, then an explicit plan
   // hand-off, then the plan, then last session.
   const inProgress = todays.length ? todays[todays.length - 1] : null;
-  if (form.weight == null) form.weight = (live && inProgress ? inProgress.weight : null) ?? (plan?.ready ? plan.weight : last?.weight ?? (base || 20));
-  if (Number(form.weight) < base) form.weight = base;
+  // A lift with nothing to load has no weight to prefill, remember or ask for.
+  const repsOnly = isReps(ex);
+  if (repsOnly) form.weight = 0;
+  else {
+    if (form.weight == null) form.weight = (live && inProgress ? inProgress.weight : null) ?? (plan?.ready ? plan.weight : last?.weight ?? (base || 20));
+    if (Number(form.weight) < base) form.weight = base;
+  }
   if (form.reps == null) form.reps = (live && inProgress ? inProgress.reps : null) ?? (plan?.ready ? plan.reps : last?.reps ?? 5);
   if (form.sets == null) form.sets = plan?.ready ? plan.sets : last?.sets ?? 3;
 
@@ -317,21 +322,27 @@ function entryForm(st, ctx, settings) {
   const paint = () => {
     const w = Number(form.weight), r = Number(form.reps), s = Number(form.sets);
     if (traceFig) traceFig.setPending(r);
-    if (!(w > 0) || !(r > 0)) { preview.replaceChildren(el('span', { class: 'preview-hint', text: 'Enter a weight and reps.' })); return; }
+    if (!(r > 0) || (!repsOnly && !(w > 0))) {
+      preview.replaceChildren(el('span', { class: 'preview-hint', text: repsOnly ? 'Enter the reps you did.' : 'Enter a weight and reps.' }));
+      return;
+    }
 
     // In live mode the number that matters is what the SESSION will be worth
     // once this set is in — not what one set on its own scores.
     const adj = live
-      ? sessionAdjWith(todays, { weight: w, reps: r }, settings)
-      : adjE1rm(w, r, s, settings);
+      ? sessionAdjWith(todays, { weight: w, reps: r }, settings, ex.kind)
+      : adjE1rm(w, r, s, settings, ex.kind);
     const target1rm = plan?.ready ? plan.target : null;
     const band = target1rm ? bandFor(adj, target1rm, bestBefore === -Infinity ? null : bestBefore, settings) : null;
     // "Already ahead" and "about to go ahead" are different things: the badge
     // belongs on the set that crosses your best, not on every set after it.
-    const adjSoFar = live && todays.length ? sessionAdjWith(todays, null, settings) : -Infinity;
+    const adjSoFar = live && todays.length ? sessionAdjWith(todays, null, settings, ex.kind) : -Infinity;
     const alreadyBest = bestBefore > -Infinity && adjSoFar > bestBefore + 1e-9;
     const beatsBest = bestBefore > -Infinity && adj > bestBefore + 1e-9 && !alreadyBest;
-    const work = volSoFar + volume(w, r, live ? 1 : s);
+    const work = repsOnly
+      ? todays.reduce((n, e) => n + e.reps * setCount(e), 0) + r * (live ? 1 : s)
+      : volSoFar + volume(w, r, live ? 1 : s);
+    const workText = repsOnly ? `${fmt(work, 0)} reps in total` : `${fmt(work, 0)} kg of work`;
 
     const scoreNum = el('span', { class: 'preview-num' });
     preview.replaceChildren(
@@ -341,10 +352,10 @@ function entryForm(st, ctx, settings) {
         beatsBest ? prBadge() : null,
       ]),
       el('div', { class: 'preview-sub', text: live
-        ? `after ${doneSoFar + 1} set${doneSoFar ? 's' : ''} · ${fmt(work, 0)} kg of work`
+        ? `after ${doneSoFar + 1} set${doneSoFar ? 's' : ''} · ${workText}`
           + (alreadyBest ? ' · already your best session'
             : bestBefore > -Infinity ? ` · best before today ${fmt(bestBefore, 1)}` : '')
-        : `${fmt(work, 0)} kg of work`
+        : workText
           + (target1rm ? ` · target ${fmt(target1rm, 1)} (${fmtSigned(adj - target1rm, 1)})` : '')
           + (bestBefore > -Infinity ? ` · best ${fmt(bestBefore, 1)}` : '') }),
     );
@@ -389,10 +400,11 @@ function entryForm(st, ctx, settings) {
 
   const relabel = () => {
     const w = fmtWeight(form.weight), r = Math.round(Number(form.reps)) || '', s = Math.round(Number(form.sets)) || '';
+    const at = repsOnly ? `${r} reps` : `${r} @ ${w} ${settings.unit}`;
     primary.textContent = live
-      ? (complete ? `Log another set — ${r} @ ${w} ${settings.unit}`
-        : `Log set ${doneSoFar + 1}${target ? ` of ${target}` : ''} — ${r} @ ${w} ${settings.unit}`)
-      : `Save ${s} × ${r} @ ${w} ${settings.unit}`;
+      ? (complete ? `Log another set — ${at}`
+        : `Log set ${doneSoFar + 1}${target ? ` of ${target}` : ''} — ${at}`)
+      : (repsOnly ? `Save ${s} × ${r} reps` : `Save ${s} × ${r} @ ${w} ${settings.unit}`);
   };
 
   const body = el('div', { class: 'form-body' }, [
@@ -410,7 +422,7 @@ function entryForm(st, ctx, settings) {
         },
       }, ['Use']),
     ]) : null,
-    el('div', { class: 'lever-row lever-row-wide' }, [weightStep]),
+    repsOnly ? null : el('div', { class: 'lever-row lever-row-wide' }, [weightStep]),
     el('div', { class: 'lever-row' }, [repsStep, setsStep]),
     live ? tracker(traceFig, doneSoFar, target, complete, ex, ctx) : null,
     preview,
@@ -539,7 +551,7 @@ function logOneSet(st, ctx, settings) {
 
   const bestBefore = st.entries.reduce((m, e) => (e.date !== form.date && Number.isFinite(e.adj) && e.adj > m ? e.adj : m), -Infinity);
   const before = store.entriesOn(form.exerciseId, form.date);
-  const adjBefore = before.length ? sessionAdjWith(before, null, settings) : -Infinity;
+  const adjBefore = before.length ? sessionAdjWith(before, null, settings, st.exercise.kind) : -Infinity;
 
   const created = store.logSet({
     exerciseId: form.exerciseId, date: form.date, weight: w, reps: r,
@@ -551,7 +563,7 @@ function logOneSet(st, ctx, settings) {
 
   const after = store.entriesOn(form.exerciseId, form.date);
   const doneAfter = after.reduce((n, e) => n + setCount(e), 0);
-  const adj = sessionAdjWith(after, null, settings);
+  const adj = sessionAdjWith(after, null, settings, st.exercise.kind);
   const target = Number(form.sets) > 0 ? Math.round(Number(form.sets)) : 0;
 
   // Once the session is past your best, every further set beats it again —
@@ -594,14 +606,19 @@ function logOneSet(st, ctx, settings) {
 
 /** All at once: the whole block as one row, as it has always worked. */
 function save(st, ctx) {
-  const w = Number(form.weight), r = Number(form.reps), s = Number(form.sets);
-  if (!(w > 0) || !(r > 0)) { toast('Enter a weight and reps first.'); return; }
+  const repsOnly = isReps(st.exercise);
+  const w = repsOnly ? 0 : Number(form.weight);
+  const r = Number(form.reps), s = Number(form.sets);
+  if (!(r > 0) || (!repsOnly && !(w > 0))) {
+    toast(repsOnly ? 'Enter the reps you did first.' : 'Enter a weight and reps first.');
+    return;
+  }
   const bestBefore = st.entries.reduce((m, e) => (e.date !== form.date && Number.isFinite(e.adj) && e.adj > m ? e.adj : m), -Infinity);
   const created = store.addEntry({
     exerciseId: form.exerciseId, date: form.date, weight: w, reps: r, sets: s,
     rir: form.rir, notes: form.notes,
   });
-  const adj = adjE1rm(w, r, s, ctx.settings);
+  const adj = adjE1rm(w, r, s, ctx.settings, st.exercise.kind);
   const beatBest = bestBefore > -Infinity && adj > bestBefore + 1e-9;
   // A personal best is the moment the whole app exists for — mark it.
   if (beatBest) { celebrate(); tap([30, 60, 30]); }
@@ -669,15 +686,24 @@ function history(ctx, settings) {
  */
 function historyRow(entry, name, isPR, ctx, settings) {
   const rir = entry.rir !== null && entry.rir !== undefined ? `, RIR ${entry.rir}` : '';
+  const kind = (store.getExercise(entry.exerciseId) || {}).kind;
+  const repsOnly = kind === 'reps';
+  const setText = repsOnly
+    ? `${entry.sets} × ${entry.reps} reps`
+    : `${entry.sets} × ${entry.reps} @ ${fmtWeight(entry.weight)} kg`;
+  const spoken = repsOnly
+    ? `${entry.sets} sets of ${entry.reps} reps`
+    : `${entry.sets} sets of ${entry.reps} at ${fmtWeight(entry.weight)} kilos`;
+
   const btn = el('button', {
     type: 'button', class: 'row-btn',
-    'aria-label': `${name}, ${entry.sets} sets of ${entry.reps} at ${fmtWeight(entry.weight)} kilos${rir}`
+    'aria-label': `${name}, ${spoken}${rir}`
       + `${entry.notes ? `, noted: ${entry.notes}` : ''}. Edit or delete.`,
     onclick: () => editSheet(entry, ctx, settings),
   }, [
     el('span', { class: 'row-name' }, [accentDot(entry.exerciseId), name, isPR ? prBadge({ compact: true }) : null]),
-    el('span', { class: 'row-set', text: `${entry.sets} × ${entry.reps} @ ${fmtWeight(entry.weight)} kg` }),
-    el('span', { class: 'row-adj', text: fmt(adjE1rm(entry.weight, entry.reps, entry.sets, ctx.settings), 1) }),
+    el('span', { class: 'row-set', text: setText }),
+    el('span', { class: 'row-adj', text: fmt(adjE1rm(entry.weight, entry.reps, entry.sets, ctx.settings, kind), 1) }),
     entry.rir !== null && entry.rir !== undefined ? el('span', { class: 'row-rir', text: `RIR ${entry.rir}` }) : null,
     // Notes have been captured, merged and exported since the first version and
     // shown nowhere. If it was worth typing at the rack it is worth reading back.
@@ -763,7 +789,8 @@ function editSheet(entry, ctx, settings) {
     body: [
       el('div', { class: 'field-block' }, [el('span', { class: 'field-label', text: 'Date' }), dateInput]),
       el('div', { class: 'lever-row' }, [
-        stepper({ label: `Weight (${settings.unit})`, value: draft.weight, step: ex?.step || settings.defaultStep,
+        // Nothing to load, nothing to edit.
+        isReps(ex) ? null : stepper({ label: `Weight (${settings.unit})`, value: draft.weight, step: ex?.step || settings.defaultStep,
           min: 0, max: 999, dp: 1, origin: Number(ex?.base) > 0 ? Number(ex.base) : 0, id: 'ed-w',
           onChange: (v) => { draft.weight = v; } }),
         stepper({ label: 'Reps', value: draft.reps, step: 1, min: 1, max: 50, dp: 0, id: 'ed-r', onChange: (v) => { draft.reps = v; } }),

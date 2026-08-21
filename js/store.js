@@ -68,6 +68,9 @@ function normalise(raw) {
   d.exercises = (raw.exercises || []).map((e, i) => ({
     id: String(e.id ?? `ex-${i}`),
     name: String(e.name ?? 'Exercise'),
+    // 'reps' is a lift with nothing to load — a press-up, a pull-up — where the
+    // only thing that changes between sessions is how many.
+    kind: e.kind === 'reps' ? 'reps' : 'weight',
     step: num(e.step, d.settings.defaultStep),
     base: Math.max(0, num(e.base, 0)),          // empty bar / lightest pin
 
@@ -452,6 +455,7 @@ export function addExercise(ex) {
     created = {
       id: uid('ex'),
       name: String(ex.name || 'New exercise').trim(),
+      kind: ex.kind === 'reps' ? 'reps' : 'weight',
       step: num(ex.step, s.defaultStep),
       base: Math.max(0, num(ex.base, 0)),
       gainPerWeek: num(ex.gainPerWeek, s.defaultGainPerWeek),
@@ -473,6 +477,7 @@ export function updateExercise(id, patch) {
     const prev = { ...ex };
     record((u) => { const t = u.exercises.find((x) => x.id === id); if (t) Object.assign(t, prev); });
     if (patch.name !== undefined) ex.name = String(patch.name).trim() || ex.name;
+    if (patch.kind !== undefined) ex.kind = patch.kind === 'reps' ? 'reps' : 'weight';
     for (const k of ['step', 'base', 'gainPerWeek', 'setsPerSession', 'setsPerWeek']) {
       if (patch[k] !== undefined) ex[k] = num(patch[k], ex[k]);
     }
