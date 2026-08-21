@@ -7,8 +7,10 @@ import { runway, tonnageSeries, consistency, balance, prTimeline } from '../insi
 import { countUp } from '../core/motion.js';
 import { progressionChart, readinessLane, sparkline, setsMeter, weeklySetsChart,
   tonnageChart, consistencyGrid, balanceBars } from '../charts.js';
-import { fmt, fmtWeight, fmtSigned, fmtCompact, relativeDate, formatDate, dayNumber } from '../metrics.js';
+import { fmt, fmtWeight, fmtSigned, fmtCompact, relativeDate, formatDate, dayNumber,
+  isReps, loadUnit, describeSet } from '../metrics.js';
 import * as ui from '../core/uistate.js';
+import * as store from '../store.js';
 
 // Which lift is drilled into, and how the list is drawn. Kept in uistate so a
 // reload puts you back where you were rather than at the top of the list.
@@ -181,7 +183,7 @@ function bodyView(ctx) {
       list.append(el('li', { class: 'pr-event' }, [
         el('span', { class: 'pr-when', text: relativeDate(p.date, ctx.today) }),
         el('span', { class: 'pr-lift' }, [accentDot(p.exerciseId), el('span', { text: p.name })]),
-        el('span', { class: 'pr-set', text: `${p.sets} × ${p.reps} @ ${fmtWeight(p.weight)} kg` }),
+        el('span', { class: 'pr-set', text: describeSet(store.getExercise(p.exerciseId), p.sets, p.reps, p.weight) }),
         el('span', { class: 'pr-gain', text: p.delta !== null ? `+${fmt(p.delta, 1)}` : 'first' }),
       ]));
     }
@@ -279,7 +281,7 @@ function detailView(st, ctx) {
   const heroNum = el('span', { class: 'hero-num' });
   root.append(el('div', { class: 'hero' }, [
     el('span', { class: 'hero-label', text: 'Where this lift stands' }),
-    el('span', { class: 'hero-value' }, [heroNum, el('small', { text: ' kg' })]),
+    el('span', { class: 'hero-value' }, [heroNum, el('small', { text: isReps(st.exercise) ? ' score' : ' kg' })]),
     el('span', { class: `hero-delta${trendClass(st)}`, text: heroTrendText(st) }),
   ]));
   countUp(heroNum, st.lastAdj, { from: 0, format: (v) => fmt(v, 1) });
@@ -355,9 +357,9 @@ function detailView(st, ctx) {
   ctx.onResize(paintLane);
 
   root.append(el('div', { class: 'kpi-row kpi-row-2' }, [
-    statTile({ label: 'Best ever', value: fmt(st.bestAdj, 1), unit: 'kg',
+    statTile({ label: 'Best ever', value: fmt(st.bestAdj, 1), unit: isReps(st.exercise) ? '' : 'kg',
       delta: st.prCount ? `${st.prCount} PR${st.prCount === 1 ? '' : 's'} so far` : null }),
-    statTile({ label: 'Next target', value: fmt(st.nextTarget, 1), unit: 'kg',
+    statTile({ label: 'Next target', value: fmt(st.nextTarget, 1), unit: isReps(st.exercise) ? '' : 'kg',
       delta: targetDelta(st), deltaLabel: targetDeltaLabel(st) }),
   ]));
 
@@ -366,9 +368,11 @@ function detailView(st, ctx) {
   // they are rather than behind a setting that hides them.
   root.append(disclose('Where this is heading', [
     el('div', { class: 'kpi-row kpi-row-2' }, [
-      statTile({ label: 'Projected +4 wks', value: st.proj4 != null ? fmt(st.proj4, 1) : '—', unit: st.proj4 != null ? 'kg' : '',
+      statTile({ label: 'Projected +4 wks', value: st.proj4 != null ? fmt(st.proj4, 1) : '—',
+        unit: st.proj4 != null && !isReps(st.exercise) ? 'kg' : '',
         delta: st.proj4 == null ? 'needs 3 sessions over 2 weeks' : null }),
-      statTile({ label: 'Projected +12 wks', value: st.proj12 != null ? fmt(st.proj12, 1) : '—', unit: st.proj12 != null ? 'kg' : '',
+      statTile({ label: 'Projected +12 wks', value: st.proj12 != null ? fmt(st.proj12, 1) : '—',
+        unit: st.proj12 != null && !isReps(st.exercise) ? 'kg' : '',
         delta: 'a ceiling, not a forecast' }),
     ]),
     el('p', { text: 'Both numbers extend today’s straight-line trend. Real progress '
@@ -385,8 +389,13 @@ function detailView(st, ctx) {
   ctx.onResize(paintVol);
 
   root.append(el('div', { class: 'kpi-row kpi-row-2' }, [
-    statTile({ label: 'Volume, last 7 days', value: fmtCompact(st.volume7), unit: 'kg' }),
-    statTile({ label: 'Last session', value: `${st.lastSets} × ${st.lastReps}`, deltaLabel: '', delta: `@ ${fmtWeight(st.sessions[st.sessions.length - 1].best.weight)} kg` }),
+    isReps(st.exercise)
+      ? statTile({ label: 'Reps, last 7 days',
+        value: fmtCompact(st.entries.filter((e) => e.day >= dayNumber(ctx.today) - 7)
+          .reduce((n, e) => n + e.reps * (Number(e.sets) > 0 ? Number(e.sets) : 1), 0)) })
+      : statTile({ label: 'Volume, last 7 days', value: fmtCompact(st.volume7), unit: 'kg' }),
+    statTile({ label: 'Last session', value: `${st.lastSets} × ${st.lastReps}`, deltaLabel: '',
+      delta: isReps(st.exercise) ? 'reps' : `@ ${fmtWeight(st.sessions[st.sessions.length - 1].best.weight)} kg` }),
   ]));
 
   root.append(el('h2', { class: 'section-title', text: 'Every session' }));
@@ -406,7 +415,7 @@ function sessionTable(st, settings) {
       ])]),
       el('tbody', {}, rows.map((s) => el('tr', { class: s.best.isPR ? 'is-pr' : '' }, [
         el('th', { scope: 'row', text: formatDate(s.date) }),
-        el('td', { text: `${s.best.sets} × ${s.best.reps} @ ${fmtWeight(s.best.weight)} kg` }),
+        el('td', { text: describeSet(st.exercise, s.best.sets, s.best.reps, s.best.weight) }),
         el('td', {}, [fmt(s.best.adj, 1), s.best.isPR ? prBadge({ compact: true }) : null]),
         el('td', { text: String(s.sets) }),
         el('td', { text: fmt(s.volume, 0) }),

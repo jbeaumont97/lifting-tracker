@@ -3,7 +3,8 @@
 // a 2px surface ring, solid hairline gridlines, a 10% area wash, and labels only
 // on the points that carry the story (last, best, projection, target).
 
-import { fmt, fmtWeight, fmtCompact, formatDate, formatDateShort, dayNumber, isoAddDays, isoToday } from './metrics.js';
+import { fmt, fmtWeight, fmtCompact, formatDate, formatDateShort, dayNumber, isoAddDays, isoToday,
+  isReps, describeSet } from './metrics.js';
 import { projectionBand, runway, readinessCurve } from './insights.js';
 
 const SVG = 'http://www.w3.org/2000/svg';
@@ -172,7 +173,7 @@ export function progressionChart(stats, settings, {
     svg.append(svgEl('line', {
       x1: pad.l, x2: pad.l + plotW, y1: y(milestoneY), y2: y(milestoneY), class: 'ref-milestone',
     }));
-    svg.append(text(`${fmtWeight(run.milestone.value)} kg`, {
+    svg.append(text(`${fmtWeight(run.milestone.value)} ${run.milestone.kind === 'reps' ? 'reps' : 'kg'}`, {
       x: pad.l + plotW, y: y(milestoneY) - 5, class: 'label-milestone', 'text-anchor': 'end',
     }));
   }
@@ -310,10 +311,13 @@ export function progressionChart(stats, settings, {
     crosshair.setAttribute('x1', px); crosshair.setAttribute('x2', px);
     focusDot.setAttribute('cx', px); focusDot.setAttribute('cy', py);
     hover.setAttribute('visibility', 'visible');
+    const repsOnly = isReps(stats.exercise);
     tip.replaceChildren(
-      el('strong', { text: `${fmt(s.best.adj, 1)} kg` }),
-      el('span', { class: 'tip-sub', text: `${formatDate(s.date)} · ${s.best.sets}×${s.best.reps} @ ${fmtWeight(s.best.weight)} kg` }),
-      el('span', { class: 'tip-sub', text: `e1RM ${fmt(s.best.e1rm, 1)} · ${s.sets} sets · ${fmt(s.volume, 0)} kg volume` }),
+      el('strong', { text: repsOnly ? fmt(s.best.adj, 1) : `${fmt(s.best.adj, 1)} kg` }),
+      el('span', { class: 'tip-sub', text: `${formatDate(s.date)} · ${describeSet(stats.exercise, s.best.sets, s.best.reps, s.best.weight)}` }),
+      el('span', { class: 'tip-sub', text: repsOnly
+        ? `best set ${s.best.reps} reps · ${s.sets} sets`
+        : `e1RM ${fmt(s.best.e1rm, 1)} · ${s.sets} sets · ${fmt(s.volume, 0)} kg volume` }),
     );
     tip.hidden = false;
     const left = Math.max(4, Math.min(w - 132, px - 66));

@@ -25,6 +25,7 @@ import {
   readinessNote,
   readinessMaths,
   READY_AT,
+  isReps,
   REP_SCHEMES,
   SET_COLUMNS,
 } from '../metrics.js';
@@ -170,7 +171,8 @@ function card(stats, ctx, settings) {
       el('p', {
         class: 'card-meta',
         text: stats.lastDate
-          ? `${relativeDate(stats.lastDate)} · ${fmtNum(stats.lastSets)}×${fmtNum(stats.lastReps)} @ ${fmtWeight(lastWeight(stats))} kg`
+          ? `${relativeDate(stats.lastDate)} · ${fmtNum(stats.lastSets)}×${fmtNum(stats.lastReps)}`
+            + (isReps(stats.exercise) ? ' reps' : ` @ ${fmtWeight(lastWeight(stats))} kg`)
           : 'Never logged',
       }),
     ]),
@@ -189,15 +191,31 @@ function card(stats, ctx, settings) {
   }
 
   // --- the prescription, the one thing to read ---
-  const lw = lastWeight(stats);
-  const delta = lw != null ? plan.weight - lw : null;
-  const changeText = describeChange(plan, stats, delta);
+  // On a reps lift the rep count IS the prescription, so it takes the big type
+  // that the weight has on every other card.
+  const repsOnly = isReps(stats.exercise);
+  const lw = repsOnly ? Number(stats.lastReps) : lastWeight(stats);
+  const now = repsOnly ? plan.reps : plan.weight;
+  const delta = Number.isFinite(lw) && lw != null ? now - lw : null;
+  const changeText = describeChange(plan, stats, delta, repsOnly);
+  // The prescription is laid out in pieces with the spacing done by flex, which
+  // means its text content runs together — "5 reps@102.5 kg". Say it once,
+  // properly, and hide the pieces from anything reading rather than looking.
+  const spoken = repsOnly
+    ? `${plan.sets} sets of ${plan.reps} reps`
+    : `${plan.sets} sets of ${plan.reps} reps at ${fmtWeight(plan.weight)} kilos`;
   body.append(
     el('div', { class: 'presc' }, [
       el('div', { class: isOpen ? 'presc-hero' : 'presc-line' }, [
-        el('span', { class: 'presc-scheme', text: `${plan.sets} sets × ${plan.reps} reps` }),
-        el('span', { class: 'presc-at', text: '@' }),
-        el('span', { class: 'presc-weight' }, [fmtWeight(plan.weight), el('small', { text: ' kg' })]),
+        el('span', { class: 'visually-hidden', text: spoken }),
+        ...(repsOnly ? [
+          el('span', { class: 'presc-scheme', 'aria-hidden': 'true', text: `${plan.sets} sets ×` }),
+          el('span', { class: 'presc-weight', 'aria-hidden': 'true' }, [String(plan.reps), el('small', { text: ' reps' })]),
+        ] : [
+          el('span', { class: 'presc-scheme', 'aria-hidden': 'true', text: `${plan.sets} sets × ${plan.reps} reps` }),
+          el('span', { class: 'presc-at', 'aria-hidden': 'true', text: '@' }),
+          el('span', { class: 'presc-weight', 'aria-hidden': 'true' }, [fmtWeight(plan.weight), el('small', { text: ' kg' })]),
+        ]),
       ]),
       el('div', { class: 'presc-side' }, [
         bandChip(plan.band),
@@ -209,7 +227,7 @@ function card(stats, ctx, settings) {
   // Plain words carry the verdict; the arithmetic sits under them.
   body.append(el('p', {
     class: 'presc-explain',
-    text: plainVerdict(plan.band, delta)
+    text: plainVerdict(plan.band, delta, repsOnly ? 'reps' : 'kg')
       + (plan.atBase ? ` That is the bar on its own — ${fmtWeight(plan.base)} kg.` : ''),
   }));
 
@@ -247,7 +265,9 @@ function card(stats, ctx, settings) {
       el('span', { class: 'hint-label', text: 'This does not beat your best' }),
       el('span', {
         class: 'hint-value',
-        text: 'Your last session was lighter than your best. Aim past your best instead →',
+        text: repsOnly
+          ? 'This does not get past the best set you have done. Aim past it instead →'
+          : 'Your last session was lighter than your best. Aim past your best instead →',
       }),
     ]));
   }
@@ -284,7 +304,10 @@ function detail(stats, plan, ctx, settings) {
   const wrap = el('div', { class: 'card-detail' });
 
   // --- levers ---
-  const repsStepper = stepper({
+  // On a reps lift the rep count is the answer, not a lever — the only thing
+  // left to choose is how many sets to spread it over.
+  const repsOnly = plan.kind === 'reps';
+  const repsStepper = repsOnly ? null : stepper({
     label: 'Reps', value: plan.reps, step: 1, min: 1, max: 20, dp: 0, id: `reps-${id}`,
     onChange: (v) => { setOv(id, { reps: v }); ctx.refresh(); },
   });
@@ -292,7 +315,8 @@ function detail(stats, plan, ctx, settings) {
     label: 'Sets', value: plan.sets, step: 1, min: 1, max: 10, dp: 0, id: `sets-${id}`,
     onChange: (v) => { setOv(id, { sets: v }); ctx.refresh(); },
   });
-  wrap.append(el('div', { class: 'lever-row' }, [repsStepper, setsStepper]));
+  wrap.append(el('div', { class: repsOnly ? 'lever-row lever-row-half' : 'lever-row' },
+    [repsStepper, setsStepper].filter(Boolean)));
 
   wrap.append(disclose('Set the target myself', [
     el('p', { text: 'The planner works this out from your last session. Put a number in to '
@@ -307,17 +331,52 @@ function detail(stats, plan, ctx, settings) {
   if (plan.gentlest && plan.gentlest.score < plan.score - 1e-9) {
     wrap.append(el('button', {
       type: 'button', class: 'hint-btn',
-      onclick: () => { setOv(id, { reps: plan.gentlest.reps }); ctx.refresh(); },
+      onclick: () => {
+        setOv(id, repsOnly ? { sets: plan.gentlest.sets } : { reps: plan.gentlest.reps });
+        ctx.refresh();
+      },
     }, [
-      el('span', { class: 'hint-label', text: `Smallest jump at ${plan.sets} sets` }),
+      el('span', { class: 'hint-label', text: repsOnly ? 'A gentler way up' : `Smallest jump at ${plan.sets} sets` }),
       el('span', {
         class: 'hint-value',
-        text: `${plan.sets} × ${plan.gentlest.reps} @ ${fmtWeight(plan.gentlest.weight)} kg — an easier way up`,
+        text: repsOnly
+          ? `${plan.gentlest.sets} sets of ${plan.gentlest.reps} — one more set asks for fewer reps`
+          : `${plan.sets} × ${plan.gentlest.reps} @ ${fmtWeight(plan.gentlest.weight)} kg — an easier way up`,
       }),
     ]));
   }
 
-  {
+  if (repsOnly) {
+    // --- one row, not a grid: sets against the reps they ask for ---
+    wrap.append(el('div', { class: 'grid-block' }, [
+      el('div', { class: 'grid-head' }, [el('h3', { text: 'Trade sets against reps' })]),
+      el('div', { class: 'grid-scroll' }, [
+        el('table', { class: 'grid', 'aria-label': 'Reps needed at each number of sets' }, [
+          el('thead', {}, [el('tr', {}, [
+            el('th', { class: 'grid-corner', scope: 'col' }, [el('span', { text: 'sets' })]),
+            ...plan.options.map((o) => el('th', { scope: 'col', class: o.isPick ? 'is-col' : '', text: String(o.sets) })),
+          ])]),
+          el('tbody', {}, [el('tr', {}, [
+            el('th', { scope: 'row', class: 'is-row', text: 'reps' }),
+            ...plan.options.map((o) => el('td', {
+              class: `cell${o.isPick ? ' is-pick' : ''}`, dataset: { band: o.band.key },
+            }, [
+              el('button', {
+                type: 'button', class: 'cell-btn',
+                'aria-label': `${o.sets} sets of ${o.reps} reps, scores ${fmt(o.score, 1)}, ${o.band.label}`,
+                onclick: () => { tap(); setOv(id, { sets: o.sets }); ctx.refresh(); },
+              }, [
+                el('span', { class: 'cell-value', text: String(o.reps) }),
+                el('span', { class: 'cell-glyph', 'aria-hidden': 'true', text: o.band.glyph }),
+              ]),
+            ])),
+          ])]),
+        ]),
+        el('p', { class: 'grid-note', text: 'Tap a column to plan that many sets. One whole rep is a big step low down, so spreading it over another set is often the smaller one.' }),
+      ]),
+      legend(),
+    ]));
+  } else {
     // --- the trade-off grid ---
     const mode = ui.forExercise(GRID, id, { mode: 'weights' }).mode;
     const gridHost = el('div', { class: 'grid-host' });
@@ -475,12 +534,13 @@ function lastWeight(stats) {
 }
 
 /** "+2.5 kg on last" / "+1 set at the same weight" / "same as last session". */
-function describeChange(plan, stats, delta) {
+function describeChange(plan, stats, delta, repsOnly) {
   const setsDelta = Number.isFinite(Number(stats.lastSets)) ? plan.sets - Number(stats.lastSets) : 0;
   const repsDelta = Number.isFinite(Number(stats.lastReps)) ? plan.reps - Number(stats.lastReps) : 0;
   if (delta === null || !Number.isFinite(delta)) return null;
   const bits = [];
-  if (Math.abs(delta) > 1e-9) bits.push(`${fmtSigned(delta, 1).replace('.0', '')} kg`);
+  // On a reps lift the rep change IS the change; saying it twice reads as two.
+  if (!repsOnly && Math.abs(delta) > 1e-9) bits.push(`${fmtSigned(delta, 1).replace('.0', '')} kg`);
   if (setsDelta) bits.push(`${setsDelta > 0 ? '+' : '−'}${Math.abs(setsDelta)} set${Math.abs(setsDelta) === 1 ? '' : 's'}`);
   if (repsDelta) bits.push(`${repsDelta > 0 ? '+' : '−'}${Math.abs(repsDelta)} rep${Math.abs(repsDelta) === 1 ? '' : 's'}`);
   if (!bits.length) return 'same as last session';

@@ -1496,3 +1496,7 @@ h1 .accent-dot { width: 11px; height: 11px; margin-right: 9px; vertical-align: m
   content: '·'; color: var(--muted); margin-right: var(--space-2);
 }
 .summary-note { font-size: var(--text-2xs); color: var(--muted); }
+
+/* A chip that reports rather than offers: "Custom", when a lift has been tuned
+   by hand and matches none of the presets. */
+.chip.is-static { cursor: default; pointer-events: none; }

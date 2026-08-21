@@ -87,8 +87,32 @@ export function setBonus(sets, k = 0.05) {
   return 1 + k * Math.log(s);
 }
 
-export function adjE1rm(weight, reps, sets, settings) {
-  return e1rm(weight, reps, settings.formula) * setBonus(sets, settings.setBonusK);
+/**
+ * Some lifts have no weight to put on them. A press-up or a pull-up moves you,
+ * and the only thing that changes between sessions is how many times.
+ *
+ * Rather than invent a load — the app does not know your bodyweight, and a
+ * press-up is not all of it anyway — a reps lift is measured in reps. The shape
+ * of the number is deliberately identical to the weighted one: a set is worth
+ * something, and repeating it earns the same diminishing bonus. Everything
+ * downstream — the trend, the projection, the bands, the readiness model —
+ * therefore works on a reps lift without knowing it is one.
+ */
+export function isReps(exercise) {
+  return !!exercise && exercise.kind === 'reps';
+}
+
+/** What one set is worth, on whichever scale its lift is measured in. */
+export function setScore(weight, reps, settings, kind) {
+  if (kind === 'reps') {
+    const r = Math.round(Number(reps));
+    return r > 0 ? r : NaN;
+  }
+  return e1rm(weight, reps, settings.formula);
+}
+
+export function adjE1rm(weight, reps, sets, settings, kind) {
+  return setScore(weight, reps, settings, kind) * setBonus(sets, settings.setBonusK);
 }
 
 export function volume(weight, reps, sets) {
@@ -121,7 +145,7 @@ export function setKey(e) {
  * This mirrors what the store will do with the set exactly, so the preview and
  * the saved result can never disagree.
  */
-export function sessionAdjWith(entries, extra, settings) {
+export function sessionAdjWith(entries, extra, settings, kind) {
   const list = entries.map((e) => ({
     weight: Number(e.weight), reps: Number(e.reps),
     sets: Number(e.sets) > 0 ? Number(e.sets) : 1, key: setKey(e),
@@ -134,19 +158,21 @@ export function sessionAdjWith(entries, extra, settings) {
   }
   let best = NaN;
   for (const e of list) {
-    const adj = adjE1rm(e.weight, e.reps, e.sets, settings);
+    const adj = adjE1rm(e.weight, e.reps, e.sets, settings, kind);
     if (Number.isFinite(adj) && !(adj <= best)) best = adj;
   }
   return best;
 }
 
 /** What one logged entry is worth on each scale. */
-export function scoreEntry(entry, settings) {
-  const one = e1rm(entry.weight, entry.reps, settings.formula);
+export function scoreEntry(entry, settings, kind) {
+  const one = setScore(entry.weight, entry.reps, settings, kind);
   return {
     e1rm: one,
     adj: one * setBonus(entry.sets, settings.setBonusK),
-    volume: volume(entry.weight, entry.reps, entry.sets),
+    // A reps lift moves no external load, so it contributes no tonnage. Adding
+    // reps to a kilo total would be adding two different things together.
+    volume: kind === 'reps' ? 0 : volume(entry.weight, entry.reps, entry.sets),
     day: dayNumber(entry.date),
   };
 }
@@ -174,6 +200,16 @@ export function weightForTarget(target, reps, sets, settings, step, base = 0) {
   return ceilToStep(target / denom, step, base);
 }
 
+/**
+ * The fewest whole reps whose score meets `target` at this many sets.
+ * The reps equivalent of weightForTarget: the ladder is the integers.
+ */
+export function repsForTarget(target, sets, settings) {
+  const bonus = setBonus(sets, settings.setBonusK);
+  if (!(bonus > 0) || !(target > 0)) return NaN;
+  return Math.max(1, Math.ceil(target / bonus - 1e-9));
+}
+
 /** Least-squares slope of y on x. Returns null when it is not defined. */
 export function slope(points) {
   const n = points.length;
@@ -195,7 +231,7 @@ export function exerciseStats(exercise, entries, settings, todayIso = isoToday()
   const todayDay = dayNumber(todayIso);
   const mine = entries
     .filter((e) => e.exerciseId === exercise.id)
-    .map((e) => ({ ...e, ...scoreEntry(e, settings) }))
+    .map((e) => ({ ...e, ...scoreEntry(e, settings, exercise.kind) }))
     .sort((a, b) => a.day - b.day || (a.seq || 0) - (b.seq || 0));
 
   const stats = {
@@ -549,11 +585,11 @@ export const BANDS = {
  * The same verdict a band carries, said in plain words. This is what the
  * simple view shows in place of "scores 102.3 against a target of 100.1".
  */
-export function plainVerdict(band, deltaKg) {
+export function plainVerdict(band, delta, unit = 'kg') {
   if (!band) return '';
-  const move = !Number.isFinite(deltaKg) || Math.abs(deltaKg) < 1e-9
+  const move = !Number.isFinite(delta) || Math.abs(delta) < 1e-9
     ? null
-    : `${fmtSigned(deltaKg, 1).replace(/\.0$/, '')} kg on last time`;
+    : `${fmtSigned(delta, unit === 'reps' ? 0 : 1).replace(/\.0$/, '')} ${unit} on last time`;
   switch (band.key) {
     case 'ideal':
       return move ? `A small step up — ${move}.` : 'A small step up on last time.';
@@ -564,10 +600,12 @@ export function plainVerdict(band, deltaKg) {
       return move ? `A large jump — ${move}. You will probably miss reps.`
         : 'A large jump — you will probably miss reps.';
     case 'return':
-      return move ? `Lighter than last time — ${move}. A way back in after time off, not a step backwards.`
-        : 'Lighter than last time, on purpose — a way back in after time off.';
+      return move ? `${unit === 'reps' ? 'Fewer' : 'Lighter'} than last time — ${move}. A way back in after time off, not a step backwards.`
+        : `${unit === 'reps' ? 'Fewer reps' : 'Lighter'} than last time, on purpose — a way back in after time off.`;
     default:
-      return 'Lighter than a session you have already done — not progression yet.';
+      return unit === 'reps'
+        ? 'Not past a session you have already done — not progression yet.'
+        : 'Lighter than a session you have already done — not progression yet.';
   }
 }
 
@@ -584,6 +622,18 @@ export function bandFor(score, target, bestAdj, settings) {
 export function lastSessionWeight(stats) {
   const last = stats.sessions && stats.sessions.length ? stats.sessions[stats.sessions.length - 1] : null;
   return last && Number.isFinite(last.best.weight) ? last.best.weight : null;
+}
+
+/**
+ * Whatever the lift is loaded by — kilos on the bar, or reps of yourself.
+ * The comeback rule is about doing less than you were, and "less" has to mean
+ * the thing that actually varies.
+ */
+export function lastSessionLoad(stats) {
+  const last = stats.sessions && stats.sessions.length ? stats.sessions[stats.sessions.length - 1] : null;
+  if (!last) return null;
+  const v = isReps(stats.exercise) ? last.best.reps : last.best.weight;
+  return Number.isFinite(v) ? v : null;
 }
 
 /** Snap a rep count down to the nearest scheme in the grid (the sheet's MATCH,1). */
@@ -624,7 +674,7 @@ export function planFor(stats, settings, override = {}) {
    * on what you have demonstrably done, not on the model's guess.
    */
   const comebackUnder = readiness && readiness.phase && readiness.phase.key === 'detrained'
-    ? lastSessionWeight(stats) : null;
+    ? lastSessionLoad(stats) : null;
   const bandOf = (score, weight) => (
     comebackUnder !== null && weight < comebackUnder - 1e-9
       ? BANDS.return
@@ -647,8 +697,35 @@ export function planFor(stats, settings, override = {}) {
     stretchCeiling: target * (1 + settings.stretchBand),
     grid: [], columns: SET_COLUMNS, rows: REP_SCHEMES,
     gentlest: null, weight: NaN, score: NaN, overshoot: NaN, band: null,
+    kind: isReps(stats.exercise) ? 'reps' : 'weight', options: null,
   };
   if (!plan.ready) return plan;
+
+  if (isReps(stats.exercise)) {
+    plan.kind = 'reps';
+    plan.weight = null;
+    plan.atBase = false;
+    plan.lastWeight = null;
+    plan.reps = repsForTarget(target, sets, settings);
+    plan.score = plan.reps * setBonus(sets, settings.setBonusK);
+    plan.overshoot = plan.score - target;
+    plan.band = bandOf(plan.score, plan.reps);
+    // No rep-scheme axis to trade against: the only choice is how many sets,
+    // and each answer is the reps that gets you there. One row, not a grid.
+    plan.options = SET_COLUMNS.map((sn) => {
+      const r = repsForTarget(target, sn, settings);
+      const score = r * setBonus(sn, settings.setBonusK);
+      return { reps: r, sets: sn, weight: null, score, band: bandOf(score, r), isPick: sn === sets, volume: 0 };
+    });
+    // On a reps lift the smallest possible step is a whole rep, which low down
+    // is a big one: 13 to 14 is nearly 8%. Adding a set instead is usually the
+    // gentler way up, so the option that overshoots least is worth pointing at.
+    const softest = plan.options
+      .filter((o) => Number.isFinite(o.score) && o.score >= target - 1e-9)
+      .reduce((a, b) => (a === null || b.score < a.score ? b : a), null);
+    plan.gentlest = softest && softest.score < plan.score - 1e-9 ? softest : null;
+    return plan;
+  }
 
   plan.weight = weightForTarget(target, reps, sets, settings, step, base);
   // True when the bar alone is already heavier than the target needs.
@@ -708,6 +785,18 @@ export function fmt(n, dp = 1) {
   if (n == null || !Number.isFinite(Number(n))) return '—';
   const v = Number(n);
   return v.toLocaleString(undefined, { minimumFractionDigits: dp, maximumFractionDigits: dp });
+}
+
+/** The unit a lift's score and milestones are counted in. */
+export function loadUnit(exercise) {
+  return isReps(exercise) ? 'reps' : 'kg';
+}
+
+/** How one set reads: "3 × 5 @ 100 kg", or "3 × 12 reps" where there is no load. */
+export function describeSet(exercise, sets, reps, weight) {
+  return isReps(exercise)
+    ? `${sets} × ${reps} reps`
+    : `${sets} × ${reps} @ ${fmtWeight(weight)} kg`;
 }
 
 /** Weights print without a pointless .0 — "82.5 kg", "80 kg". */

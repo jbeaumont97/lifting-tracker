@@ -224,6 +224,7 @@ export function bandChip(band, { compact = false } = {}) {
 export function milestoneTrack(run, { compact = false } = {}) {
   if (!run || !run.milestone) return null;
   const { milestone: m, eta } = run;
+  const unit = m.kind === 'reps' ? 'reps' : 'kg';
   const from = m.value - m.step;
   const pct = Math.max(2, Math.min(100, run.progress * 100));
 
@@ -238,18 +239,18 @@ export function milestoneTrack(run, { compact = false } = {}) {
   return el('div', { class: `milestone${compact ? ' is-compact' : ''}` }, [
     el('div', { class: 'milestone-head' }, [
       el('span', { class: 'milestone-label', text: 'Next milestone' }),
-      el('span', { class: 'milestone-value' }, [fmtWeight(m.value), el('small', { text: ' kg' })]),
+      el('span', { class: 'milestone-value' }, [fmtWeight(m.value), el('small', { text: ` ${unit}` })]),
     ]),
     el('div', {
       class: 'milestone-track', role: 'meter',
       'aria-valuenow': String(Math.round(run.progress * 100)),
       'aria-valuemin': '0', 'aria-valuemax': '100',
-      'aria-label': `Progress from ${fmtWeight(from)} to ${fmtWeight(m.value)} kg`,
+      'aria-label': `Progress from ${fmtWeight(from)} to ${fmtWeight(m.value)} ${unit}`,
     }, [
       el('span', { class: 'milestone-fill', style: `width:${pct}%` }),
     ]),
     el('div', { class: 'milestone-foot' }, [
-      el('span', { class: 'milestone-from', text: `${fmtWeight(m.from)} kg best` }),
+      el('span', { class: 'milestone-from', text: `${fmtWeight(m.from)} ${unit} best` }),
       el('span', { class: 'milestone-eta', text: detail }),
     ]),
   ]);

@@ -5,7 +5,8 @@ import { el, stepper, chipGroup, segmented, toast, sheet, confirmSheet, details,
 import * as store from '../store.js';
 import { showWelcome } from './welcome.js';
 import * as ui from '../core/uistate.js';
-import { fmt, setBonus, READY_AT, fatigueAt, retentionAt, readinessSettings } from '../metrics.js';
+import { fmt, setBonus, READY_AT, fatigueAt, retentionAt, readinessSettings, isReps } from '../metrics.js';
+import { LEVELS, levelOf, levelByKey, suggestLevel } from '../insights.js';
 
 export function renderSetup(ctx) {
   const { settings } = ctx;
@@ -36,6 +37,7 @@ export function renderSetup(ctx) {
 
   /* ---------------------------------------------------------- exercises */
   root.append(el('h2', { class: 'section-title', text: 'Your lifts' }));
+  root.append(globalLevel(ctx));
   const list = el('div', { class: 'card-list' });
   const exercises = store.getExercises();
   for (const [i, ex] of exercises.entries()) list.append(exerciseCard(ex, i, exercises.length, ctx));
@@ -47,7 +49,8 @@ export function renderSetup(ctx) {
   }, ['Add a lift']));
   root.append(details('How to set these up', [
     el('p', { text: 'Starting weight is the lightest this lift can be: the empty bar, or the lowest pin on a stack. Weight step is the smallest increment on top of that. Together they define the loads that exist — a 20 kg bar with 2.5 kg steps means 20, 22.5, 25 and so on, and nothing in between. Leave the starting weight at 0 for dumbbells or anything where the step alone describes it.' }),
-    el('p', { text: 'Weight step is the smallest increment you can actually load — every suggestion is rounded up to the next rung. Target gain per week is roughly 1.0% if you are new, 0.5% at intermediate, 0.2% once advanced.' }),
+    el('p', { text: 'Weight step is the smallest increment you can actually load — every suggestion is rounded up to the next rung. Gain per week is the one number the whole planner turns on, which is why it comes with three presets: pick the level that fits and tune it after, per lift, if you want to.' }),
+    el('p', { text: 'A lift set to "just reps" has nothing to load. The planner asks for a rep count instead of a weight, progress means more reps, and it adds sets but no tonnage to your totals — the app does not know what you weigh, and a press-up is not all of you anyway.' }),
     el('p', { text: 'Sets per session is the set count the planner assumes when it recommends a weight. Sets per week is your working-set budget for that lift; Progress flags you under, on, or over it. Roughly 10–20 hard sets per muscle per week is the common recommendation, spread across every lift that trains it — so these per-lift numbers should add up to that, not each hit it.' }),
   ]));
 
@@ -227,18 +230,88 @@ function today() {
 
 const OPEN_EX = 'setup.openExerciseId';
 
+/**
+ * The training level every new lift starts from.
+ *
+ * The app already had global defaults that new lifts inherit; this puts a word
+ * on the one that mattered. Applying it to lifts that already exist is a
+ * separate, confirmed action, because it overwrites choices already made — and
+ * you are rarely the same standard on every lift.
+ */
+function globalLevel(ctx) {
+  const s = ctx.settings;
+  const current = LEVELS.find((l) => Math.abs(l.gainPerWeek - Number(s.defaultGainPerWeek)) < 1e-9) || null;
+
+  const chips = el('div', { class: 'chips', role: 'radiogroup', 'aria-label': 'Starting level for new lifts' });
+  for (const l of LEVELS) {
+    const on = current && current.key === l.key;
+    chips.append(el('button', {
+      type: 'button', class: `chip${on ? ' is-selected' : ''}`, role: 'radio',
+      'aria-checked': on ? 'true' : 'false', title: l.hint,
+      onclick: () => { store.updateSettings({ defaultGainPerWeek: l.gainPerWeek }); ctx.refresh(); },
+    }, [el('span', { text: l.label })]));
+  }
+  if (!current) chips.append(el('span', { class: 'chip is-selected is-static' }, [el('span', { text: 'Custom' })]));
+
+  const lifts = store.getExercises();
+  return el('div', { class: 'card card-pad' }, [
+    el('div', { class: 'field-block' }, [
+      el('span', { class: 'field-label', text: 'Training level' }),
+      chips,
+      el('p', { class: 'field-hint', text: current
+        ? `${current.hint} New lifts start at ${(current.gainPerWeek * 100).toFixed(2)}%/week and ${current.setsPerWeek} sets a week.`
+        : 'New lifts start from the weekly gain set under The maths below.' }),
+    ]),
+    current && lifts.length ? el('button', {
+      type: 'button', class: 'btn btn-ghost btn-block btn-sm',
+      onclick: () => confirmSheet({
+        title: `Set all ${lifts.length} lifts to ${current.label}?`,
+        message: 'This replaces the weekly gain and set targets on every lift, including any you have tuned by hand. You can undo straight afterwards.',
+        confirmLabel: 'Set them all',
+        onConfirm: () => {
+          for (const ex of lifts) applyLevel(ex.id, current.key);
+          ctx.refresh();
+          toast(`Every lift set to ${current.label}`, {
+            action: () => { for (let i = 0; i < lifts.length; i++) store.undo(); ctx.refresh(); },
+            actionLabel: 'Undo',
+          });
+        },
+      }),
+    }, [`Apply ${current.label} to all ${lifts.length} lifts`]) : null,
+  ]);
+}
+
 function exerciseCard(ex, index, total, ctx) {
   const isOpen = ui.get(OPEN_EX, null) === ex.id;
+  const reps = isReps(ex);
+  const st = ctx.stats.find((x) => x.exercise.id === ex.id);
+
   const body = el('div', { class: 'card-body' }, [
-    el('div', { class: 'lever-row' }, [
+    el('div', { class: 'field-block' }, [
+      el('span', { class: 'field-label', text: 'What changes between sessions' }),
+      segmented({
+        label: 'What changes between sessions', value: reps ? 'reps' : 'weight',
+        options: [{ value: 'weight', label: 'Weight' }, { value: 'reps', label: 'Just reps' }],
+        onChange: (v) => { store.updateExercise(ex.id, { kind: v }); ctx.refresh({ transition: true }); },
+      }),
+      el('p', { class: 'field-hint', text: reps
+        ? 'A lift with nothing to load — a press-up, a pull-up, a plank. Progress is more reps, and the planner asks for reps instead of a weight. It contributes sets but no tonnage, because the app does not know what you weigh.'
+        : 'Weight on the bar or the stack. Progress is more of it.' }),
+    ]),
+
+    // Nothing to load means nothing to say about bars, pins or plate steps.
+    reps ? null : el('div', { class: 'lever-row' }, [
       stepper({ label: 'Starting weight', value: ex.base, step: 0.5, min: 0, max: 200, dp: 1, id: `bs-${ex.id}`,
         onChange: (v) => { store.updateExercise(ex.id, { base: v }); ctx.refresh(); } }),
       stepper({ label: 'Weight step', value: ex.step, step: 0.1, min: 0.1, max: 25, dp: 1, id: `st-${ex.id}`,
         onChange: (v) => { store.updateExercise(ex.id, { step: v }); ctx.refresh(); } }),
     ]),
-    el('p', { class: 'field-hint', text: ex.base > 0
+    reps ? null : el('p', { class: 'field-hint', text: ex.base > 0
       ? `Loads are ${fmt(ex.base, 1).replace('.0', '')} kg and up, in ${fmt(ex.step, 1).replace('.0', '')} kg steps — ${ladderExample(ex)}.`
       : 'Starting weight is the empty bar, or the lightest pin on the stack. Leave it at 0 if anything is loadable.' }),
+
+    levelPicker(ex, st, ctx),
+
     el('div', { class: 'lever-row' }, [
       stepper({ label: 'Gain %/week', value: ex.gainPerWeek * 100, step: 0.05, min: 0, max: 5, dp: 2, id: `gn-${ex.id}`,
         onChange: (v) => { store.updateExercise(ex.id, { gainPerWeek: v / 100 }); ctx.refresh(); } }),
@@ -272,13 +345,81 @@ function exerciseCard(ex, index, total, ctx) {
       accentDot(ex.id),
       el('div', { class: 'card-head-main' }, [
         el('h3', { class: 'card-title', text: ex.name }),
-        el('p', { class: 'card-meta', text: (ex.base > 0 ? `from ${fmt(ex.base, 1).replace('.0', '')} kg · ` : '')
-          + `${fmt(ex.step, 1).replace('.0', '')} kg steps · ${(ex.gainPerWeek * 100).toFixed(2)}%/wk · ${ex.setsPerSession} sets/session · ${ex.setsPerWeek}/week` }),
+        el('p', { class: 'card-meta', text: [
+          reps ? 'reps only' : (ex.base > 0 ? `from ${fmt(ex.base, 1).replace('.0', '')} kg` : null),
+          reps ? null : `${fmt(ex.step, 1).replace('.0', '')} kg steps`,
+          (levelOf(ex) || { label: 'Custom' }).label.toLowerCase() + ` · ${(ex.gainPerWeek * 100).toFixed(2)}%/wk`,
+          `${ex.setsPerSession} sets/session · ${ex.setsPerWeek}/week`,
+        ].filter(Boolean).join(' · ') }),
       ]),
       chevron(),
     ]),
     isOpen ? body : null,
   ]);
+}
+
+/**
+ * How fast this lift should be expected to move, in words rather than in a
+ * percentage with two decimal places.
+ *
+ * The stepper underneath stays: the presets are a starting point, not a cage,
+ * and a lift tuned by hand says so rather than pretending to be one of the
+ * three. Where the lift has been running at a visibly different rate for long
+ * enough to mean something, it says so and offers the change — but never takes
+ * it. The measured rate is a description of the past, not a decision.
+ */
+function levelPicker(ex, st, ctx) {
+  const current = levelOf(ex);
+  const suggestion = st ? suggestLevel(st) : null;
+
+  const chips = el('div', { class: 'chips', role: 'radiogroup', 'aria-label': 'Training level' });
+  for (const l of LEVELS) {
+    const on = current && current.key === l.key;
+    chips.append(el('button', {
+      type: 'button', class: `chip${on ? ' is-selected' : ''}`, role: 'radio',
+      'aria-checked': on ? 'true' : 'false', title: l.hint,
+      onclick: () => { applyLevel(ex.id, l.key); ctx.refresh(); },
+    }, [el('span', { text: l.label })]));
+  }
+  if (!current) {
+    chips.append(el('span', { class: 'chip is-selected is-static', 'aria-label': 'Tuned by hand' }, [
+      el('span', { text: 'Custom' }),
+    ]));
+  }
+
+  return el('div', { class: 'field-block' }, [
+    el('span', { class: 'field-label', text: 'How fast this lift should move' }),
+    chips,
+    el('p', { class: 'field-hint', text: current ? current.hint
+      : 'Tuned by hand. Pick a level to go back to a preset, or leave it — the numbers below are what actually count.' }),
+    suggestion ? el('button', {
+      type: 'button', class: 'hint-btn',
+      onclick: () => {
+        applyLevel(ex.id, suggestion.level.key);
+        ctx.refresh();
+        toast(`${ex.name} set to ${suggestion.level.label}`, {
+          action: () => { store.undo(); ctx.refresh(); }, actionLabel: 'Undo',
+        });
+      },
+    }, [
+      el('span', { class: 'hint-label', text: 'This lift has been moving faster than that' }),
+      el('span', {
+        class: 'hint-value',
+        text: `${(suggestion.measured * 100).toFixed(2)}%/wk over the last ${suggestion.weeks} weeks, `
+          + `which looks like ${suggestion.level.label}. Use it →`,
+      }),
+    ]) : null,
+  ]);
+}
+
+function applyLevel(id, key) {
+  const l = levelByKey(key);
+  if (!l) return;
+  store.updateExercise(id, {
+    gainPerWeek: l.gainPerWeek,
+    setsPerSession: l.setsPerSession,
+    setsPerWeek: l.setsPerWeek,
+  });
 }
 
 function renameSheet(ex, ctx) {
@@ -295,18 +436,39 @@ function renameSheet(ex, ctx) {
 
 function addSheet(ctx) {
   const s = ctx.settings;
-  const draft = { name: '', base: 0, step: s.defaultStep, gainPerWeek: s.defaultGainPerWeek, setsPerSession: 3, setsPerWeek: 15 };
+  const lvl = LEVELS.find((l) => Math.abs(l.gainPerWeek - Number(s.defaultGainPerWeek)) < 1e-9);
+  const draft = {
+    name: '', kind: 'weight', base: 0, step: s.defaultStep,
+    gainPerWeek: s.defaultGainPerWeek,
+    setsPerSession: lvl ? lvl.setsPerSession : 3,
+    setsPerWeek: lvl ? lvl.setsPerWeek : 15,
+  };
   const input = el('input', { type: 'text', class: 'text-input', placeholder: 'e.g. Romanian deadlift', 'aria-label': 'Exercise name' });
   input.addEventListener('input', () => { draft.name = input.value; });
+
+  // A reps lift has nothing to load, so the load fields go away rather than
+  // sitting there asking for a number that will never mean anything.
+  const loadFields = el('div', { class: 'field-block' }, [
+    el('div', { class: 'lever-row' }, [
+      stepper({ label: 'Starting weight', value: draft.base, step: 0.5, min: 0, max: 200, dp: 1, id: 'new-base', onChange: (v) => { draft.base = v; } }),
+      stepper({ label: 'Weight step', value: draft.step, step: 0.1, min: 0.1, max: 25, dp: 1, id: 'new-step', onChange: (v) => { draft.step = v; } }),
+    ]),
+    el('p', { class: 'field-hint', text: 'Starting weight is the empty bar, or the lightest pin on the stack — every suggestion is that plus a whole number of steps. Leave it at 0 if anything is loadable.' }),
+  ]);
+
   sheet({
     title: 'Add a lift',
     body: [
       el('div', { class: 'field-block' }, [el('span', { class: 'field-label', text: 'Name' }), input]),
-      el('div', { class: 'lever-row' }, [
-        stepper({ label: 'Starting weight', value: draft.base, step: 0.5, min: 0, max: 200, dp: 1, id: 'new-base', onChange: (v) => { draft.base = v; } }),
-        stepper({ label: 'Weight step', value: draft.step, step: 0.1, min: 0.1, max: 25, dp: 1, id: 'new-step', onChange: (v) => { draft.step = v; } }),
+      el('div', { class: 'field-block' }, [
+        el('span', { class: 'field-label', text: 'What changes between sessions' }),
+        segmented({
+          label: 'What changes between sessions', value: 'weight',
+          options: [{ value: 'weight', label: 'Weight' }, { value: 'reps', label: 'Just reps' }],
+          onChange: (v) => { draft.kind = v; loadFields.hidden = v === 'reps'; },
+        }),
       ]),
-      el('p', { class: 'field-hint', text: 'Starting weight is the empty bar, or the lightest pin on the stack — every suggestion is that plus a whole number of steps. Leave it at 0 if anything is loadable.' }),
+      loadFields,
       el('div', { class: 'lever-row lever-row-half' }, [
         stepper({ label: 'Gain %/week', value: draft.gainPerWeek * 100, step: 0.05, min: 0, max: 5, dp: 2, id: 'new-gain', onChange: (v) => { draft.gainPerWeek = v / 100; } }),
       ]),

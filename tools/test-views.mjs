@@ -988,6 +988,155 @@ const motion2 = await import('../js/core/motion.js');
   globalThis.matchMedia = realMatch;
 }
 
+/* ---------------------------------------- 6i. lifts with nothing to load */
+
+/** A reps lift with enough history to plan from. */
+function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
+  const ex = store.addExercise({ name: 'Press-ups', kind: 'reps', setsPerSession: 3, gainPerWeek: 0.015, setsPerWeek: 12 });
+  for (const [i, r] of reps.entries()) {
+    store.addEntry({ exerciseId: ex.id, date: metrics.isoAddDays(TODAY, from + i * step), weight: 0, reps: r, sets: 3, rir: 2 });
+  }
+  select.invalidate();
+  return ex;
+}
+
+{
+  reset();
+  store.clearAll();
+  const ex = givePressUps();
+
+  // --- the planner ---
+  openCard(ex.id);
+  const plan = renderPlan(ctx());
+  const presc = plan.querySelector('.presc');
+  ok('the prescription is a rep count, not a weight', !/\bkg\b/.test(presc.textContent), presc.textContent);
+  ok('and it is said once, properly, for anything reading it',
+    /^\d+ sets of \d+ reps$/.test(presc.querySelector('.visually-hidden').textContent),
+    presc.querySelector('.visually-hidden').textContent);
+  ok('the pieces it is drawn from are hidden from screen readers',
+    presc.querySelectorAll('.presc-weight').every((n) => n.getAttribute('aria-hidden') === 'true'));
+
+  ok('there is no rep lever — reps are the answer', plan.querySelectorAll('#reps-' + ex.id).length === 0);
+  ok('but there is still a sets lever', plan.querySelectorAll('#sets-' + ex.id).length === 1);
+  const cells = plan.querySelectorAll('.cell-btn');
+  ok('the trade-off is one row of set counts, not a grid', cells.length === 6, String(cells.length));
+  ok('and it is labelled in reps',
+    /\d+ sets of \d+ reps/.test(cells[0].getAttribute('aria-label') || ''), cells[0].getAttribute('aria-label'));
+  const was = refreshes;
+  cells[4].click();
+  ok('picking a column changes the set count', refreshes > was);
+
+  // --- logging ---
+  setPrefill({ exerciseId: ex.id, date: TODAY, mode: 'sets' });
+  const log = renderLog(ctx({ route: 'log' }));
+  ok('the log asks for no weight', !/Weight \(/.test(log.textContent));
+  ok('the save button counts reps', /\d+ reps$/.test(log.querySelector('.btn-save').textContent),
+    log.querySelector('.btn-save').textContent);
+  ok('history reads without a load', log.querySelector('.row-set').textContent === '3 × 12 reps',
+    log.querySelector('.row-set').textContent);
+  ok('and says so out loud too',
+    /3 sets of 12 reps/.test(log.querySelector('.row-btn').getAttribute('aria-label') || ''),
+    log.querySelector('.row-btn').getAttribute('aria-label'));
+
+  // --- progress ---
+  openExercise(ex.id);
+  const prog = renderProgress(ctx({ route: 'progress' }));
+  await settle();
+  ok('the hero is a score, not kilos', prog.querySelector('.hero-value').textContent.endsWith(' score'),
+    prog.querySelector('.hero-value').textContent);
+  ok('the milestone is counted in reps',
+    /reps$/.test(prog.querySelector('.milestone-value').textContent.trim()),
+    prog.querySelector('.milestone-value').textContent);
+  ok('the session table reads without a load',
+    prog.querySelectorAll('.data-table td')[0].textContent === '3 × 12 reps');
+  clearSelection();
+
+  // --- the whole-body screen must not add reps to a kilo total ---
+  uistate.set('progress.view', 'body');
+  const body = renderProgress(ctx({ route: 'progress' }));
+  await settle();
+  ok('a bodyweight lift contributes no tonnage',
+    insights.tonnageSeries(ctx().stats, { weeks: 4, todayIso: TODAY }).every((b) => b.volume === 0),
+    'reps were counted as kilos');
+  ok('but it still shows up in where the work went',
+    body.textContent.includes('Press-ups'));
+  uistate.set('progress.view', 'lifts');
+}
+
+/* ------------------------------------------- 6j. how fast a lift moves */
+
+{
+  reset();
+  const ex = store.getExercises()[0];
+  uistate.set('setup.openExerciseId', ex.id);
+  const view = renderSetup(ctx({ route: 'setup' }));
+
+  ok('the lift card offers a level', view.textContent.includes('How fast this lift should move'));
+  ok('and a kind switch', view.textContent.includes('What changes between sessions'));
+
+  // There are two level pickers on this screen: the global one that new lifts
+  // inherit, and this lift's own. Scope to the open card.
+  const chips = view.querySelectorAll('.card.is-open .chips .chip');
+  const labels = chips.map((n) => n.textContent);
+  ok('the global picker is a separate control', view.textContent.includes('Training level'));
+  ok('all three levels are offered',
+    ['Beginner', 'Intermediate', 'Advanced'].every((l) => labels.includes(l)), labels.join(','));
+  ok('the shipped default reads as Custom, not as a preset',
+    labels.includes('Custom'), labels.join(','));
+
+  const beginner = chips.find((n) => n.textContent === 'Beginner');
+  beginner.click();
+  const after = store.getExercise(ex.id);
+  ok('picking a level sets the gain rate', Math.abs(after.gainPerWeek - 0.015) < 1e-9, String(after.gainPerWeek));
+  ok('and the set targets that come with it', after.setsPerSession === 3 && after.setsPerWeek === 10);
+
+  const again = renderSetup(ctx({ route: 'setup' }));
+  const selected = again.querySelectorAll('.card.is-open .chips .chip.is-selected').map((n) => n.textContent);
+  ok('the chosen level shows as chosen', selected.includes('Beginner'), selected.join(','));
+  ok('and Custom is gone from that lift',
+    !again.querySelectorAll('.card.is-open .chips .chip').map((n) => n.textContent).includes('Custom'));
+
+  store.undo();
+  ok('undo puts the old numbers back', store.getExercise(ex.id).gainPerWeek !== 0.015);
+}
+
+{
+  // A lift running visibly faster than its setting says so, and only offers.
+  reset();
+  const ex = store.getExercises()[0];
+  giveHistory(ex.id, { weeks: 14, from: 72.5, perWeek: 1.15 });
+  store.updateExercise(ex.id, { gainPerWeek: 0.0015, setsPerSession: 4, setsPerWeek: 20 });
+  select.invalidate();
+  uistate.set('setup.openExerciseId', ex.id);
+
+  const st = ctx().stats.find((s) => s.exercise.id === ex.id);
+  ok('the lift really is outrunning its setting', !!insights.suggestLevel(st));
+
+  const view = renderSetup(ctx({ route: 'setup' }));
+  ok('the card says so', view.textContent.includes('has been moving faster'));
+  ok('and shows the measured rate', /%\/wk over the last \d+ weeks/.test(view.textContent), view.textContent.slice(0, 60));
+  ok('it offers rather than applies',
+    Math.abs(store.getExercise(ex.id).gainPerWeek - 0.0015) < 1e-9, 'the suggestion changed the lift on its own');
+
+  view.querySelectorAll('.hint-btn').find((n) => /moving faster/.test(n.textContent)).click();
+  ok('taking the suggestion applies it',
+    store.getExercise(ex.id).gainPerWeek > 0.0015, String(store.getExercise(ex.id).gainPerWeek));
+
+  // And a lift that agrees with its setting stays quiet.
+  reset();
+  const q = store.getExercises()[0];
+  giveHistory(q.id, { weeks: 14 });
+  select.invalidate();
+  const st2 = ctx().stats.find((s) => s.exercise.id === q.id);
+  const near = insights.nearestLevel(st2.trendPerWeek / st2.lastAdj);
+  store.updateExercise(q.id, { gainPerWeek: near.gainPerWeek });
+  select.invalidate();
+  uistate.set('setup.openExerciseId', q.id);
+  ok('a lift matching its level is left alone',
+    !renderSetup(ctx({ route: 'setup' })).textContent.includes('has been moving faster'));
+  uistate.set('setup.openExerciseId', null);
+}
+
 /* ------------------------------------- 7. view state survives a reload */
 
 {

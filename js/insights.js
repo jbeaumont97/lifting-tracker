@@ -14,7 +14,7 @@
 //     no figure the spreadsheet fixture checks can move because of this file.
 
 import {
-  dayNumber, isoAddDays, isoToday, e1rm, volume, repFactor, setBonus, slope,
+  dayNumber, isoAddDays, isoToday, e1rm, volume, repFactor, setBonus, slope, isReps,
   fatigueAt, accrualAt, retentionAt, typicalInterval, readinessSettings,
   READY_AT,
 } from './metrics.js';
@@ -200,22 +200,33 @@ export function sessionSeverityV2(sets, exercise) {
  * The round numbers people actually chase. Nobody sets out to hit an adjusted
  * e1RM of 118.3; they set out to put a hundred on the bar.
  */
-export function milestoneStep(value) {
+export function milestoneStep(value, kind) {
+  // Reps are chased in fives — ten press-ups, then fifteen — and there is no
+  // magnitude at which that stops being the round number.
+  if (kind === 'reps') return 5;
   if (!(value > 0)) return 5;
   if (value < 100) return 5;
   if (value < 200) return 10;
   return 25;
 }
 
-/** The heaviest weight ever moved on this lift, whatever the reps. */
-export function bestWeight(stats) {
+/**
+ * The most this lift has ever been loaded to — kilos on the bar, or reps of
+ * yourself. Both are "the biggest single set you have done"; they just differ
+ * in what is being counted.
+ */
+export function bestLoad(stats) {
+  const reps = isReps(stats.exercise);
   let best = null;
   for (const e of stats.entries || []) {
-    const w = Number(e.weight);
-    if (Number.isFinite(w) && (best === null || w > best)) best = w;
+    const v = Number(reps ? e.reps : e.weight);
+    if (Number.isFinite(v) && (best === null || v > best)) best = v;
   }
   return best;
 }
+
+/** @deprecated kept as the old name; bestLoad says what it now means. */
+export const bestWeight = bestLoad;
 
 /**
  * The next round number up, on the bar and on the score.
@@ -224,21 +235,25 @@ export function bestWeight(stats) {
  * passed and drifted back below is not the next thing to chase.
  */
 export function milestones(stats, { count = 1 } = {}) {
+  const reps = isReps(stats.exercise);
   const out = [];
-  const w = bestWeight(stats);
+  const w = bestLoad(stats);
   if (Number.isFinite(w) && w > 0) {
-    const step = milestoneStep(w);
+    const step = milestoneStep(w, reps ? 'reps' : 'weight');
     for (let i = 1; i <= count; i++) {
       const value = (Math.floor(w / step) + i) * step;
-      out.push({ kind: 'weight', value, from: w, step, label: `${value} kg on the bar` });
+      out.push({
+        kind: reps ? 'reps' : 'weight', value, from: w, step,
+        label: reps ? `${value} reps in a set` : `${value} kg on the bar`,
+      });
     }
   }
   const b = stats.bestAdj;
   if (Number.isFinite(b) && b > 0) {
-    const step = milestoneStep(b);
+    const step = milestoneStep(b, reps ? 'reps' : 'weight');
     for (let i = 1; i <= count; i++) {
       const value = (Math.floor(b / step) + i) * step;
-      out.push({ kind: 'e1rm', value, from: b, step, label: `${value} score` });
+      out.push({ kind: 'score', value, from: b, step, label: `${value} score` });
     }
   }
   return out;
@@ -323,18 +338,24 @@ export function projectionBand(stats, settings, { todayIso = isoToday(), z = 1 }
  * what that weight would score at the reps and sets this lift is trained with.
  */
 export function runway(stats, settings, { todayIso = isoToday() } = {}) {
-  const [target] = milestones(stats).filter((m) => m.kind === 'weight');
+  const isRepsLift = isReps(stats.exercise);
+  const [target] = milestones(stats).filter((m) => m.kind === (isRepsLift ? 'reps' : 'weight'));
   if (!target) return null;
 
   const reps = Number(stats.lastReps) > 0 ? Math.round(Number(stats.lastReps)) : 5;
   const sets = Number(stats.exercise.setsPerSession) > 0
     ? Math.round(Number(stats.exercise.setsPerSession))
     : (Number(stats.lastSets) > 0 ? Math.round(Number(stats.lastSets)) : 3);
-  const factor = repFactor(reps, settings.formula) * setBonus(sets, settings.setBonusK);
+  // On a reps lift the milestone IS a rep count, so the only conversion is the
+  // set bonus; there is no rep factor because reps are not standing in for a
+  // one-rep max, they are the thing itself.
+  const factor = isRepsLift
+    ? setBonus(sets, settings.setBonusK)
+    : repFactor(reps, settings.formula) * setBonus(sets, settings.setBonusK);
   if (!Number.isFinite(factor) || factor <= 0) return null;
 
   const scoreNeeded = target.value * factor;
-  const best = bestWeight(stats);
+  const best = bestLoad(stats);
   return {
     milestone: target,
     reps,
@@ -395,6 +416,92 @@ export function readinessCurve(stats, settings, { days = 28, step = 1 } = {}) {
     });
   }
   return out;
+}
+
+/* ============================================================ training age */
+
+/**
+ * How fast a lift should be expected to move.
+ *
+ * Gain-per-week is the dial the whole planner turns on, and it was a raw
+ * percentage with two decimal places and no guidance — 0.75%/week means nothing
+ * to somebody who has just started, and it is wrong for them by a factor of
+ * two. These are the usual findings rather than anything precise: a novice adds
+ * weight almost every session, an intermediate measures progress in months, and
+ * an advanced lifter in half-years. All three stay editable, because the honest
+ * position is that this varies by person and by lift.
+ */
+export const LEVELS = [
+  {
+    key: 'beginner',
+    label: 'Beginner',
+    hint: 'First few months. Strength comes fast, almost every session.',
+    gainPerWeek: 0.015,
+    setsPerSession: 3,
+    setsPerWeek: 10,
+  },
+  {
+    key: 'intermediate',
+    label: 'Intermediate',
+    hint: 'Past the first year. Steady progress, measured over weeks.',
+    gainPerWeek: 0.005,
+    setsPerSession: 3,
+    setsPerWeek: 15,
+  },
+  {
+    key: 'advanced',
+    label: 'Advanced',
+    hint: 'Years in. Progress is slow, and volume is what buys it.',
+    gainPerWeek: 0.0015,
+    setsPerSession: 4,
+    setsPerWeek: 20,
+  },
+];
+
+export const levelByKey = (key) => LEVELS.find((l) => l.key === key) || null;
+
+/**
+ * Which preset a lift is currently set to, or null when it has been tuned by
+ * hand. Only the gain rate decides it: the set counts are a suggestion that
+ * comes with the preset, not part of its identity.
+ */
+export function levelOf(exercise) {
+  if (!exercise) return null;
+  const g = Number(exercise.gainPerWeek);
+  return LEVELS.find((l) => Math.abs(l.gainPerWeek - g) < 1e-9) || null;
+}
+
+/** The nearest preset to a measured rate, compared in ratio rather than in points. */
+export function nearestLevel(gainPerWeek) {
+  const g = Number(gainPerWeek);
+  if (!(g > 0)) return LEVELS[LEVELS.length - 1];
+  return LEVELS.reduce((best, l) => {
+    const d = Math.abs(Math.log(l.gainPerWeek / g));
+    return best === null || d < best.d ? { l, d } : best;
+  }, null).l;
+}
+
+/**
+ * What the lift has actually been doing, against what it is set to expect.
+ *
+ * Returns null unless there is something worth saying: the fit has to clear
+ * metrics.js's own bar for being worth extrapolating, the lift has to be going
+ * up, and the answer has to differ from the setting. A suggestion that agrees
+ * with you is noise.
+ */
+export function suggestLevel(stats) {
+  if (!stats || !stats.trendReliable) return null;
+  if (!Number.isFinite(stats.lastAdj) || !(stats.lastAdj > 0)) return null;
+  if (!Number.isFinite(stats.trendPerWeek) || !(stats.trendPerWeek > 0)) return null;
+
+  const measured = stats.trendPerWeek / stats.lastAdj;
+  const level = nearestLevel(measured);
+  const current = levelOf(stats.exercise);
+  if (current && current.key === level.key) return null;
+  // Within a whisker of the configured rate, whatever preset that rate is
+  // nearest to — there is nothing to correct.
+  if (Math.abs(Math.log(measured / (stats.gainPerWeek || 1e-9))) < 0.35) return null;
+  return { level, measured, weeks: Math.round(stats.trendWindowDays / 7) };
 }
 
 /* ========================================================== the whole body */
