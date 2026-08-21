@@ -10,7 +10,8 @@
 // your target.
 
 import { el, stepper, segmented, bandChip, toast, details, disclose, milestoneTrack, chevron, accentDot, tap } from '../ui.js';
-import { runway } from '../insights.js';
+import * as store from '../store.js';
+import { runway, looksBodyweight } from '../insights.js';
 import * as ui from '../core/uistate.js';
 import {
   planFor,
@@ -25,7 +26,7 @@ import {
   readinessNote,
   readinessMaths,
   READY_AT,
-  isReps,
+  isBodyweight,
   REP_SCHEMES,
   SET_COLUMNS,
 } from '../metrics.js';
@@ -172,7 +173,7 @@ function card(stats, ctx, settings) {
         class: 'card-meta',
         text: stats.lastDate
           ? `${relativeDate(stats.lastDate)} · ${fmtNum(stats.lastSets)}×${fmtNum(stats.lastReps)}`
-            + (isReps(stats.exercise) ? ' reps' : ` @ ${fmtWeight(lastWeight(stats))} kg`)
+            + (isBodyweight(stats.exercise) ? ' reps' : ` @ ${fmtWeight(lastWeight(stats))} kg`)
           : 'Never logged',
       }),
     ]),
@@ -182,6 +183,26 @@ function card(stats, ctx, settings) {
   const body = el('div', { class: 'card-body' });
 
   if (!plan || !plan.ready) {
+    // A lift whose every session was logged with no weight has no score to
+    // plan from. Saying "log a session" to somebody who has logged nine is the
+    // least helpful thing the card could do.
+    if (looksBodyweight(stats)) {
+      body.append(el('p', { class: 'card-note', text:
+        `Every session logged for ${stats.exercise.name} has no weight on it, so there is nothing to `
+        + 'work a target out from. If this is a bodyweight lift, mark it as one and it will be planned '
+        + 'in reps instead.' }));
+      body.append(el('button', {
+        type: 'button', class: 'btn btn-primary btn-block',
+        onclick: () => {
+          store.updateExercise(id, { kind: 'bodyweight' });
+          ctx.refresh({ transition: true });
+          toast(`${stats.exercise.name} is now a bodyweight lift`, {
+            action: () => { store.undo(); ctx.refresh(); }, actionLabel: 'Undo',
+          });
+        },
+      }, ['Mark as bodyweight']));
+      return el('article', { class: 'card', style: `view-transition-name: card-${cssName(id)}` }, [head, body]);
+    }
     body.append(el('p', { class: 'card-note', text: 'Log a session for this lift and its plan appears here.' }));
     body.append(el('button', {
       type: 'button', class: 'btn btn-primary btn-block',
@@ -193,7 +214,7 @@ function card(stats, ctx, settings) {
   // --- the prescription, the one thing to read ---
   // On a reps lift the rep count IS the prescription, so it takes the big type
   // that the weight has on every other card.
-  const repsOnly = isReps(stats.exercise);
+  const repsOnly = isBodyweight(stats.exercise);
   const lw = repsOnly ? Number(stats.lastReps) : lastWeight(stats);
   const now = repsOnly ? plan.reps : plan.weight;
   const delta = Number.isFinite(lw) && lw != null ? now - lw : null;
@@ -244,13 +265,13 @@ function card(stats, ctx, settings) {
 
   body.append(disclose('Show the numbers', [
     el('p', { text: `Scores ${fmt(plan.score, 1)} against a target of ${fmt(plan.target, 1)} `
-      + `(${fmtSigned(plan.overshoot, 1)} kg over). ${plan.band.hint}.`
+      + `(${fmtSigned(plan.overshoot, 1)}${repsOnly ? '' : ' kg'} over). ${plan.band.hint}.`
       + (plan.atBase ? ` That is the lightest this lift loads — ${fmtWeight(plan.base)} kg is the bar.` : '') }),
     readinessMaths(stats.readiness) ? el('p', { text: readinessMaths(stats.readiness) }) : null,
     el('div', { class: 'target-facts' }, [
-      factLine('Target adj e1RM', `${fmt(plan.target, 1)} kg`,
+      factLine(repsOnly ? 'Target score' : 'Target adj e1RM', `${fmt(plan.target, 1)}${repsOnly ? '' : ' kg'}`,
         plan.usingManualTarget ? 'your override' : targetSub(stats, plan)),
-      factLine('Current best', `${fmt(plan.bestNow, 1)} kg`,
+      factLine('Current best', `${fmt(plan.bestNow, 1)}${repsOnly ? '' : ' kg'}`,
         plan.bestNow < stats.bestAdj - 0.05
           ? `${fmt(stats.bestAdj, 1)} less ${((1 - stats.readiness.retention) * 100).toFixed(1)}% detraining`
           : stats.bestAdj > stats.lastAdj + 1e-9 ? 'beat this to set a PR' : 'set last session'),
@@ -306,7 +327,7 @@ function detail(stats, plan, ctx, settings) {
   // --- levers ---
   // On a reps lift the rep count is the answer, not a lever — the only thing
   // left to choose is how many sets to spread it over.
-  const repsOnly = plan.kind === 'reps';
+  const repsOnly = plan.kind === 'bodyweight';
   const repsStepper = repsOnly ? null : stepper({
     label: 'Reps', value: plan.reps, step: 1, min: 1, max: 20, dp: 0, id: `reps-${id}`,
     onChange: (v) => { setOv(id, { reps: v }); ctx.refresh(); },
@@ -322,7 +343,7 @@ function detail(stats, plan, ctx, settings) {
     el('p', { text: 'The planner works this out from your last session. Put a number in to '
       + 'override it — the grid below re-solves against whatever you set.' }),
     stepper({
-      label: 'Override target (kg)', value: o.target ?? '', step: 0.5, min: 0, max: 999, dp: 1,
+      label: repsOnly ? 'Override target (score)' : 'Override target (kg)', value: o.target ?? '', step: 0.5, min: 0, max: 999, dp: 1,
       id: `tgt-${id}`, placeholder: fmt(plan.autoTarget, 1) + ' auto',
       onChange: (v) => { setOv(id, { target: v > 0 ? v : null }); ctx.refresh(); },
     }),

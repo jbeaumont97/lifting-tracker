@@ -1147,7 +1147,7 @@ const fakeStats = {
 // lets the trend, the bands, the planner and the readiness model all work on
 // one without knowing it is one.
 {
-  const repsEx = { id: 'pu', name: 'Press-ups', kind: 'reps', setsPerSession: 3, gainPerWeek: 0.015, setsPerWeek: 12, step: 1, base: 0 };
+  const repsEx = { id: 'pu', name: 'Press-ups', kind: 'bodyweight', setsPerSession: 3, gainPerWeek: 0.015, setsPerWeek: 12, step: 1, base: 0 };
   const rows = [
     { id: 'r1', date: '2026-08-04', exerciseId: 'pu', weight: 0, reps: 10, sets: 3, rir: 2, notes: '', seq: 1 },
     { id: 'r2', date: '2026-08-08', exerciseId: 'pu', weight: 0, reps: 11, sets: 3, rir: 2, notes: '', seq: 2 },
@@ -1157,8 +1157,8 @@ const fakeStats = {
 
   close('a reps set is worth its reps, with the set bonus',
     st.lastAdj, 12 * M.setBonus(3, settings.setBonusK), 1e-9);
-  ok('a reps lift is recognised as one', M.isReps(repsEx) === true);
-  ok('and a normal lift is not', M.isReps({ name: 'Squat' }) === false);
+  ok('a reps lift is recognised as one', M.isBodyweight(repsEx) === true);
+  ok('and a normal lift is not', M.isBodyweight({ name: 'Squat' }) === false);
   close('a reps lift moves no tonnage', st.entries[0].volume, 0, 1e-9);
   close('and none of it reaches the weekly total', st.volume7, 0, 1e-9);
   ok('but its sets still count', st.sets7 > 0);
@@ -1172,7 +1172,7 @@ const fakeStats = {
   ok('by the smallest whole rep', (need - 1) * M.setBonus(4, settings.setBonusK) < 20);
 
   const plan = M.planFor(st, { ...settings, readiness: 'off' }, {});
-  ok('the plan knows what kind of lift it is', plan.kind === 'reps');
+  ok('the plan knows what kind of lift it is', plan.kind === 'bodyweight', plan.kind);
   ok('and asks for no weight at all', plan.weight === null);
   ok('it prescribes a rep count', plan.reps > 0 && Number.isInteger(plan.reps));
   close('scored on the reps scale', plan.score, plan.reps * M.setBonus(plan.sets, settings.setBonusK), 1e-9);
@@ -1263,15 +1263,15 @@ const fakeStats = {
 // --- the store keeps the kind, and defaults it safely ---
 {
   fresh();
-  const made = store.addExercise({ name: 'Pull-ups', kind: 'reps' });
-  ok('a lift can be created with nothing to load', made.kind === 'reps');
+  const made = store.addExercise({ name: 'Pull-ups', kind: 'bodyweight' });
+  ok('a lift can be created with nothing to load', made.kind === 'bodyweight');
   ok('and an ordinary one still is not', store.addExercise({ name: 'Row' }).kind === 'weight');
   ok('junk falls back to a weighted lift', store.addExercise({ name: 'X', kind: 'nonsense' }).kind === 'weight');
 
   store.updateExercise(made.id, { kind: 'weight' });
   ok('the kind can be changed', store.getExercise(made.id).kind === 'weight');
   store.undo();
-  ok('and undone', store.getExercise(made.id).kind === 'reps');
+  ok('and undone', store.getExercise(made.id).kind === 'bodyweight');
 
   const doc = JSON.parse(store.exportJSON());
   for (const e of doc.exercises) delete e.kind;

@@ -103,7 +103,7 @@ const screens = [];
   store.reload();
 
   // A lift with nothing to load, so the reps-only prescription is on the page.
-  const pu = store.addExercise({ name: 'Press-ups', kind: 'reps', setsPerSession: 3, gainPerWeek: 0.015, setsPerWeek: 12 });
+  const pu = store.addExercise({ name: 'Press-ups', kind: 'bodyweight', setsPerSession: 3, gainPerWeek: 0.015, setsPerWeek: 12 });
   for (const [i, reps] of [10, 11, 12, 12].entries()) {
     store.addEntry({ exerciseId: pu.id, date: M.isoAddDays(TODAY, -14 + i * 4), weight: 0, reps, sets: 3, rir: 2 });
   }

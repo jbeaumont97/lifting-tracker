@@ -8,7 +8,7 @@ import { countUp } from '../core/motion.js';
 import { progressionChart, readinessLane, sparkline, setsMeter, weeklySetsChart,
   tonnageChart, consistencyGrid, balanceBars } from '../charts.js';
 import { fmt, fmtWeight, fmtSigned, fmtCompact, relativeDate, formatDate, dayNumber,
-  isReps, loadUnit, describeSet } from '../metrics.js';
+  isBodyweight, loadUnit, describeSet } from '../metrics.js';
 import * as ui from '../core/uistate.js';
 import * as store from '../store.js';
 
@@ -71,9 +71,18 @@ function listView(ctx) {
   for (const s of stats) for (const e of s.entries) if (e.day >= dayNumber(ctx.today) - 7) days7.add(e.date);
   const rising = trained.filter((s) => (s.trendPerWeek ?? 0) > 0).length;
 
+  // A week of nothing but bodyweight work moved no bar, and "0 kg" is a worse
+  // summary of it than the reps it actually was.
+  const reps7 = stats.reduce((n, s) => n + (isBodyweight(s.exercise)
+    ? s.entries.filter((e) => e.day >= dayNumber(ctx.today) - 7)
+      .reduce((m, e) => m + e.reps * (Number(e.sets) > 0 ? Number(e.sets) : 1), 0)
+    : 0), 0);
+
   root.append(el('div', { class: 'kpi-row' }, [
     statTile({ label: 'Sets, last 7 days', value: fmtCompact(sets7) }),
-    statTile({ label: 'Volume, last 7 days', value: fmtCompact(vol7), unit: 'kg' }),
+    vol7 > 0
+      ? statTile({ label: 'Volume, last 7 days', value: fmtCompact(vol7), unit: 'kg' })
+      : statTile({ label: 'Reps, last 7 days', value: fmtCompact(reps7) }),
     statTile({ label: 'Sessions, last 7 days', value: String(days7.size) }),
     statTile({ label: 'Lifts trending up', value: `${rising}/${trained.length}` }),
   ]));
@@ -238,10 +247,12 @@ function exerciseRow(st, ctx) {
           : 'No sessions logged' }),
       ]),
       st.entryCount ? el('div', { class: 'row-open-figs' }, [
-        el('span', { class: 'row-adj-big' }, [fmt(st.lastAdj, 1), el('small', { text: ' kg' })]),
+        el('span', { class: 'row-adj-big' }, [fmt(st.lastAdj, 1),
+          el('small', { text: isBodyweight(st.exercise) ? ' score' : ' kg' })]),
         st.trendPerWeek != null
           ? el('span', { class: `row-trend${st.trendReliable && trendGood ? ' is-good' : st.trendReliable && trendGood === false ? ' is-bad' : ' is-muted'}`,
-              text: Math.abs(st.trendPerWeek) < FLAT ? 'flat' : `${fmtSigned(st.trendPerWeek, 2)} kg/wk${st.trendReliable ? '' : ' (early)'}` })
+              text: Math.abs(st.trendPerWeek) < FLAT ? 'flat'
+                : `${fmtSigned(st.trendPerWeek, 2)}${isBodyweight(st.exercise) ? '/wk' : ' kg/wk'}${st.trendReliable ? '' : ' (early)'}` })
           : el('span', { class: 'row-trend is-muted', text: 'needs 2 sessions' }),
       ]) : null,
       st.sessions.length > 1 ? spark : null,
@@ -281,7 +292,7 @@ function detailView(st, ctx) {
   const heroNum = el('span', { class: 'hero-num' });
   root.append(el('div', { class: 'hero' }, [
     el('span', { class: 'hero-label', text: 'Where this lift stands' }),
-    el('span', { class: 'hero-value' }, [heroNum, el('small', { text: isReps(st.exercise) ? ' score' : ' kg' })]),
+    el('span', { class: 'hero-value' }, [heroNum, el('small', { text: isBodyweight(st.exercise) ? ' score' : ' kg' })]),
     el('span', { class: `hero-delta${trendClass(st)}`, text: heroTrendText(st) }),
   ]));
   countUp(heroNum, st.lastAdj, { from: 0, format: (v) => fmt(v, 1) });
@@ -357,9 +368,9 @@ function detailView(st, ctx) {
   ctx.onResize(paintLane);
 
   root.append(el('div', { class: 'kpi-row kpi-row-2' }, [
-    statTile({ label: 'Best ever', value: fmt(st.bestAdj, 1), unit: isReps(st.exercise) ? '' : 'kg',
+    statTile({ label: 'Best ever', value: fmt(st.bestAdj, 1), unit: isBodyweight(st.exercise) ? '' : 'kg',
       delta: st.prCount ? `${st.prCount} PR${st.prCount === 1 ? '' : 's'} so far` : null }),
-    statTile({ label: 'Next target', value: fmt(st.nextTarget, 1), unit: isReps(st.exercise) ? '' : 'kg',
+    statTile({ label: 'Next target', value: fmt(st.nextTarget, 1), unit: isBodyweight(st.exercise) ? '' : 'kg',
       delta: targetDelta(st), deltaLabel: targetDeltaLabel(st) }),
   ]));
 
@@ -369,10 +380,10 @@ function detailView(st, ctx) {
   root.append(disclose('Where this is heading', [
     el('div', { class: 'kpi-row kpi-row-2' }, [
       statTile({ label: 'Projected +4 wks', value: st.proj4 != null ? fmt(st.proj4, 1) : '—',
-        unit: st.proj4 != null && !isReps(st.exercise) ? 'kg' : '',
+        unit: st.proj4 != null && !isBodyweight(st.exercise) ? 'kg' : '',
         delta: st.proj4 == null ? 'needs 3 sessions over 2 weeks' : null }),
       statTile({ label: 'Projected +12 wks', value: st.proj12 != null ? fmt(st.proj12, 1) : '—',
-        unit: st.proj12 != null && !isReps(st.exercise) ? 'kg' : '',
+        unit: st.proj12 != null && !isBodyweight(st.exercise) ? 'kg' : '',
         delta: 'a ceiling, not a forecast' }),
     ]),
     el('p', { text: 'Both numbers extend today’s straight-line trend. Real progress '
@@ -389,13 +400,13 @@ function detailView(st, ctx) {
   ctx.onResize(paintVol);
 
   root.append(el('div', { class: 'kpi-row kpi-row-2' }, [
-    isReps(st.exercise)
+    isBodyweight(st.exercise)
       ? statTile({ label: 'Reps, last 7 days',
         value: fmtCompact(st.entries.filter((e) => e.day >= dayNumber(ctx.today) - 7)
           .reduce((n, e) => n + e.reps * (Number(e.sets) > 0 ? Number(e.sets) : 1), 0)) })
       : statTile({ label: 'Volume, last 7 days', value: fmtCompact(st.volume7), unit: 'kg' }),
     statTile({ label: 'Last session', value: `${st.lastSets} × ${st.lastReps}`, deltaLabel: '',
-      delta: isReps(st.exercise) ? 'reps' : `@ ${fmtWeight(st.sessions[st.sessions.length - 1].best.weight)} kg` }),
+      delta: isBodyweight(st.exercise) ? 'reps' : `@ ${fmtWeight(st.sessions[st.sessions.length - 1].best.weight)} kg` }),
   ]));
 
   root.append(el('h2', { class: 'section-title', text: 'Every session' }));
@@ -477,7 +488,9 @@ function heroTrendText(st) {
   if (st.trendPerWeek == null) return 'trend needs two sessions in the window';
   if (Math.abs(st.trendPerWeek) < FLAT) return 'holding steady over your recent sessions';
   const dir = st.trendPerWeek > 0 ? 'going up' : 'drifting down';
-  return `${dir} about ${Math.abs(st.trendPerWeek).toFixed(2)} kg a week`
+  // No kilos on a lift with no kilos; the hero above already says "score".
+  const unit = isBodyweight(st.exercise) ? '' : ' kg';
+  return `${dir} about ${Math.abs(st.trendPerWeek).toFixed(2)}${unit} a week`
     + (st.trendReliable ? '' : ' — early days, so treat it lightly');
 }
 

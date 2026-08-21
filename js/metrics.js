@@ -98,13 +98,15 @@ export function setBonus(sets, k = 0.05) {
  * downstream — the trend, the projection, the bands, the readiness model —
  * therefore works on a reps lift without knowing it is one.
  */
-export function isReps(exercise) {
-  return !!exercise && exercise.kind === 'reps';
+export function isBodyweight(exercise) {
+  if (!exercise) return false;
+  // 'reps' is what this was called for one release; both mean the same lift.
+  return exercise.kind === 'bodyweight' || exercise.kind === 'reps';
 }
 
 /** What one set is worth, on whichever scale its lift is measured in. */
 export function setScore(weight, reps, settings, kind) {
-  if (kind === 'reps') {
+  if (isBodyweight({ kind })) {
     const r = Math.round(Number(reps));
     return r > 0 ? r : NaN;
   }
@@ -172,7 +174,7 @@ export function scoreEntry(entry, settings, kind) {
     adj: one * setBonus(entry.sets, settings.setBonusK),
     // A reps lift moves no external load, so it contributes no tonnage. Adding
     // reps to a kilo total would be adding two different things together.
-    volume: kind === 'reps' ? 0 : volume(entry.weight, entry.reps, entry.sets),
+    volume: isBodyweight({ kind }) ? 0 : volume(entry.weight, entry.reps, entry.sets),
     day: dayNumber(entry.date),
   };
 }
@@ -632,7 +634,7 @@ export function lastSessionWeight(stats) {
 export function lastSessionLoad(stats) {
   const last = stats.sessions && stats.sessions.length ? stats.sessions[stats.sessions.length - 1] : null;
   if (!last) return null;
-  const v = isReps(stats.exercise) ? last.best.reps : last.best.weight;
+  const v = isBodyweight(stats.exercise) ? last.best.reps : last.best.weight;
   return Number.isFinite(v) ? v : null;
 }
 
@@ -697,12 +699,12 @@ export function planFor(stats, settings, override = {}) {
     stretchCeiling: target * (1 + settings.stretchBand),
     grid: [], columns: SET_COLUMNS, rows: REP_SCHEMES,
     gentlest: null, weight: NaN, score: NaN, overshoot: NaN, band: null,
-    kind: isReps(stats.exercise) ? 'reps' : 'weight', options: null,
+    kind: isBodyweight(stats.exercise) ? 'bodyweight' : 'weight', options: null,
   };
   if (!plan.ready) return plan;
 
-  if (isReps(stats.exercise)) {
-    plan.kind = 'reps';
+  if (isBodyweight(stats.exercise)) {
+    plan.kind = 'bodyweight';
     plan.weight = null;
     plan.atBase = false;
     plan.lastWeight = null;
@@ -789,12 +791,12 @@ export function fmt(n, dp = 1) {
 
 /** The unit a lift's score and milestones are counted in. */
 export function loadUnit(exercise) {
-  return isReps(exercise) ? 'reps' : 'kg';
+  return isBodyweight(exercise) ? 'reps' : 'kg';
 }
 
 /** How one set reads: "3 × 5 @ 100 kg", or "3 × 12 reps" where there is no load. */
 export function describeSet(exercise, sets, reps, weight) {
-  return isReps(exercise)
+  return isBodyweight(exercise)
     ? `${sets} × ${reps} reps`
     : `${sets} × ${reps} @ ${fmtWeight(weight)} kg`;
 }
