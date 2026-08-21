@@ -20,7 +20,7 @@ import { startRest, stopRest } from '../timer.js';
 import * as store from '../store.js';
 import {
   isoToday, isoAddDays, relativeDate, formatDate, fmt, fmtWeight, fmtSigned,
-  adjE1rm, e1rm, volume, planFor, bandFor, exerciseStats, sessionAdjWith, isReps,
+  adjE1rm, e1rm, volume, planFor, bandFor, exerciseStats, sessionAdjWith, isBodyweight, describeSet,
 } from '../metrics.js';
 import { bandChip } from '../ui.js';
 import { setTrace } from '../charts.js';
@@ -276,7 +276,7 @@ function entryForm(st, ctx, settings) {
   // hand-off, then the plan, then last session.
   const inProgress = todays.length ? todays[todays.length - 1] : null;
   // A lift with nothing to load has no weight to prefill, remember or ask for.
-  const repsOnly = isReps(ex);
+  const repsOnly = isBodyweight(ex);
   if (repsOnly) form.weight = 0;
   else {
     if (form.weight == null) form.weight = (live && inProgress ? inProgress.weight : null) ?? (plan?.ready ? plan.weight : last?.weight ?? (base || 20));
@@ -411,13 +411,17 @@ function entryForm(st, ctx, settings) {
     el('div', { class: 'mode-row' }, [modeSwitch]),
     plan?.ready ? el('div', { class: 'plan-strip' }, [
       el('span', { class: 'plan-strip-label', text: 'Planned' }),
-      el('span', { class: 'plan-strip-value', text: `${plan.sets} × ${plan.reps} @ ${fmtWeight(plan.weight)} kg` }),
+      el('span', { class: 'plan-strip-value', text: repsOnly
+        ? `${plan.sets} × ${plan.reps} reps`
+        : `${plan.sets} × ${plan.reps} @ ${fmtWeight(plan.weight)} kg` }),
       bandChip(plan.band, { compact: true }),
       el('button', {
         type: 'button', class: 'link-btn',
         onclick: () => {
-          form.weight = plan.weight; form.reps = plan.reps; form.sets = plan.sets;
-          weightStep.setValue(plan.weight); repsStep.setValue(plan.reps); setsStep.setValue(plan.sets);
+          form.weight = repsOnly ? 0 : plan.weight;
+          form.reps = plan.reps; form.sets = plan.sets;
+          if (!repsOnly) weightStep.setValue(plan.weight);
+          repsStep.setValue(plan.reps); setsStep.setValue(plan.sets);
           ctx.tick();
         },
       }, ['Use']),
@@ -465,7 +469,7 @@ function entryForm(st, ctx, settings) {
         el('p', { class: 'card-meta', text: live && doneSoFar
           ? `${doneSoFar} set${doneSoFar === 1 ? '' : 's'} logged ${form.date === isoToday() ? 'today' : formatDate(form.date)}`
           : last
-            ? `${relativeDate(last.date)} · ${last.sets}×${last.reps} @ ${fmtWeight(last.weight)} kg`
+            ? `${relativeDate(last.date)} · ${describeSet(ex, last.sets, last.reps, last.weight)}`
             : 'First time logging this lift' }),
       ]),
     ]),
@@ -499,7 +503,7 @@ function tracker(traceFig, doneSoFar, target, complete, ex, ctx) {
           setLastSetId(null);
           stopRest();
           ctx.refresh();
-          if (removed) toast(`Took back ${removed.reps} @ ${fmtWeight(removed.weight)} kg`, {
+          if (removed) toast(`Took back ${removed.reps}${isBodyweight(ex) ? ' reps' : ` @ ${fmtWeight(removed.weight)} kg`}`, {
             action: () => { store.undo(); ctx.refresh(); }, actionLabel: 'Undo',
           });
         },
@@ -606,7 +610,7 @@ function logOneSet(st, ctx, settings) {
 
 /** All at once: the whole block as one row, as it has always worked. */
 function save(st, ctx) {
-  const repsOnly = isReps(st.exercise);
+  const repsOnly = isBodyweight(st.exercise);
   const w = repsOnly ? 0 : Number(form.weight);
   const r = Number(form.reps), s = Number(form.sets);
   if (!(r > 0) || (!repsOnly && !(w > 0))) {
@@ -661,11 +665,21 @@ function history(ctx, settings) {
     if (shown >= 10) break;
     shown++;
     const totalSets = rows.reduce((n, e) => n + e.sets, 0);
-    const totalVol = rows.reduce((n, e) => n + volume(e.weight, e.reps, e.sets), 0);
+    // A day of bodyweight work moved no bar, so "0 kg" is the wrong summary of
+    // it. Count what each kind of lift actually did and name only what happened.
+    let totalVol = 0;
+    let bodyReps = 0;
+    for (const e of rows) {
+      if (isBodyweight(store.getExercise(e.exerciseId))) bodyReps += e.reps * (Number(e.sets) > 0 ? Number(e.sets) : 1);
+      else totalVol += volume(e.weight, e.reps, e.sets);
+    }
+    const meta = [formatDate(date), `${totalSets} sets`];
+    if (totalVol > 0) meta.push(`${fmt(totalVol, 0)} kg`);
+    if (bodyReps > 0) meta.push(`${bodyReps} reps`);
     wrap.append(el('div', { class: 'day' }, [
       el('div', { class: 'day-head' }, [
         el('span', { class: 'day-when', text: relativeDate(date) }),
-        el('span', { class: 'day-meta', text: `${formatDate(date)} · ${totalSets} sets · ${fmt(totalVol, 0)} kg` }),
+        el('span', { class: 'day-meta', text: meta.join(' · ') }),
       ]),
       el('ul', { class: 'day-list' }, rows.map((e) => historyRow(e, names.get(e.exerciseId) || 'Unknown', prIds.has(e.id), ctx, settings))),
     ]));
@@ -686,8 +700,9 @@ function history(ctx, settings) {
  */
 function historyRow(entry, name, isPR, ctx, settings) {
   const rir = entry.rir !== null && entry.rir !== undefined ? `, RIR ${entry.rir}` : '';
-  const kind = (store.getExercise(entry.exerciseId) || {}).kind;
-  const repsOnly = kind === 'reps';
+  const lift = store.getExercise(entry.exerciseId) || {};
+  const kind = lift.kind;
+  const repsOnly = isBodyweight(lift);
   const setText = repsOnly
     ? `${entry.sets} × ${entry.reps} reps`
     : `${entry.sets} × ${entry.reps} @ ${fmtWeight(entry.weight)} kg`;
@@ -790,7 +805,7 @@ function editSheet(entry, ctx, settings) {
       el('div', { class: 'field-block' }, [el('span', { class: 'field-label', text: 'Date' }), dateInput]),
       el('div', { class: 'lever-row' }, [
         // Nothing to load, nothing to edit.
-        isReps(ex) ? null : stepper({ label: `Weight (${settings.unit})`, value: draft.weight, step: ex?.step || settings.defaultStep,
+        isBodyweight(ex) ? null : stepper({ label: `Weight (${settings.unit})`, value: draft.weight, step: ex?.step || settings.defaultStep,
           min: 0, max: 999, dp: 1, origin: Number(ex?.base) > 0 ? Number(ex.base) : 0, id: 'ed-w',
           onChange: (v) => { draft.weight = v; } }),
         stepper({ label: 'Reps', value: draft.reps, step: 1, min: 1, max: 50, dp: 0, id: 'ed-r', onChange: (v) => { draft.reps = v; } }),

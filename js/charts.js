@@ -4,7 +4,7 @@
 // on the points that carry the story (last, best, projection, target).
 
 import { fmt, fmtWeight, fmtCompact, formatDate, formatDateShort, dayNumber, isoAddDays, isoToday,
-  isReps, describeSet } from './metrics.js';
+  isBodyweight, describeSet } from './metrics.js';
 import { projectionBand, runway, readinessCurve } from './insights.js';
 
 const SVG = 'http://www.w3.org/2000/svg';
@@ -311,7 +311,7 @@ export function progressionChart(stats, settings, {
     crosshair.setAttribute('x1', px); crosshair.setAttribute('x2', px);
     focusDot.setAttribute('cx', px); focusDot.setAttribute('cy', py);
     hover.setAttribute('visibility', 'visible');
-    const repsOnly = isReps(stats.exercise);
+    const repsOnly = isBodyweight(stats.exercise);
     tip.replaceChildren(
       el('strong', { text: repsOnly ? fmt(s.best.adj, 1) : `${fmt(s.best.adj, 1)} kg` }),
       el('span', { class: 'tip-sub', text: `${formatDate(s.date)} · ${describeSet(stats.exercise, s.best.sets, s.best.reps, s.best.weight)}` }),
@@ -354,7 +354,8 @@ export function progressionChart(stats, settings, {
   // --- key: identity never rests on colour alone ---
   const key = el('div', { class: 'chart-key' }, [
     keyItem('line', 'Adj e1RM per session'),
-    stats.trendPerDay != null ? keyItem('trend', `Trend ${fmt(stats.trendPerWeek, 2)} kg/wk`) : null,
+    stats.trendPerDay != null ? keyItem('trend',
+      `Trend ${fmt(stats.trendPerWeek, 2)}${isBodyweight(stats.exercise) ? ' a week' : ' kg/wk'}`) : null,
     horizon ? keyItem('proj', `Projection, +${Math.round(horizon / 7)} wks`) : null,
     band ? keyItem('cone', `Spread your sessions sit in, ±${fmt(band.sd, 1)} kg`) : null,
     anyStep ? keyItem('best', 'Best up to that point') : null,

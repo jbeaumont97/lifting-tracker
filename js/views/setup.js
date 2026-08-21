@@ -5,7 +5,7 @@ import { el, stepper, chipGroup, segmented, toast, sheet, confirmSheet, details,
 import * as store from '../store.js';
 import { showWelcome } from './welcome.js';
 import * as ui from '../core/uistate.js';
-import { fmt, setBonus, READY_AT, fatigueAt, retentionAt, readinessSettings, isReps } from '../metrics.js';
+import { fmt, setBonus, READY_AT, fatigueAt, retentionAt, readinessSettings, isBodyweight } from '../metrics.js';
 import { LEVELS, levelOf, levelByKey, suggestLevel } from '../insights.js';
 
 export function renderSetup(ctx) {
@@ -50,7 +50,7 @@ export function renderSetup(ctx) {
   root.append(details('How to set these up', [
     el('p', { text: 'Starting weight is the lightest this lift can be: the empty bar, or the lowest pin on a stack. Weight step is the smallest increment on top of that. Together they define the loads that exist — a 20 kg bar with 2.5 kg steps means 20, 22.5, 25 and so on, and nothing in between. Leave the starting weight at 0 for dumbbells or anything where the step alone describes it.' }),
     el('p', { text: 'Weight step is the smallest increment you can actually load — every suggestion is rounded up to the next rung. Gain per week is the one number the whole planner turns on, which is why it comes with three presets: pick the level that fits and tune it after, per lift, if you want to.' }),
-    el('p', { text: 'A lift set to "just reps" has nothing to load. The planner asks for a rep count instead of a weight, progress means more reps, and it adds sets but no tonnage to your totals — the app does not know what you weigh, and a press-up is not all of you anyway.' }),
+    el('p', { text: 'A bodyweight lift has nothing to load. There is no weight to record and no one-rep max to estimate, so the planner asks for a rep count instead, progress means more reps, and it adds sets but no tonnage to your totals — the app does not know what you weigh, and a press-up is not all of you anyway.' }),
     el('p', { text: 'Sets per session is the set count the planner assumes when it recommends a weight. Sets per week is your working-set budget for that lift; Progress flags you under, on, or over it. Roughly 10–20 hard sets per muscle per week is the common recommendation, spread across every lift that trains it — so these per-lift numbers should add up to that, not each hit it.' }),
   ]));
 
@@ -283,19 +283,19 @@ function globalLevel(ctx) {
 
 function exerciseCard(ex, index, total, ctx) {
   const isOpen = ui.get(OPEN_EX, null) === ex.id;
-  const reps = isReps(ex);
+  const reps = isBodyweight(ex);
   const st = ctx.stats.find((x) => x.exercise.id === ex.id);
 
   const body = el('div', { class: 'card-body' }, [
     el('div', { class: 'field-block' }, [
       el('span', { class: 'field-label', text: 'What changes between sessions' }),
       segmented({
-        label: 'What changes between sessions', value: reps ? 'reps' : 'weight',
-        options: [{ value: 'weight', label: 'Weight' }, { value: 'reps', label: 'Just reps' }],
+        label: 'What changes between sessions', value: reps ? 'bodyweight' : 'weight',
+        options: [{ value: 'weight', label: 'Weight' }, { value: 'bodyweight', label: 'Bodyweight' }],
         onChange: (v) => { store.updateExercise(ex.id, { kind: v }); ctx.refresh({ transition: true }); },
       }),
       el('p', { class: 'field-hint', text: reps
-        ? 'A lift with nothing to load — a press-up, a pull-up, a plank. Progress is more reps, and the planner asks for reps instead of a weight. It contributes sets but no tonnage, because the app does not know what you weigh.'
+        ? 'Nothing to load — a press-up, a pull-up, a dip. There is no weight to ask for and no one-rep max to estimate from one, so progress is measured in reps and the planner asks for a rep count. It counts sets but adds no tonnage, because the app does not know what you weigh.'
         : 'Weight on the bar or the stack. Progress is more of it.' }),
     ]),
 
@@ -346,7 +346,7 @@ function exerciseCard(ex, index, total, ctx) {
       el('div', { class: 'card-head-main' }, [
         el('h3', { class: 'card-title', text: ex.name }),
         el('p', { class: 'card-meta', text: [
-          reps ? 'reps only' : (ex.base > 0 ? `from ${fmt(ex.base, 1).replace('.0', '')} kg` : null),
+          reps ? 'bodyweight' : (ex.base > 0 ? `from ${fmt(ex.base, 1).replace('.0', '')} kg` : null),
           reps ? null : `${fmt(ex.step, 1).replace('.0', '')} kg steps`,
           (levelOf(ex) || { label: 'Custom' }).label.toLowerCase() + ` · ${(ex.gainPerWeek * 100).toFixed(2)}%/wk`,
           `${ex.setsPerSession} sets/session · ${ex.setsPerWeek}/week`,
@@ -464,8 +464,8 @@ function addSheet(ctx) {
         el('span', { class: 'field-label', text: 'What changes between sessions' }),
         segmented({
           label: 'What changes between sessions', value: 'weight',
-          options: [{ value: 'weight', label: 'Weight' }, { value: 'reps', label: 'Just reps' }],
-          onChange: (v) => { draft.kind = v; loadFields.hidden = v === 'reps'; },
+          options: [{ value: 'weight', label: 'Weight' }, { value: 'bodyweight', label: 'Bodyweight' }],
+          onChange: (v) => { draft.kind = v; loadFields.hidden = v === 'bodyweight'; },
         }),
       ]),
       loadFields,

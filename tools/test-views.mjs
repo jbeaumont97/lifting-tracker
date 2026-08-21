@@ -992,7 +992,7 @@ const motion2 = await import('../js/core/motion.js');
 
 /** A reps lift with enough history to plan from. */
 function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
-  const ex = store.addExercise({ name: 'Press-ups', kind: 'reps', setsPerSession: 3, gainPerWeek: 0.015, setsPerWeek: 12 });
+  const ex = store.addExercise({ name: 'Press-ups', kind: 'bodyweight', setsPerSession: 3, gainPerWeek: 0.015, setsPerWeek: 12 });
   for (const [i, r] of reps.entries()) {
     store.addEntry({ exerciseId: ex.id, date: metrics.isoAddDays(TODAY, from + i * step), weight: 0, reps: r, sets: 3, rir: 2 });
   }
@@ -1061,6 +1061,106 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
   ok('but it still shows up in where the work went',
     body.textContent.includes('Press-ups'));
   uistate.set('progress.view', 'lifts');
+}
+
+/* ------------------- 6i-b. a bodyweight lift never mentions a weight */
+
+// The first cut of this leaked "@ 0 kg" into the planned strip, the card meta,
+// the undo toast, the day header and two trend labels — which reads as the app
+// telling you to load a press-up. Rather than test those six by name, sweep
+// every element that shows a per-lift figure and assert none of them says kg.
+{
+  reset();
+  store.clearAll();
+  const ex = givePressUps();
+
+  /** Every per-lift value on a screen. Deliberately not the whole textContent:
+   *  the shared explainers talk about barbell training and always will. */
+  const VALUE_PARTS = [
+    '.presc', '.plan-strip-value', '.card-meta', '.row-set', '.day-meta',
+    '.hero-value', '.hero-delta', '.row-adj-big', '.row-trend', '.milestone-value',
+    '.milestone-from', '.set-track', '.summary-facts', '.stat-value', '.data-table td',
+  ];
+  const sweep = (label, node) => {
+    for (const sel of VALUE_PARTS) {
+      for (const n of node.querySelectorAll(sel)) {
+        ok(`${label} ${sel} says nothing about kilos`,
+          !/\bkg\b|kilos/.test(n.textContent), `${sel}: ${n.textContent.trim().slice(0, 70)}`);
+      }
+    }
+  };
+
+  openCard(ex.id);
+  sweep('[plan]', renderPlan(ctx()));
+
+  setPrefill({ exerciseId: ex.id, date: TODAY, mode: 'sets' });
+  sweep('[log]', renderLog(ctx({ route: 'log' })));
+
+  openExercise(ex.id);
+  const detail = renderProgress(ctx({ route: 'progress' }));
+  await settle();
+  sweep('[lift]', detail);
+  clearSelection();
+  sweep('[list]', renderProgress(ctx({ route: 'progress' })));
+
+  // And with the numbers disclosed, which is where the score and target live.
+  store.updateSettings({ numbersOpen: true });
+  openCard(ex.id);
+  sweep('[plan, numbers open]', renderPlan(ctx()));
+  store.updateSettings({ numbersOpen: false });
+}
+
+/* --------------------- 6i-c. the 0 kg trap, and the way out of it */
+
+{
+  // Logging a bodyweight lift as an ordinary one with no weight leaves it with
+  // no score, no trend and no plan — and the card used to answer that by asking
+  // for a session, of which there were nine.
+  reset();
+  store.clearAll();
+  const ex = store.addExercise({ name: 'Press-ups' });
+  for (const [i, r] of [10, 11, 12].entries()) {
+    store.addEntry({ exerciseId: ex.id, date: metrics.isoAddDays(TODAY, -9 + i * 4), weight: 0, reps: r, sets: 3, rir: 2 });
+  }
+  select.invalidate();
+
+  const st = ctx().stats.find((s) => s.exercise.id === ex.id);
+  ok('a lift logged with no weight scores nothing', !(st.lastAdj > 0));
+  ok('and is recognised as one that should not have been weighted',
+    insights.looksBodyweight(st) === true);
+  ok('a lift already marked is not flagged again',
+    insights.looksBodyweight({ ...st, exercise: { ...st.exercise, kind: 'bodyweight' } }) === false);
+  ok('and a properly loaded lift is never flagged',
+    insights.looksBodyweight(ctx().stats.find((s) => s.exercise.id !== ex.id) || { entries: [] }) === false);
+
+  openCard(ex.id);
+  const card = renderPlan(ctx()).querySelector('.card');
+  ok('the card explains what is actually wrong',
+    /has no weight on it/.test(card.textContent), card.textContent.slice(0, 90));
+  ok('rather than asking for a session it already has',
+    !card.textContent.includes('Log a session for this lift'));
+
+  const fix = card.querySelectorAll('.btn-primary').find((n) => /Mark as bodyweight/.test(n.textContent));
+  ok('and offers the one-tap fix', !!fix);
+  fix.click();
+  ok('which marks the lift', store.getExercise(ex.id).kind === 'bodyweight');
+  select.invalidate();
+  const planned = renderPlan(ctx());
+  ok('and it now gets a real prescription',
+    /\d+ sets of \d+ reps/.test((planned.querySelector('.presc .visually-hidden') || {}).textContent || ''),
+    'still no plan after marking it');
+  store.undo();
+  ok('the fix is undoable', store.getExercise(ex.id).kind === 'weight');
+}
+
+{
+  // The flag was called 'reps' for one release; documents saved then still read.
+  reset();
+  const doc = JSON.parse(store.exportJSON());
+  doc.exercises[0].kind = 'reps';
+  const back = store.importJSON(JSON.stringify(doc));
+  ok('a lift saved as "reps" loads as a bodyweight lift', back.exercises[0].kind === 'bodyweight');
+  ok('and is treated as one', metrics.isBodyweight(back.exercises[0]) === true);
 }
 
 /* ------------------------------------------- 6j. how fast a lift moves */

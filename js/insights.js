@@ -14,7 +14,7 @@
 //     no figure the spreadsheet fixture checks can move because of this file.
 
 import {
-  dayNumber, isoAddDays, isoToday, e1rm, volume, repFactor, setBonus, slope, isReps,
+  dayNumber, isoAddDays, isoToday, e1rm, volume, repFactor, setBonus, slope, isBodyweight,
   fatigueAt, accrualAt, retentionAt, typicalInterval, readinessSettings,
   READY_AT,
 } from './metrics.js';
@@ -216,7 +216,7 @@ export function milestoneStep(value, kind) {
  * in what is being counted.
  */
 export function bestLoad(stats) {
-  const reps = isReps(stats.exercise);
+  const reps = isBodyweight(stats.exercise);
   let best = null;
   for (const e of stats.entries || []) {
     const v = Number(reps ? e.reps : e.weight);
@@ -235,7 +235,7 @@ export const bestWeight = bestLoad;
  * passed and drifted back below is not the next thing to chase.
  */
 export function milestones(stats, { count = 1 } = {}) {
-  const reps = isReps(stats.exercise);
+  const reps = isBodyweight(stats.exercise);
   const out = [];
   const w = bestLoad(stats);
   if (Number.isFinite(w) && w > 0) {
@@ -338,8 +338,8 @@ export function projectionBand(stats, settings, { todayIso = isoToday(), z = 1 }
  * what that weight would score at the reps and sets this lift is trained with.
  */
 export function runway(stats, settings, { todayIso = isoToday() } = {}) {
-  const isRepsLift = isReps(stats.exercise);
-  const [target] = milestones(stats).filter((m) => m.kind === (isRepsLift ? 'reps' : 'weight'));
+  const isBodyweightLift = isBodyweight(stats.exercise);
+  const [target] = milestones(stats).filter((m) => m.kind === (isBodyweightLift ? 'reps' : 'weight'));
   if (!target) return null;
 
   const reps = Number(stats.lastReps) > 0 ? Math.round(Number(stats.lastReps)) : 5;
@@ -349,7 +349,7 @@ export function runway(stats, settings, { todayIso = isoToday() } = {}) {
   // On a reps lift the milestone IS a rep count, so the only conversion is the
   // set bonus; there is no rep factor because reps are not standing in for a
   // one-rep max, they are the thing itself.
-  const factor = isRepsLift
+  const factor = isBodyweightLift
     ? setBonus(sets, settings.setBonusK)
     : repFactor(reps, settings.formula) * setBonus(sets, settings.setBonusK);
   if (!Number.isFinite(factor) || factor <= 0) return null;
@@ -416,6 +416,21 @@ export function readinessCurve(stats, settings, { days = 28, step = 1 } = {}) {
     });
   }
   return out;
+}
+
+/**
+ * A lift that is plainly a bodyweight one but has not been marked as such.
+ *
+ * Its sessions carry no load, so its e1RM is zero, so it has no score, no
+ * trend and no plan — and the card falls back to "log a session and a plan
+ * appears here" even though sessions are exactly what it has. Silence is the
+ * worst possible answer there, so this is what turns it into a sentence.
+ */
+export function looksBodyweight(stats) {
+  if (!stats || isBodyweight(stats.exercise)) return false;
+  const rows = stats.entries || [];
+  if (!rows.length) return false;
+  return rows.every((e) => !(Number(e.weight) > 0));
 }
 
 /* ============================================================ training age */
