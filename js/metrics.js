@@ -287,10 +287,15 @@ export function exerciseStats(exercise, entries, settings, todayIso = isoToday()
   stats.bestEntry = mine.reduce((a, b) => (b.adj > a.adj ? b : a));
   stats.bestAdj = stats.bestEntry.adj;
 
-  // Trend: every logged set inside the lookback window, adj e1RM against day.
+  // Trend: one point per session inside the lookback window, that day's best
+  // adj e1RM against day. Sub-maximal entries within a session (warm-ups,
+  // back-off sets) are deliberately excluded — fitting on every logged set
+  // would let a session logged with more distinct low entries outweigh one
+  // logged as a single clean top set, which can pull the line down even while
+  // every session's best is a new PR.
   const from = todayDay - settings.lookbackDays;
-  const win = mine.filter((e) => e.day >= from && Number.isFinite(e.adj));
-  const perDay = slope(win.map((e) => [e.day, e.adj]));
+  const win = stats.sessions.filter((s) => s.day >= from && Number.isFinite(s.best.adj));
+  const perDay = slope(win.map((s) => [s.day, s.best.adj]));
   stats.trendWindowCount = win.length;
   stats.trendWindowDays = win.length ? win[win.length - 1].day - win[0].day : 0;
   // Two sessions three days apart give a slope, but not one worth extrapolating
