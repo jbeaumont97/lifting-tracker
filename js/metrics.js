@@ -1,11 +1,14 @@
-// metrics.js — a faithful port of the spreadsheet's maths. Pure functions only:
-// no DOM, no storage, so every number here is testable in isolation.
+// metrics.js — a faithful port of the spreadsheet's maths, with one deliberate
+// departure: a session's score is its best set, not whichever block happens to
+// carry the most repeats. Pure functions only: no DOM, no storage, so every
+// number here is testable in isolation.
 //
 //   e1RM (Epley)   = w x (1 + reps/30)
 //   e1RM (Brzycki) = w x 36/(37 - reps)
-//   Adj e1RM       = e1RM x (1 + k x ln(sets))
+//   Adj e1RM       = e1RM x (1 + k x ln(sets))       — one block, its own sets
+//   Session adj    = best e1RM in the session x (1 + k x ln(total sets))
 //   Volume         = w x reps x sets
-//   Trend          = least-squares slope of adj e1RM vs day, x7 for kg/week
+//   Trend          = least-squares slope of session adj e1RM vs day, x7 for kg/week
 
 export const ANCHOR = '2020-01-01';          // Settings!B3 — zero point for day numbers
 export const REP_SCHEMES = [3, 4, 5, 6, 8, 10, 12];
@@ -139,10 +142,11 @@ export function setKey(e) {
 /**
  * What a session scores, optionally with one more set added to it.
  *
- * A session is worth its best block: the best set, credited for how many times
- * it was repeated. Four sets of five plus a dropped-to-four last set is scored
- * on the four honest sets — the short one neither inflates the number nor
- * erases the work that came before it.
+ * A session is worth its best set — the single highest raw e1RM logged, whatever
+ * its own rep scheme — credited for every set done that session, not only exact
+ * repeats of that one block. A warm-up ahead of it or a lighter back-off block
+ * after it no longer changes which set anchors the score; they only add to the
+ * set count the anchor is credited for.
  *
  * This mirrors what the store will do with the set exactly, so the preview and
  * the saved result can never disagree.
@@ -158,12 +162,14 @@ export function sessionAdjWith(entries, extra, settings, kind) {
     if (hit) hit.sets += 1;
     else list.push({ weight: Number(extra.weight), reps: Number(extra.reps), sets: 1, key });
   }
-  let best = NaN;
+  let bestRaw = NaN;
+  let totalSets = 0;
   for (const e of list) {
-    const adj = adjE1rm(e.weight, e.reps, e.sets, settings, kind);
-    if (Number.isFinite(adj) && !(adj <= best)) best = adj;
+    const raw = setScore(e.weight, e.reps, settings, kind);
+    totalSets += e.sets;
+    if (Number.isFinite(raw) && !(raw <= bestRaw)) bestRaw = raw;
   }
-  return best;
+  return Number.isFinite(bestRaw) ? bestRaw * setBonus(totalSets, settings.setBonusK) : NaN;
 }
 
 /** What one logged entry is worth on each scale. */
@@ -255,27 +261,41 @@ export function exerciseStats(exercise, entries, settings, todayIso = isoToday()
   };
   if (!mine.length) return stats;
 
-  // Mark the sets that were a personal best at the moment they were logged.
-  // The first entry is not a PR — there was nothing to beat.
-  let running = -Infinity;
-  for (const [i, e] of mine.entries()) {
-    e.isPR = i > 0 && Number.isFinite(e.adj) && e.adj > running + 1e-9;
-    if (e.isPR) stats.prCount++;
-    if (Number.isFinite(e.adj)) running = Math.max(running, e.adj);
-  }
-
-  // One point per session date, carrying that day's best set — this is what
-  // gets charted, and what "last session" means.
+  // One point per session date, anchored on that day's best RAW set — the
+  // single highest e1RM logged, before any set-count bonus. A warm-up or a
+  // lighter back-off block never wins the anchor just for having more sets
+  // behind it; it only adds to the count the anchor is credited for below.
   const byDate = new Map();
   for (const e of mine) {
     const cur = byDate.get(e.date);
-    if (!cur || e.adj > cur.best.adj) byDate.set(e.date, { ...(cur || {}), date: e.date, day: e.day, best: e });
+    if (!cur || e.e1rm > cur.best.e1rm) byDate.set(e.date, { ...(cur || {}), date: e.date, day: e.day, best: e });
     const s = byDate.get(e.date);
     s.sets = (s.sets || 0) + (Number(e.sets) > 0 ? Number(e.sets) : 1);
     s.volume = (s.volume || 0) + e.volume;
     s.rows = (s.rows || 0) + 1;
   }
   stats.sessions = [...byDate.values()].sort((a, b) => a.day - b.day);
+
+  // A session is worth its best set, credited for every set logged that
+  // session — not just exact repeats of that one block. This overwrites the
+  // anchor entry's own (block-only) adj with the full session figure, which
+  // every other reader of entry.adj — PR marking below, bestAdj, the live
+  // "beats your best" check while logging — then sees for free.
+  for (const s of stats.sessions) {
+    s.best.adj = s.best.e1rm * setBonus(s.sets, settings.setBonusK);
+  }
+
+  // Mark the sessions that were a personal best at the moment they happened.
+  // The first session is not a PR — there was nothing to beat. This runs over
+  // sessions rather than raw entries so that a first-ever session logged as
+  // warm-up-then-work does not get its anchor flagged just for having a
+  // weaker entry ahead of it in the log.
+  let running = -Infinity;
+  for (const [i, s] of stats.sessions.entries()) {
+    s.best.isPR = i > 0 && Number.isFinite(s.best.adj) && s.best.adj > running + 1e-9;
+    if (s.best.isPR) stats.prCount++;
+    if (Number.isFinite(s.best.adj)) running = Math.max(running, s.best.adj);
+  }
 
   const last = stats.sessions[stats.sessions.length - 1];
   stats.lastDate = last.date;
