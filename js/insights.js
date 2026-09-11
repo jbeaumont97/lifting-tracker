@@ -306,20 +306,23 @@ export function etaTo(value, stats, { todayIso = isoToday(), maxDays = 730 } = {
 export function projectionBand(stats, settings, { todayIso = isoToday(), z = 1 } = {}) {
   if (!stats.trendReliable || !Number.isFinite(stats.trendPerDay)) return null;
   const from = dayNumber(todayIso) - settings.lookbackDays;
-  const win = (stats.entries || []).filter((e) => e.day >= from && Number.isFinite(e.adj));
+  // Same one-point-per-session basis as the fit itself (metrics.js) — the
+  // spread has to describe scatter around the line that was actually drawn,
+  // not scatter of every sub-maximal set logged alongside it.
+  const win = (stats.sessions || []).filter((s) => s.day >= from && Number.isFinite(s.best.adj));
   if (win.length < 3) return null;
 
   const n = win.length;
-  const mx = win.reduce((t, e) => t + e.day, 0) / n;
-  const my = win.reduce((t, e) => t + e.adj, 0) / n;
+  const mx = win.reduce((t, s) => t + s.day, 0) / n;
+  const my = win.reduce((t, s) => t + s.best.adj, 0) / n;
   let sxx = 0, sxy = 0;
-  for (const e of win) { sxx += (e.day - mx) ** 2; sxy += (e.day - mx) * (e.adj - my); }
+  for (const s of win) { sxx += (s.day - mx) ** 2; sxy += (s.day - mx) * (s.best.adj - my); }
   if (!(sxx > 0)) return null;
 
   const b = sxy / sxx;
   const a = my - b * mx;
   let ss = 0;
-  for (const e of win) { const r = e.adj - (a + b * e.day); ss += r * r; }
+  for (const s of win) { const r = s.best.adj - (a + b * s.day); ss += r * r; }
   const sd = Math.sqrt(ss / Math.max(1, n - 2));
   const span = Math.max(1, win[win.length - 1].day - win[0].day);
 
