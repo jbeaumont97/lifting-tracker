@@ -21,6 +21,7 @@ import * as store from '../store.js';
 import {
   isoToday, isoAddDays, relativeDate, formatDate, fmt, fmtWeight, fmtSigned,
   adjE1rm, e1rm, volume, planFor, bandFor, exerciseStats, sessionAdjWith, isBodyweight, describeSet,
+  warmupPlan,
 } from '../metrics.js';
 import { bandChip } from '../ui.js';
 import { setTrace } from '../charts.js';
@@ -266,6 +267,9 @@ function entryForm(st, ctx, settings) {
   const ex = st.exercise;
   const base = Number(ex.base) > 0 ? Number(ex.base) : 0;
   const plan = st.entryCount ? planFor(st, settings, {}) : null;
+  // warmupPlan already returns nothing for a lift with no weight to ramp, so
+  // this needs no bodyweight check of its own.
+  const warmups = plan?.ready ? warmupPlan(plan.weight, ex.step || settings.defaultStep, base, ex.kind) : [];
   const last = store.lastEntryFor(ex.id);
   const todays = store.entriesOn(ex.id, form.date);
   const doneSoFar = todays.reduce((n, e) => n + setCount(e), 0);
@@ -425,6 +429,20 @@ function entryForm(st, ctx, settings) {
           ctx.tick();
         },
       }, ['Use']),
+    ]) : null,
+    warmups.length ? el('div', { class: 'warmup-strip' }, [
+      el('span', { class: 'warmup-strip-label', text: 'Warm-up' }),
+      el('div', { class: 'warmup-steps' }, warmups.map((wu) => el('div', { class: 'warmup-step' }, [
+        el('span', { class: 'warmup-step-value', text: `${fmtWeight(wu.weight)} kg × ${wu.reps}` }),
+        el('button', {
+          type: 'button', class: 'link-btn',
+          onclick: () => {
+            form.weight = wu.weight; form.reps = wu.reps; form.sets = wu.sets;
+            weightStep.setValue(wu.weight); repsStep.setValue(wu.reps); setsStep.setValue(wu.sets);
+            ctx.tick();
+          },
+        }, ['Use']),
+      ]))),
     ]) : null,
     repsOnly ? null : el('div', { class: 'lever-row lever-row-wide' }, [weightStep]),
     el('div', { class: 'lever-row' }, [repsStep, setsStep]),

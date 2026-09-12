@@ -3,7 +3,7 @@
 // dropdowns, and numeric keypads on every number field.
 
 import { el } from './charts.js';
-import { fmtWeight, formatDate } from './metrics.js';
+import { fmtWeight, formatDate, milestoneUnitLabel } from './metrics.js';
 export { el };
 
 /** A labelled number field with big decrement/increment buttons. */
@@ -162,11 +162,27 @@ export function chipGroup({ label, options, value, onChange, allowNull = false, 
   return group;
 }
 
-function chip(label, selected, onClick, sub) {
+function chip(label, selected, onClick, sub, role = 'radio') {
   return el('button', {
-    type: 'button', class: `chip${selected ? ' is-selected' : ''}`, role: 'radio',
+    type: 'button', class: `chip${selected ? ' is-selected' : ''}`, role,
     'aria-checked': selected ? 'true' : 'false', onclick: () => { tap(); onClick(); },
   }, [el('span', { text: label }), sub ? el('small', { text: sub }) : null]);
+}
+
+/**
+ * Horizontal multi-choice chips — the toggle sibling of chipGroup(). Stateless:
+ * the caller owns `values` and repaints (or narrows a results list) on toggle,
+ * the same way plan.js's filter chips and setup.js's tag chips already do for
+ * everything else in this app.
+ */
+export function multiChipGroup({ label, options, values, onToggle, className = '' }) {
+  const group = el('div', { class: `chips ${className}`, role: 'group', 'aria-label': label });
+  for (const opt of options) {
+    const o = typeof opt === 'object' ? opt : { value: opt, label: String(opt) };
+    const selected = values.includes(o.value);
+    group.append(chip(o.label, selected, () => onToggle(o.value, !selected), o.sub, 'checkbox'));
+  }
+  return group;
 }
 
 /** Two-or-three-way view switch (e.g. Weights | Scores | Table). */
@@ -225,6 +241,7 @@ export function milestoneTrack(run, { compact = false } = {}) {
   if (!run || !run.milestone) return null;
   const { milestone: m, eta } = run;
   const unit = m.kind === 'reps' ? 'reps' : 'kg';
+  const valueUnit = milestoneUnitLabel(m, run.reps);
   const from = m.value - m.step;
   const pct = Math.max(2, Math.min(100, run.progress * 100));
 
@@ -239,7 +256,7 @@ export function milestoneTrack(run, { compact = false } = {}) {
   return el('div', { class: `milestone${compact ? ' is-compact' : ''}` }, [
     el('div', { class: 'milestone-head' }, [
       el('span', { class: 'milestone-label', text: 'Next milestone' }),
-      el('span', { class: 'milestone-value' }, [fmtWeight(m.value), el('small', { text: ` ${unit}` })]),
+      el('span', { class: 'milestone-value' }, [fmtWeight(m.value), el('small', { text: ` ${valueUnit}` })]),
     ]),
     el('div', {
       class: 'milestone-track', role: 'meter',

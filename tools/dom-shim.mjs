@@ -147,7 +147,13 @@ class Element_ extends Node_ {
   removeEventListener(type, fn) { this.listeners.get(type)?.delete(fn); }
   dispatchEvent(ev) {
     const type = typeof ev === 'string' ? ev : ev.type;
-    for (const fn of this.listeners.get(type) || []) fn({ type, target: this, preventDefault() {}, stopPropagation() {} });
+    // Extra fields on the passed-in event (key, shiftKey, ...) ride along, so a
+    // test can simulate more than a bare type — target stays this element's own,
+    // whatever the caller passed.
+    const extra = typeof ev === 'object' && ev ? ev : {};
+    for (const fn of this.listeners.get(type) || []) {
+      fn({ preventDefault() {}, stopPropagation() {}, ...extra, type, target: this });
+    }
     return true;
   }
   /** Fire a handler the way a user would, for the interaction tests. */

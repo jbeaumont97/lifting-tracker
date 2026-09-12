@@ -1,12 +1,56 @@
 // views/setup.js — the Exercises and Settings sheets, plus backup/restore.
 // Everything here is stored on this device only; nothing is ever sent anywhere.
 
-import { el, stepper, chipGroup, segmented, toast, sheet, confirmSheet, details, chevron, accentDot } from '../ui.js';
+import { el, stepper, chipGroup, multiChipGroup, segmented, toast, sheet, confirmSheet, details, chevron, accentDot } from '../ui.js';
 import * as store from '../store.js';
 import { showWelcome } from './welcome.js';
 import * as ui from '../core/uistate.js';
 import { fmt, setBonus, READY_AT, fatigueAt, retentionAt, readinessSettings, isBodyweight } from '../metrics.js';
 import { LEVELS, levelOf, levelByKey, suggestLevel } from '../insights.js';
+
+const SUGGESTED_TAGS = ['Legs', 'Push', 'Pull', 'Arms', 'Chest', 'Back', 'Core'];
+
+/**
+ * Free-form categories on a lift — a few common ones offered as quick-add
+ * chips, plus a text box for anything else. Owns its own repaint so toggling
+ * or adding a tag never has to touch the rest of the card.
+ */
+function tagEditor({ tags, onChange }) {
+  let current = [...tags];
+  const chipHost = el('div');
+  const paint = () => {
+    const options = [...new Set([...SUGGESTED_TAGS, ...current])];
+    chipHost.replaceChildren(multiChipGroup({
+      label: 'Tags', options, values: current,
+      onToggle: (tag, on) => {
+        current = on ? [...new Set([...current, tag])] : current.filter((t) => t !== tag);
+        paint();
+        onChange([...current]);
+      },
+    }));
+  };
+  paint();
+
+  const input = el('input', {
+    type: 'text', class: 'text-input', placeholder: 'Add a tag…', 'aria-label': 'Add a tag',
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const v = input.value.trim();
+    if (!v || current.includes(v)) { input.value = ''; return; }
+    current = [...current, v];
+    input.value = '';
+    paint();
+    onChange([...current]);
+  });
+
+  return el('div', { class: 'field-block' }, [
+    el('span', { class: 'field-label', text: 'Tags' }),
+    chipHost,
+    input,
+  ]);
+}
 
 export function renderSetup(ctx) {
   const { settings } = ctx;
@@ -299,6 +343,8 @@ function exerciseCard(ex, index, total, ctx) {
         : 'Weight on the bar or the stack. Progress is more of it.' }),
     ]),
 
+    tagEditor({ tags: ex.tags || [], onChange: (tags) => { store.updateExercise(ex.id, { tags }); ctx.refresh(); } }),
+
     // Nothing to load means nothing to say about bars, pins or plate steps.
     reps ? null : el('div', { class: 'lever-row' }, [
       stepper({ label: 'Starting weight', value: ex.base, step: 0.5, min: 0, max: 200, dp: 1, id: `bs-${ex.id}`,
@@ -322,6 +368,9 @@ function exerciseCard(ex, index, total, ctx) {
       stepper({ label: 'Sets / week', value: ex.setsPerWeek, step: 1, min: 0, max: 60, dp: 0, id: `sw-${ex.id}`,
         onChange: (v) => { store.updateExercise(ex.id, { setsPerWeek: v }); ctx.refresh(); } }),
     ]),
+
+    milestoneEditor(ex, ctx),
+
     el('div', { class: 'card-actions card-actions-end' }, [
       el('button', { type: 'button', class: 'btn btn-ghost btn-sm', disabled: index === 0, onclick: () => { store.moveExercise(ex.id, -1); ctx.refresh(); } }, ['↑ Up']),
       el('button', { type: 'button', class: 'btn btn-ghost btn-sm', disabled: index === total - 1, onclick: () => { store.moveExercise(ex.id, 1); ctx.refresh(); } }, ['↓ Down']),
@@ -355,6 +404,41 @@ function exerciseCard(ex, index, total, ctx) {
       chevron(),
     ]),
     isOpen ? body : null,
+  ]);
+}
+
+/**
+ * Left alone, "next milestone" is always a guess: the next round number above
+ * your best, at whatever reps you last happened to log. That can read as
+ * already beaten if most of your training is done at higher reps than the
+ * number implies. Set one here and it replaces the guess outright, at the
+ * reps you actually mean it for.
+ */
+function milestoneEditor(ex, ctx) {
+  const bw = isBodyweight(ex);
+  const m = ex.milestone || null;
+  return el('div', { class: 'field-block' }, [
+    el('span', { class: 'field-label', text: 'Milestone to chase' }),
+    el('p', { class: 'field-hint', text: bw
+      ? 'Left blank, the app picks the next round number of reps above your best.'
+      : 'Left blank, the app picks the next round number on the bar above your best, at whatever reps you last did. Set one to chase a specific weight for a specific rep count instead.' }),
+    el('div', { class: bw ? 'lever-row lever-row-half' : 'lever-row' }, [
+      stepper({
+        label: bw ? 'Target reps' : 'Target weight', value: m?.value ?? '',
+        step: bw ? 1 : (ex.step || 2.5), min: 0, max: 999, dp: bw ? 0 : 1,
+        id: `ms-val-${ex.id}`, placeholder: 'auto',
+        onChange: (v) => { store.updateExercise(ex.id, { milestone: { value: v > 0 ? v : null, reps: m?.reps ?? null } }); ctx.refresh(); },
+      }),
+      bw ? null : stepper({
+        label: 'At reps', value: m?.reps ?? 5, step: 1, min: 1, max: 20, dp: 0,
+        id: `ms-reps-${ex.id}`,
+        onChange: (v) => { store.updateExercise(ex.id, { milestone: { value: m?.value ?? null, reps: v } }); ctx.refresh(); },
+      }),
+    ]),
+    m ? el('button', {
+      type: 'button', class: 'btn btn-ghost btn-sm',
+      onclick: () => { store.updateExercise(ex.id, { milestone: null }); ctx.refresh(); toast('Back to automatic milestones'); },
+    }, ['Clear — back to automatic']) : null,
   ]);
 }
 
@@ -442,6 +526,7 @@ function addSheet(ctx) {
     gainPerWeek: s.defaultGainPerWeek,
     setsPerSession: lvl ? lvl.setsPerSession : 3,
     setsPerWeek: lvl ? lvl.setsPerWeek : 15,
+    tags: [],
   };
   const input = el('input', { type: 'text', class: 'text-input', placeholder: 'e.g. Romanian deadlift', 'aria-label': 'Exercise name' });
   input.addEventListener('input', () => { draft.name = input.value; });
@@ -469,6 +554,7 @@ function addSheet(ctx) {
         }),
       ]),
       loadFields,
+      tagEditor({ tags: [], onChange: (tags) => { draft.tags = tags; } }),
       el('div', { class: 'lever-row lever-row-half' }, [
         stepper({ label: 'Gain %/week', value: draft.gainPerWeek * 100, step: 0.05, min: 0, max: 5, dp: 2, id: 'new-gain', onChange: (v) => { draft.gainPerWeek = v / 100; } }),
       ]),
