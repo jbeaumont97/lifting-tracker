@@ -806,6 +806,69 @@ export function planFor(stats, settings, override = {}) {
   return plan;
 }
 
+/* ------------------------------------------------------------- warm-up */
+
+const WARMUP_PCT_TABLE = [
+  { pct: 0.40, reps: 10 },
+  { pct: 0.60, reps: 5 },
+  { pct: 0.75, reps: 3 },
+  { pct: 0.85, reps: 1 },
+];
+const WARMUP_BAR_REPS = 10;
+
+// How many warm-up steps to draw, tiered by "rungs" — loadable steps above the
+// empty bar/lightest pin — rather than a weight ratio, because base is
+// legitimately 0 for a lot of lifts (dumbbells, machines) where a ratio has
+// nothing to divide by. Heuristic constants, not derived from anything; the
+// usual findings rather than anything precise, in the same spirit as the
+// readiness defaults above.
+const WARMUP_TIERS = [
+  { maxRungs: 3, count: 0 },
+  { maxRungs: 8, count: 1 },
+  { maxRungs: 16, count: 2 },
+  { maxRungs: 28, count: 3 },
+  { maxRungs: Infinity, count: 4 },
+];
+
+/**
+ * A ramp up to a work weight: a handful of ascending sets, reps tapering as
+ * the weight rises, ending below the work weight rather than at it. How many
+ * steps it takes scales with how far above the bar the work weight sits — a
+ * weight barely above the bar needs nothing to ramp through, a heavy one gets
+ * the full climb.
+ *
+ * Purely advisory: nothing here is stored, every call rebuilds it fresh from
+ * whatever the work weight is today. A lift with nothing to load has nothing
+ * to ramp through either — see the note on isBodyweight() for why inventing a
+ * reps-based ramp was considered and rejected rather than merely skipped.
+ */
+export function warmupPlan(workWeight, step, base, kind) {
+  if (isBodyweight({ kind }) || !Number.isFinite(workWeight) || workWeight <= 0) return [];
+  const s = Number(step) > 0 ? Number(step) : 2.5;
+  const b = Number(base) > 0 ? Number(base) : 0;
+  const rungs = Math.max(0, (workWeight - b) / s);
+  const tier = WARMUP_TIERS.find((t) => rungs <= t.maxRungs);
+  if (!tier.count) return [];
+
+  const out = [];
+  for (const p of WARMUP_PCT_TABLE.slice(WARMUP_PCT_TABLE.length - tier.count)) {
+    // Rounds up, like every other suggestion in this file: a warm-up landing
+    // slightly heavier than the nominal percentage costs nothing, landing
+    // lighter risks under-priming the set it is meant to prepare.
+    const w = ceilToStep(workWeight * p.pct, s, b);
+    if (w >= workWeight) continue;                                       // rounded into the work weight itself
+    if (out.length && out[out.length - 1].weight >= w - 1e-9) continue;   // a coarse step collapsed two rungs onto one
+    out.push({ weight: w, reps: p.reps, sets: 1 });
+  }
+  // The empty bar itself, only when there is a real gap between it and the
+  // ramp — and only once a ramp is happening at all, or a bar-only set is
+  // just another name for the work set.
+  if (b > 0 && out.length && out[0].weight > b + 1e-9) {
+    out.unshift({ weight: b, reps: WARMUP_BAR_REPS, sets: 1 });
+  }
+  return out;
+}
+
 /* ----------------------------------------------------------- formatting */
 
 export function fmt(n, dp = 1) {
@@ -817,6 +880,12 @@ export function fmt(n, dp = 1) {
 /** The unit a lift's score and milestones are counted in. */
 export function loadUnit(exercise) {
   return isBodyweight(exercise) ? 'reps' : 'kg';
+}
+
+/** How a milestone reads: "kg × 5" for a weight target at given reps, "reps" for a reps target. */
+export function milestoneUnitLabel(milestone, reps) {
+  if (!milestone) return '';
+  return milestone.kind === 'reps' ? 'reps' : `kg × ${Math.round(Number(reps))}`;
 }
 
 /** How one set reads: "3 × 5 @ 100 kg", or "3 × 12 reps" where there is no load. */

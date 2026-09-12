@@ -79,6 +79,8 @@ function normalise(raw) {
     setsPerSession: num(e.setsPerSession, 3),
     setsPerWeek: num(e.setsPerWeek, 15),
     notes: String(e.notes ?? ''),
+    milestone: normaliseMilestone(e.milestone),
+    tags: normaliseTags(e.tags),
   }));
   const known = new Set(d.exercises.map((e) => e.id));
   d.entries = (raw.entries || [])
@@ -105,6 +107,24 @@ function normalise(raw) {
 function num(v, fallback) {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
+}
+
+/** A hand-set milestone target, or null for "let the app guess". */
+function normaliseMilestone(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const value = Number(raw.value);
+  const reps = Number(raw.reps);
+  if (!(value > 0) && !(reps > 0)) return null;
+  return {
+    value: value > 0 ? value : null,
+    reps: reps > 0 ? Math.round(reps) : null,
+  };
+}
+
+/** Free-form categories on a lift — trimmed, deduplicated, empties dropped. */
+function normaliseTags(raw) {
+  if (!Array.isArray(raw)) return [];
+  return [...new Set(raw.map((t) => String(t).trim()).filter(Boolean))];
 }
 
 /**
@@ -463,6 +483,8 @@ export function addExercise(ex) {
       setsPerSession: num(ex.setsPerSession, 3),
       setsPerWeek: num(ex.setsPerWeek, 15),
       notes: String(ex.notes || ''),
+      milestone: normaliseMilestone(ex.milestone),
+      tags: normaliseTags(ex.tags),
     };
     d.exercises.push(created);
     const id = created.id;
@@ -483,6 +505,8 @@ export function updateExercise(id, patch) {
       if (patch[k] !== undefined) ex[k] = num(patch[k], ex[k]);
     }
     if (patch.notes !== undefined) ex.notes = String(patch.notes);
+    if (patch.milestone !== undefined) ex.milestone = normaliseMilestone(patch.milestone);
+    if (patch.tags !== undefined) ex.tags = normaliseTags(patch.tags);
   }, { undoable: true, label: 'exercise edited' });
 }
 

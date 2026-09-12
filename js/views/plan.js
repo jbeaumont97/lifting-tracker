@@ -9,7 +9,7 @@
 // also get the full trade-off grid the spreadsheet drew, colour-banded against
 // your target.
 
-import { el, stepper, segmented, bandChip, toast, details, disclose, milestoneTrack, chevron, accentDot, tap } from '../ui.js';
+import { el, stepper, segmented, bandChip, toast, details, disclose, milestoneTrack, chevron, accentDot, tap, multiChipGroup } from '../ui.js';
 import * as store from '../store.js';
 import { runway, looksBodyweight } from '../insights.js';
 import * as ui from '../core/uistate.js';
@@ -35,6 +35,8 @@ import {
 const OV = 'plan.overrides';   // exerciseId -> { target, reps, sets }
 const GRID = 'plan.gridMode';  // exerciseId -> { mode: 'weights'|'scores'|'table' }
 const OPEN = 'plan.openId';
+const SEARCH = 'plan.search';  // string
+const TAGFILT = 'plan.tags';   // string[] — a lift matches if it carries any of these
 // undefined = nothing decided yet, so the view may open the top card itself.
 // null = every card is deliberately closed.
 const openId = () => ui.get(OPEN, undefined);
@@ -100,24 +102,78 @@ export function renderPlan(ctx) {
   const unlogged = stats.filter((s) => !s.entryCount);
 
   // The top of the readiness order opens itself: a home screen should show you
-  // a weight, not four collapsed rows.
+  // a weight, not four collapsed rows. Driven off the unfiltered order, so
+  // typing in the search box never changes which card opened on first load.
   if (openId() === undefined) setOpenId((ready[0] || resting[0])?.exercise.id ?? null);
 
-  for (const group of [
-    { title: 'Ready now', rows: ready, hint: 'Recovered from the last session — stalest first.' },
-    { title: 'Still recovering', rows: resting, hint: 'Trained recently enough that a hard session would be uphill. The plans below are held back to match.' },
-    { title: 'Not logged yet', rows: unlogged, hint: null },
-  ]) {
-    if (!group.rows.length) continue;
-    root.append(el('div', { class: 'group-head' }, [
-      el('h2', { class: 'section-title', text: group.title }),
-      el('span', { class: 'group-count', text: String(group.rows.length) }),
-    ]));
-    if (group.hint) root.append(el('p', { class: 'group-hint', text: group.hint }));
-    const list = el('div', { class: 'card-list' });
-    for (const s of group.rows) list.append(card(s, ctx, settings));
-    root.append(list);
+  const allTags = [...new Set(stats.flatMap((s) => s.exercise.tags || []))].sort((a, b) => a.localeCompare(b));
+
+  // The search box needs to filter on every keystroke, and a full ctx.refresh()
+  // would rebuild — and so defocus — the input on the first character typed.
+  // So the input and the tag chips are built once and never touched again;
+  // only resultsHost's children are replaced when the filter changes.
+  const resultsHost = el('div', { class: 'plan-results' });
+  const paintResults = () => {
+    const q = ui.get(SEARCH, '').trim().toLowerCase();
+    const activeTags = ui.get(TAGFILT, []);
+    const match = (s) => (!q || s.exercise.name.toLowerCase().includes(q))
+      && (!activeTags.length || (s.exercise.tags || []).some((t) => activeTags.includes(t)));
+
+    const groups = [
+      { title: 'Ready now', rows: ready.filter(match), hint: 'Recovered from the last session — stalest first.' },
+      { title: 'Still recovering', rows: resting.filter(match), hint: 'Trained recently enough that a hard session would be uphill. The plans below are held back to match.' },
+      { title: 'Not logged yet', rows: unlogged.filter(match), hint: null },
+    ];
+    const nodes = [];
+    for (const group of groups) {
+      if (!group.rows.length) continue;
+      nodes.push(el('div', { class: 'group-head' }, [
+        el('h2', { class: 'section-title', text: group.title }),
+        el('span', { class: 'group-count', text: String(group.rows.length) }),
+      ]));
+      if (group.hint) nodes.push(el('p', { class: 'group-hint', text: group.hint }));
+      const list = el('div', { class: 'card-list' });
+      for (const s of group.rows) list.append(card(s, ctx, settings));
+      nodes.push(list);
+    }
+    if (!nodes.length) {
+      nodes.push(el('div', { class: 'empty' }, [
+        el('p', { text: 'No lifts match.' }),
+        el('button', {
+          type: 'button', class: 'btn btn-ghost btn-sm',
+          onclick: () => { ui.set(SEARCH, ''); ui.set(TAGFILT, []); searchInput.value = ''; paintResults(); },
+        }, ['Clear filters']),
+      ]));
+    }
+    resultsHost.replaceChildren(...nodes);
+  };
+
+  const searchInput = el('input', {
+    type: 'search', class: 'text-input', placeholder: 'Search lifts…',
+    'aria-label': 'Search lifts by name', value: ui.get(SEARCH, ''),
+  });
+  searchInput.addEventListener('input', () => { ui.set(SEARCH, searchInput.value); paintResults(); });
+  root.append(el('div', { class: 'field-block' }, [searchInput]));
+
+  if (allTags.length) {
+    const tagHost = el('div');
+    const paintTags = () => {
+      tagHost.replaceChildren(multiChipGroup({
+        label: 'Filter by tag', options: allTags, values: ui.get(TAGFILT, []),
+        onToggle: (tag, on) => {
+          const next = on ? [...ui.get(TAGFILT, []), tag] : ui.get(TAGFILT, []).filter((t) => t !== tag);
+          ui.set(TAGFILT, next);
+          paintTags();
+          paintResults();
+        },
+      }));
+    };
+    paintTags();
+    root.append(tagHost);
   }
+
+  paintResults();
+  root.append(resultsHost);
 
   root.append(
     details('How the planner decides', [

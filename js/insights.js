@@ -229,23 +229,57 @@ export function bestLoad(stats) {
 export const bestWeight = bestLoad;
 
 /**
+ * A milestone set by hand rather than guessed from history.
+ *
+ * The auto milestone only ever knows the next round number above your best —
+ * it cannot know you are chasing a specific 140kg single, or that "100kg" only
+ * means something to you at 5 reps, not whatever rep count you last happened to
+ * log. Set on the exercise (Setup), this replaces the auto weight/reps
+ * milestone outright while it is set; the score milestone is untouched.
+ */
+export function manualMilestone(stats) {
+  const ex = stats.exercise;
+  const m = ex && ex.milestone;
+  if (!m || !(Number(m.value) > 0)) return null;
+  const reps = isBodyweight(ex);
+  const value = reps ? Math.round(Number(m.value)) : Number(m.value);
+  const from = bestLoad(stats);
+  const base = Number.isFinite(from) ? from : 0;
+  // Doubles as how far the progress bar spans — from your current best to the
+  // target you set, not the auto 5/10/25 grid, which would misread a bar not
+  // aligned to a round-number step.
+  const step = Math.max(value - base, reps ? 1 : 0.5);
+  return {
+    kind: reps ? 'reps' : 'weight', value, from: base, step, manual: true,
+    reps: reps ? null : (Number(m.reps) > 0 ? Math.round(Number(m.reps)) : 5),
+    label: reps ? `${value} reps in a set` : `${value} kg on the bar`,
+  };
+}
+
+/**
  * The next round number up, on the bar and on the score.
  *
  * Measured from your best rather than your last: a milestone you have already
- * passed and drifted back below is not the next thing to chase.
+ * passed and drifted back below is not the next thing to chase. A manual
+ * target, when one is set, stands in for the auto weight/reps guess.
  */
 export function milestones(stats, { count = 1 } = {}) {
   const reps = isBodyweight(stats.exercise);
   const out = [];
-  const w = bestLoad(stats);
-  if (Number.isFinite(w) && w > 0) {
-    const step = milestoneStep(w, reps ? 'reps' : 'weight');
-    for (let i = 1; i <= count; i++) {
-      const value = (Math.floor(w / step) + i) * step;
-      out.push({
-        kind: reps ? 'reps' : 'weight', value, from: w, step,
-        label: reps ? `${value} reps in a set` : `${value} kg on the bar`,
-      });
+  const manual = manualMilestone(stats);
+  if (manual) {
+    out.push(manual);
+  } else {
+    const w = bestLoad(stats);
+    if (Number.isFinite(w) && w > 0) {
+      const step = milestoneStep(w, reps ? 'reps' : 'weight');
+      for (let i = 1; i <= count; i++) {
+        const value = (Math.floor(w / step) + i) * step;
+        out.push({
+          kind: reps ? 'reps' : 'weight', value, from: w, step,
+          label: reps ? `${value} reps in a set` : `${value} kg on the bar`,
+        });
+      }
     }
   }
   const b = stats.bestAdj;
@@ -345,7 +379,10 @@ export function runway(stats, settings, { todayIso = isoToday() } = {}) {
   const [target] = milestones(stats).filter((m) => m.kind === (isBodyweightLift ? 'reps' : 'weight'));
   if (!target) return null;
 
-  const reps = Number(stats.lastReps) > 0 ? Math.round(Number(stats.lastReps)) : 5;
+  // A manual target carries its own rep count; the auto guess falls back to
+  // whatever reps you last did.
+  const reps = target.manual && Number.isFinite(target.reps) ? target.reps
+    : Number(stats.lastReps) > 0 ? Math.round(Number(stats.lastReps)) : 5;
   const sets = Number(stats.exercise.setsPerSession) > 0
     ? Math.round(Number(stats.exercise.setsPerSession))
     : (Number(stats.lastSets) > 0 ? Math.round(Number(stats.lastSets)) : 3);

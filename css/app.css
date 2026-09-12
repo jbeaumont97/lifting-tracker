@@ -553,6 +553,16 @@ table.grid td.cell.is-pick { box-shadow: inset 0 0 0 2px var(--series-1); }
 .plan-strip-value { font-size: var(--text-md); font-weight: var(--fw-semi); font-variant-numeric: tabular-nums; }
 .plan-strip .link-btn { margin-left: auto; }
 
+.warmup-strip {
+  display: flex; flex-direction: column; gap: var(--space-2);
+  background: var(--surface-2); border-radius: var(--radius-sm); padding: var(--space-3) var(--space-4);
+}
+.warmup-strip-label { font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: var(--fw-semi); }
+.warmup-steps { display: flex; flex-direction: column; gap: var(--space-1); }
+.warmup-step { display: flex; align-items: center; gap: var(--space-3); }
+.warmup-step-value { font-size: var(--text-sm); font-variant-numeric: tabular-nums; color: var(--text-secondary); }
+.warmup-step .link-btn { margin-left: auto; }
+
 .preview {
   display: flex; flex-direction: column; gap: var(--space-1);
   border-top: 1px solid var(--border); padding-top: var(--space-4);

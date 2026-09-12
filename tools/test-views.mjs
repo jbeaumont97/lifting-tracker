@@ -200,6 +200,45 @@ for (const open of [false, true]) {
   }
 }
 
+/* ------------------------------------------------ 1b. search and tag filters */
+
+{
+  reset();
+  const [squat, bench] = store.getExercises();
+  store.updateExercise(squat.id, { tags: ['Legs'] });
+  store.updateExercise(bench.id, { tags: ['Push', 'Chest'] });
+  select.invalidate();
+
+  const c = ctx();
+  const plan = renderPlan(c);
+  const totalCards = plan.querySelectorAll('.card').length;
+  ok('every lift shows with no filter active', totalCards === store.getExercises().length, String(totalCards));
+
+  const search = plan.querySelector('input[type="search"]');
+  ok('the search box is on the page', !!search);
+
+  const before = refreshes;
+  search.value = 'squat';
+  search.dispatchEvent('input');
+  const narrowed = plan.querySelectorAll('.card-list .card').map((n) => n.querySelector('.card-title')?.textContent);
+  ok('typing narrows the list to matching names', narrowed.length === 1 && narrowed[0] === 'Squat', narrowed.join(','));
+  ok('typing into the search box does not trigger a full refresh', refreshes === before, `${refreshes - before} refreshes`);
+
+  search.value = 'zzz no such lift';
+  search.dispatchEvent('input');
+  ok('a query matching nothing shows the empty note', plan.textContent.includes('No lifts match'));
+  const clearBtn = plan.querySelectorAll('button').find((n) => n.textContent === 'Clear filters');
+  ok('with a way back out', !!clearBtn);
+  clearBtn.click();
+  ok('clearing restores the full list', plan.querySelectorAll('.card').length === totalCards);
+
+  const tagChip = plan.querySelectorAll('.chips .chip').find((n) => n.textContent === 'Legs');
+  ok('a tag actually in use on a lift appears as a filter chip', !!tagChip);
+  tagChip.click();
+  const byTag = plan.querySelectorAll('.card-list .card').map((n) => n.querySelector('.card-title')?.textContent);
+  ok('selecting it narrows to lifts carrying that tag', byTag.length === 1 && byTag[0] === 'Squat', byTag.join(','));
+}
+
 /* ------------------------------------------------------- 2. the empty states */
 
 {
@@ -526,6 +565,48 @@ for (const open of [false, true]) {
     && view.querySelector('.row-note').textContent === 'belt on, felt fast');
 }
 
+/* --------------------------------------------------- 3b. the warm-up ramp */
+
+{
+  reset();
+  const ex = store.getExercises()[0];
+  store.logSet({ exerciseId: ex.id, date: TODAY, weight: 100, reps: 5 });
+  select.invalidate();
+  setPrefill({ exerciseId: ex.id, date: TODAY });
+  const view = renderLog(ctx({ route: 'log' }));
+
+  const steps = view.querySelectorAll('.warmup-step');
+  ok('a heavy lift shows a warm-up ramp', steps.length > 0, String(steps.length));
+
+  const before = view.querySelector('#log-weight').value;
+  steps[0].querySelector('.link-btn').click();
+  const after = view.querySelector('#log-weight').value;
+  ok('using the first warm-up step fills in its weight',
+    after !== before && Number(after) < 100, `${before} -> ${after}`);
+}
+
+{
+  reset();
+  const light = store.addExercise({ name: 'Fresh Lift', base: 20, step: 2.5 });
+  store.logSet({ exerciseId: light.id, date: TODAY, weight: 22.5, reps: 5 });
+  select.invalidate();
+  setPrefill({ exerciseId: light.id, date: TODAY });
+  const view = renderLog(ctx({ route: 'log' }));
+  ok('barely above the bar, there is nothing to ramp through',
+    view.querySelectorAll('.warmup-step').length === 0);
+}
+
+{
+  reset();
+  const bw = store.addExercise({ name: 'Press-ups', kind: 'bodyweight' });
+  store.logSet({ exerciseId: bw.id, date: TODAY, weight: 0, reps: 12 });
+  select.invalidate();
+  setPrefill({ exerciseId: bw.id, date: TODAY });
+  const view = renderLog(ctx({ route: 'log' }));
+  ok('a lift with nothing to load gets no warm-up ramp',
+    view.querySelectorAll('.warmup-step').length === 0);
+}
+
 /* -------------------------------------------- 6e. paths to progression */
 
 const metrics = await import('../js/metrics.js');
@@ -689,12 +770,13 @@ const insights = await import('../js/insights.js');
   ok('a climbing lift draws a running-best step', fig.querySelectorAll('.pr-step').length === 1);
   ok('the milestone is drawn on the chart', fig.querySelectorAll('.ref-milestone').length === 1);
   const label = fig.querySelector('.label-milestone').textContent;
-  ok('and labelled in kilos on the bar, not in score', /kg$/.test(label), label);
+  const run = insights.runway(st, cfg, { todayIso: TODAY });
+  ok('and labelled in kilos on the bar, not in score', new RegExp(`kg × ${run.reps}$`).test(label), label);
 
   // The chart and the milestone track must not disagree about the target.
-  const run = insights.runway(st, cfg, { todayIso: TODAY });
   ok('the chart line and the milestone track name the same target',
-    label === `${run.milestone.value} kg`, `${label} vs ${run.milestone.value} kg`);
+    label === `${run.milestone.value} ${metrics.milestoneUnitLabel(run.milestone, run.reps)}`,
+    `${label} vs ${run.milestone.value} ${metrics.milestoneUnitLabel(run.milestone, run.reps)}`);
 }
 
 // --- range clips the view without touching the fit ---
@@ -1198,6 +1280,61 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
 
   store.undo();
   ok('undo puts the old numbers back', store.getExercise(ex.id).gainPerWeek !== 0.015);
+}
+
+/* ------------------------------------------- 6k. a hand-set milestone */
+
+{
+  reset();
+  const ex = store.getExercises()[0];
+  uistate.set('setup.openExerciseId', ex.id);
+  const view = renderSetup(ctx({ route: 'setup' }));
+
+  ok('the lift card offers a milestone target', view.textContent.includes('Milestone to chase'));
+  ok('with no override, there is nothing to clear',
+    view.querySelectorAll('.card.is-open button').filter((n) => /Clear/.test(n.textContent)).length === 0);
+
+  const valField = view.querySelector(`#ms-val-${ex.id}`);
+  valField.value = '140';
+  valField.dispatchEvent('change');
+  ok('typing a target weight saves it', store.getExercise(ex.id).milestone.value === 140,
+    JSON.stringify(store.getExercise(ex.id).milestone));
+
+  const again = renderSetup(ctx({ route: 'setup' }));
+  ok('once set, a clear button appears',
+    again.querySelectorAll('.card.is-open button').some((n) => /Clear/.test(n.textContent)));
+  again.querySelectorAll('.card.is-open button').find((n) => /Clear/.test(n.textContent)).click();
+  ok('clearing goes back to automatic', store.getExercise(ex.id).milestone === null);
+  uistate.set('setup.openExerciseId', null);
+}
+
+/* ------------------------------------------------------------ 6l. tags */
+
+{
+  reset();
+  const ex = store.getExercises()[0];
+  uistate.set('setup.openExerciseId', ex.id);
+  const view = renderSetup(ctx({ route: 'setup' }));
+
+  ok('the lift card offers tags', view.textContent.includes('Tags'));
+  const suggested = view.querySelectorAll('.card.is-open .chips .chip').map((n) => n.textContent);
+  ok('common tags are offered as quick-add chips', suggested.includes('Legs') && suggested.includes('Push'));
+
+  view.querySelectorAll('.card.is-open .chips .chip').find((n) => n.textContent === 'Legs').click();
+  ok('tapping a suggested tag adds it', store.getExercise(ex.id).tags.includes('Legs'));
+
+  const again = renderSetup(ctx({ route: 'setup' }));
+  const legsChip = again.querySelectorAll('.card.is-open .chips .chip').find((n) => n.textContent === 'Legs');
+  ok('it now shows selected', legsChip.classList.contains('is-selected'));
+  legsChip.click();
+  ok('tapping it again removes it', !store.getExercise(ex.id).tags.includes('Legs'));
+
+  const input = again.querySelectorAll('.card.is-open input').find((n) => n.getAttribute('aria-label') === 'Add a tag');
+  input.value = 'Warm-up focus';
+  input.dispatchEvent({ type: 'keydown', key: 'Enter', preventDefault() {} });
+  ok('a custom tag typed and entered is saved', store.getExercise(ex.id).tags.includes('Warm-up focus'),
+    JSON.stringify(store.getExercise(ex.id).tags));
+  uistate.set('setup.openExerciseId', null);
 }
 
 {

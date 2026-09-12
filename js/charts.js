@@ -4,7 +4,7 @@
 // on the points that carry the story (last, best, projection, target).
 
 import { fmt, fmtWeight, fmtCompact, formatDate, formatDateShort, dayNumber, isoAddDays, isoToday,
-  isBodyweight, describeSet } from './metrics.js';
+  isBodyweight, describeSet, milestoneUnitLabel } from './metrics.js';
 import { projectionBand, runway, readinessCurve } from './insights.js';
 
 const SVG = 'http://www.w3.org/2000/svg';
@@ -173,7 +173,7 @@ export function progressionChart(stats, settings, {
     svg.append(svgEl('line', {
       x1: pad.l, x2: pad.l + plotW, y1: y(milestoneY), y2: y(milestoneY), class: 'ref-milestone',
     }));
-    svg.append(text(`${fmtWeight(run.milestone.value)} ${run.milestone.kind === 'reps' ? 'reps' : 'kg'}`, {
+    svg.append(text(`${fmtWeight(run.milestone.value)} ${milestoneUnitLabel(run.milestone, run.reps)}`, {
       x: pad.l + plotW, y: y(milestoneY) - 5, class: 'label-milestone', 'text-anchor': 'end',
     }));
   }
@@ -359,7 +359,7 @@ export function progressionChart(stats, settings, {
     horizon ? keyItem('proj', `Projection, +${Math.round(horizon / 7)} wks`) : null,
     band ? keyItem('cone', `Spread your sessions sit in, ±${fmt(band.sd, 1)} kg`) : null,
     anyStep ? keyItem('best', 'Best up to that point') : null,
-    milestoneDrawn ? keyItem('milestone', `Next milestone ${fmtWeight(run.milestone.value)} kg`) : null,
+    milestoneDrawn ? keyItem('milestone', `Next milestone ${fmtWeight(run.milestone.value)} ${milestoneUnitLabel(run.milestone, run.reps)}`) : null,
     Number.isFinite(stats.nextTarget) ? keyItem('target', `Next session ${fmt(stats.nextTarget, 1)}`) : null,
     anyPR ? keyItem('pr', 'A set that was a PR') : null,
   ]);

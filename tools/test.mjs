@@ -68,6 +68,41 @@ close('ladder: a negative base is ignored', M.ceilToStep(80.6, 2.5, -5), 82.5);
   ok('weightForTarget never goes under the bar', M.weightForTarget(1, 12, 5, st, 2.5, 20) === 20);
 }
 
+// warmupPlan ramps up to a work weight, always landing on the ladder.
+{
+  ok('barely above the bar needs no ramp at all', M.warmupPlan(25, 2.5, 20, 'weight').length === 0);
+  ok('the bar itself needs nothing to ramp through', M.warmupPlan(20, 2.5, 20, 'weight').length === 0);
+
+  const heavy = M.warmupPlan(100, 2.5, 20, 'weight');
+  ok('a heavy lift gets the full climb', heavy.length === 5, JSON.stringify(heavy));
+  ok('the bar leads it off', heavy[0].weight === 20);
+  ok('every step is strictly heavier than the last',
+    heavy.every((s, i) => i === 0 || s.weight > heavy[i - 1].weight));
+  ok('every step stays under the work weight', heavy.every((s) => s.weight < 100));
+  ok('the reps taper 10, 5, 3, 1 after the bar',
+    heavy.slice(1).map((s) => s.reps).join(',') === '10,5,3,1', JSON.stringify(heavy));
+
+  const odd = M.warmupPlan(60, 2.3, 11.5, 'weight');
+  ok('every step lands exactly on this lift\'s own ladder',
+    odd.every((s) => Math.abs((s.weight - 11.5) / 2.3 - Math.round((s.weight - 11.5) / 2.3)) < 1e-6),
+    JSON.stringify(odd));
+
+  ok('a reps-kind lift gets no ramp, whatever the work weight',
+    M.warmupPlan(100, 2.5, 20, 'bodyweight').length === 0);
+  ok('nor does an invalid work weight', M.warmupPlan(NaN, 2.5, 20, 'weight').length === 0
+    && M.warmupPlan(0, 2.5, 20, 'weight').length === 0);
+
+  ok('no bar step when there is nothing to load from (base 0)',
+    M.warmupPlan(20, 2, 0, 'weight').every((s) => s.weight > 0));
+
+  // A step coarse enough that two percentage rungs round to the same weight
+  // must not produce a duplicate or an overshoot.
+  const coarse = M.warmupPlan(100, 20, 20, 'weight');
+  ok('a coarse step never repeats a weight',
+    coarse.every((s, i) => i === 0 || s.weight > coarse[i - 1].weight), JSON.stringify(coarse));
+  ok('and never reaches the work weight', coarse.every((s) => s.weight < 100));
+}
+
 // A perfect fit and a flat run.
 close('slope of a straight line', M.slope([[0, 0], [1, 2], [2, 4]]), 2);
 ok('slope of one point is null', M.slope([[1, 1]]) === null);
@@ -1058,6 +1093,37 @@ const fakeStats = {
     I.milestones({ entries: [], bestAdj: null }).length === 0);
 }
 
+// --- a hand-set milestone stands in for the guess ---
+{
+  const targeted = { ...fakeStats, exercise: { ...fakeStats.exercise, milestone: { value: 120, reps: 3 } } };
+  const manual = I.manualMilestone(targeted);
+  ok('a manual target is picked up', manual && manual.value === 120 && manual.manual === true);
+  ok('it carries its own rep count', manual.reps === 3);
+  close('measured from your current best', manual.from, I.bestLoad(fakeStats), 1e-9);
+
+  const ms = I.milestones(targeted);
+  ok('milestones() uses the manual target in place of the auto guess',
+    ms.filter((m) => m.kind === 'weight').length === 1 && ms.find((m) => m.kind === 'weight').value === 120);
+  ok('the score milestone is untouched by the weight override',
+    ms.find((m) => m.kind === 'score').value === 120);
+
+  const r = I.runway(targeted, settings, { todayIso: TODAY });
+  ok('runway aims at the manual target', r.milestone.value === 120);
+  close('and converts it at the manual reps, not stats.lastReps',
+    r.scoreNeeded, 120 * M.repFactor(3, settings.formula) * M.setBonus(3, settings.setBonusK), 1e-9);
+
+  const inert = { ...fakeStats, exercise: { ...fakeStats.exercise, milestone: { value: null, reps: 8 } } };
+  ok('a reps-only entry with no value is inert — order of typing does not matter',
+    I.manualMilestone(inert) === null);
+  ok('so milestones() falls back to the auto guess',
+    I.milestones(inert).find((m) => m.kind === 'weight').value === 100);
+
+  const cleared = { ...fakeStats, exercise: { ...fakeStats.exercise, milestone: null } };
+  ok('clearing it reverts to automatic', I.manualMilestone(cleared) === null);
+  ok('and milestones() goes back to the round-number guess',
+    I.milestones(cleared).find((m) => m.kind === 'weight').value === 100);
+}
+
 {
   const eta = I.etaTo(120, fakeStats, { todayIso: TODAY });
   ok('an ETA counts the days at the fitted rate', eta.days === 50, String(eta.days));
@@ -1210,6 +1276,15 @@ const fakeStats = {
   const run = I.runway(st, settings, { todayIso: TODAY });
   close('the runway converts by the set bonus alone',
     run.scoreNeeded, 15 * M.setBonus(run.sets, settings.setBonusK), 1e-9);
+
+  // A hand-set target on a reps lift is a single rep count — there is no
+  // weight axis to pair it with.
+  const stTargeted = { ...st, exercise: { ...repsEx, milestone: { value: 20, reps: 99 } } };
+  const manualReps = I.manualMilestone(stTargeted);
+  ok('a manual reps target ignores the reps field — the value IS the reps',
+    manualReps && manualReps.kind === 'reps' && manualReps.value === 20);
+  ok('milestones() picks it up in place of the auto guess',
+    I.milestones(stTargeted).find((m) => m.kind === 'reps').value === 20);
 }
 
 // The spreadsheet fixture must be untouched by any of it.
@@ -1277,6 +1352,53 @@ const fakeStats = {
   for (const e of doc.exercises) delete e.kind;
   ok('a document written before any of this loads as weighted',
     store.importJSON(JSON.stringify(doc)).exercises.every((e) => e.kind === 'weight'));
+}
+
+// --- a hand-set milestone round-trips through the store ---
+{
+  fresh();
+  const ex = store.addExercise({ name: 'Overhead Press' });
+  ok('no override by default', ex.milestone === null);
+
+  store.updateExercise(ex.id, { milestone: { value: 60, reps: 5 } });
+  const withTarget = store.getExercise(ex.id);
+  ok('the target is kept', withTarget.milestone.value === 60 && withTarget.milestone.reps === 5);
+
+  store.updateExercise(ex.id, { milestone: { value: 0, reps: 5 } });
+  ok('a zeroed value is dropped rather than kept as junk', store.getExercise(ex.id).milestone.value === null);
+
+  store.updateExercise(ex.id, { milestone: null });
+  ok('clearing it goes back to null, not a stale object', store.getExercise(ex.id).milestone === null);
+
+  store.updateExercise(ex.id, { milestone: { value: 60, reps: 5 } });
+  const doc2 = JSON.parse(store.exportJSON());
+  const reloaded = store.importJSON(JSON.stringify(doc2)).exercises.find((e) => e.id === ex.id);
+  ok('a milestone survives export and import', reloaded.milestone.value === 60 && reloaded.milestone.reps === 5);
+
+  const created = store.addExercise({ name: 'Front Squat', milestone: { value: 80, reps: 1 } });
+  ok('addExercise accepts a milestone up front', created.milestone.value === 80 && created.milestone.reps === 1);
+}
+
+// --- free-form tags: trimmed, deduplicated, round-trip through the store ---
+{
+  fresh();
+  const noTags = store.addExercise({ name: 'Leg Press' });
+  ok('no tags by default', Array.isArray(noTags.tags) && noTags.tags.length === 0);
+
+  const withTags = store.addExercise({ name: 'Barbell Row', tags: [' Pull ', 'Back', 'Pull', ''] });
+  ok('tags are trimmed, deduplicated and emptied of blanks',
+    JSON.stringify(withTags.tags) === JSON.stringify(['Pull', 'Back']), JSON.stringify(withTags.tags));
+
+  store.updateExercise(noTags.id, { tags: ['Legs', 'Push'] });
+  ok('tags can be set after the fact', JSON.stringify(store.getExercise(noTags.id).tags) === JSON.stringify(['Legs', 'Push']));
+
+  store.updateExercise(noTags.id, { tags: [] });
+  ok('tags can be cleared back to none', store.getExercise(noTags.id).tags.length === 0);
+
+  const doc = JSON.parse(store.exportJSON());
+  for (const e of doc.exercises) delete e.tags;
+  ok('a document written before tags existed loads with none, not a crash',
+    store.importJSON(JSON.stringify(doc)).exercises.every((e) => Array.isArray(e.tags) && e.tags.length === 0));
 }
 
 /* ------------------------------------------------------------------ report */
