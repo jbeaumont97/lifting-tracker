@@ -381,21 +381,6 @@ export function weightForTarget(target, reps, sets, settings, step, base = 0) {
 }
 
 /**
- * The lightest loadable weight whose WORK meets `target` at reps x sets.
- *
- * The work analogue of weightForTarget, and a genuinely different solve: there
- * is no rep factor and no set bonus, because work is not trying to estimate
- * anything. Kilos times reps times sets is simply how much you moved.
- */
-export function weightForWork(target, reps, sets, step, base = 0) {
-  const denom =
-    Math.round(Number(reps)) *
-    (Number(sets) > 0 ? Math.round(Number(sets)) : 1);
-  if (!(denom > 0) || !(target > 0)) return NaN;
-  return ceilToStep(target / denom, step, base);
-}
-
-/**
  * The fewest whole reps whose score meets `target` at this many sets.
  * The reps equivalent of weightForTarget: the ladder is the integers.
  */
@@ -439,6 +424,7 @@ export function exerciseStats(
   entries,
   settings,
   todayIso = isoToday(),
+  doneDates = null,
 ) {
   const todayDay = dayNumber(todayIso);
   const mine = entries
@@ -716,9 +702,8 @@ export function readinessSettings(settings = {}) {
  * the session is assumed to have been a normal hard one rather than an easy or
  * a brutal one.
  */
-export function sessionSeverity(session, exercise) {
-  const usual =
-    Number(exercise?.setsPerSession) > 0 ? Number(exercise.setsPerSession) : 3;
+export function sessionSeverity(session, exercise, sessions = null) {
+  const usual = usualSets(sessions, exercise);
   const sets = Number(session?.sets) > 0 ? Number(session.sets) : usual;
   const setPart = clamp(sets / usual, 0.5, 1.6);
   const rir = session?.best?.rir;
@@ -749,6 +734,34 @@ export function retentionAt(days, grace, rs = READINESS_DEFAULTS) {
   return (
     floor + (1 - floor) * Math.pow(0.5, (days - grace) / rs.detrainHalfLife)
   );
+}
+
+/**
+ * How many sets this lift's finished sessions actually run to.
+ *
+ * `setsPerSession` is a plan, and a plan is a guess. Measuring a five-set
+ * session against a guess of three pins setPart at its cap and calls an
+ * ordinary session brutal. Once enough sessions have been CALLED finished,
+ * their median is the honest answer — the same move typicalInterval() makes for
+ * the grace period, and for the same reason.
+ *
+ * Sessions that were never called done are left out rather than counted short:
+ * one you walked away from half-way through says nothing about how long a
+ * session normally is. Below three finished ones there is no median worth
+ * trusting, so the setting stands.
+ */
+export function usualSets(sessions, exercise) {
+  const fallback =
+    Number(exercise?.setsPerSession) > 0 ? Number(exercise.setsPerSession) : 3;
+  const counts = (sessions || [])
+    .filter((s) => s && s.done && Number(s.sets) > 0)
+    .map((s) => Number(s.sets))
+    .sort((a, b) => a - b);
+  if (counts.length < 3) return fallback;
+  const mid = Math.floor(counts.length / 2);
+  return counts.length % 2
+    ? counts[mid]
+    : (counts[mid - 1] + counts[mid]) / 2;
 }
 
 /** Median gap, in days, between this lift's sessions. Null until there are two. */
@@ -801,7 +814,7 @@ export function readinessFor(stats, settings = {}) {
   const last = stats.sessions.length
     ? stats.sessions[stats.sessions.length - 1]
     : null;
-  const severity = sessionSeverity(last, stats.exercise);
+  const severity = sessionSeverity(last, stats.exercise, stats.sessions);
 
   const out = {
     enabled: rs.enabled,
@@ -1172,7 +1185,6 @@ export function planFor(stats, settings, override = {}) {
     plan.atBase = false;
     plan.lastWeight = null;
     plan.reps = repsForTarget(target, sets, settings);
-    plan.reps = repsForTarget(target, sets, settings);
     plan.score = plan.reps * setBonus(sets, settings.setBonusK);
     plan.work = plan.reps * sets;
     plan.hardSets = sets * repCredit(plan.reps);
@@ -1195,39 +1207,6 @@ export function planFor(stats, settings, override = {}) {
         hardSets: sn * repCredit(r),
       };
     });
-    // The work scale on a lift with nothing to load is simply total reps, and
-    // the only lever is how they are split up. So the same row again, with the
-    // reps solved against the work target rather than the strength one.
-    if (plan.workTarget > 0) {
-      plan.workOptions = SET_COLUMNS.map((sn) => {
-        const r = Math.max(1, Math.ceil(plan.workTarget / sn - 1e-9));
-        const done = r * sn;
-        return {
-          reps: r,
-          sets: sn,
-          weight: null,
-          work: done,
-          band: bandForWork(done, plan.workTarget, bestWorkNow, settings),
-          isPick: sn === sets,
-          score: r * setBonus(sn, settings.setBonusK),
-        };
-      });
-      const minSets = Math.max(
-        1,
-        Math.round(usualSets(stats.sessions, stats.exercise)),
-      );
-      const room = plan.workOptions.filter((o) => o.sets >= minSets);
-      plan.picks = {
-        strength: plan.options.reduce(
-          (a, b) => (a === null || b.score < a.score ? b : a),
-          null,
-        ),
-        hypertrophy: (room.length ? room : plan.workOptions).reduce(
-          (a, b) => (a === null || b.work < a.work ? b : a),
-          null,
-        ),
-      };
-    }
     // On a reps lift the smallest possible step is a whole rep, which low down
     // is a big one: 13 to 14 is nearly 8%. Adding a set instead is usually the
     // gentler way up, so the option that overshoots least is worth pointing at.
@@ -1239,7 +1218,6 @@ export function planFor(stats, settings, override = {}) {
     return plan;
   }
 
-  plan.weight = weightForTarget(target, reps, sets, settings, step, base);
   plan.weight = weightForTarget(target, reps, sets, settings, step, base);
   // True when the bar alone is already heavier than the target needs.
   plan.atBase = base > 0 && Math.abs(plan.weight - base) < 1e-9;

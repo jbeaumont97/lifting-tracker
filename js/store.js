@@ -26,18 +26,6 @@ export const DEFAULT_SETTINGS = {
   restSeconds: 150,        // rest timer target; 0 turns the timer off
   unit: 'kg',
 
-  // The second scale: work, not strength. See sessionWork() in metrics.js.
-  // Volume climbs faster than a one-rep max does, so rather than a second
-  // per-lift dial to keep in step with the first, the work target is this
-  // multiple of whatever gain the lift is already set to earn.
-  workGainMultiple: 3,
-  // Far wider than the e1RM bands, because the steps are far bigger: on
-  // 3 x 10 @ 65 kg one 2.5 kg rung is +3.8%, one more rep is +10% and one
-  // more set is +33%. So load reads as the small step it is, a rep as a
-  // stretch, and a whole set as the deliberate jump in weekly volume it is.
-  workIdealBand: 0.06,
-  workStretchBand: 0.15,
-
   // Fatigue / recovery / detraining — see readinessFor() in metrics.js.
   // 'off' falls back to the spreadsheet's flat per-session step.
   readiness: 'on',
