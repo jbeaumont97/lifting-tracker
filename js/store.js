@@ -48,7 +48,30 @@ export const getVersion = () => version;
 /* ------------------------------------------------------------- lifecycle */
 
 function blank() {
-  return { schema: SCHEMA, exercises: [], entries: [], settings: { ...DEFAULT_SETTINGS }, seq: 1 };
+  return { schema: SCHEMA, exercises: [], entries: [], done: [], settings: { ...DEFAULT_SETTINGS }, seq: 1 };
+}
+
+/**
+ * The lifts called finished on a given day: `{ exerciseId, date }`, and
+ * deliberately nothing else.
+ *
+ * It is a fact about the day rather than a property of any entry, because the
+ * two answer different questions. How many sets you did is in the log; whether
+ * you had finished is a decision, and it has to survive editing, merging or
+ * taking back the sets it was made about.
+ */
+function normaliseDone(raw, known) {
+  const seen = new Set();
+  const out = [];
+  for (const d of raw || []) {
+    if (!d || !d.date || !known.has(d.exerciseId)) continue;
+    const row = { exerciseId: String(d.exerciseId), date: String(d.date).slice(0, 10) };
+    const key = `${row.exerciseId}|${row.date}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(row);
+  }
+  return out;
 }
 
 function normalise(raw) {
@@ -98,6 +121,9 @@ function normalise(raw) {
       seq: Number(e.seq) || i + 1,
     }))
     .map((e) => ({ ...e, log: normaliseLog(e.log, e) }));
+  // A document written before lifts could be called done simply arrives with
+  // none, which is the truth about it — so there is nothing to migrate.
+  d.done = normaliseDone(raw.done, known);
   // A spread over every entry blows the call stack on a long log; fold instead.
   d.seq = d.entries.reduce((m, e) => (e.seq + 1 > m ? e.seq + 1 : m), 1);
   d.schema = SCHEMA;
@@ -297,6 +323,27 @@ export const getSettings = () => load().settings;
 export const getExercises = () => load().exercises;
 export const getEntries = () => load().entries;
 export const getExercise = (id) => load().exercises.find((e) => e.id === id) || null;
+export const getDone = () => load().done;
+
+/** Has this lift been called finished on this day? */
+export function isDone(exerciseId, date) {
+  return load().done.some((d) => d.exerciseId === exerciseId && d.date === date);
+}
+
+/** The lifts called finished on one day, in no particular order. */
+export function doneOn(date) {
+  return load().done.filter((d) => d.date === date).map((d) => d.exerciseId);
+}
+
+/**
+ * Every day this lift was called finished, as a Set.
+ * This is the shape metrics.js wants: one membership test per session.
+ */
+export function doneDatesFor(exerciseId) {
+  const out = new Set();
+  for (const d of load().done) if (d.exerciseId === exerciseId) out.add(d.date);
+  return out;
+}
 
 /** Exercises ordered by most recently trained, so the picker matches habit. */
 export function exercisesByRecency() {
@@ -434,6 +481,41 @@ export function removeLastSet(exerciseId, date, preferId = null) {
   return removed;
 }
 
+/* ------------------------------------------------------- calling it done */
+
+/**
+ * Say this lift is finished for the day — or take that back.
+ *
+ * Nothing about the log changes: you can log another set afterwards, and the
+ * marker simply stops being true of what you did. That is why it is a separate
+ * row rather than a flag on the last entry.
+ */
+export function markDone(exerciseId, date = isoToday()) {
+  commit((d, record) => {
+    if (d.done.some((x) => x.exerciseId === exerciseId && x.date === date)) return;
+    d.done.push({ exerciseId, date });
+    record((u) => { u.done = u.done.filter((x) => !(x.exerciseId === exerciseId && x.date === date)); });
+  }, { undoable: true, label: 'lift finished' });
+}
+
+export function clearDone(exerciseId, date = isoToday()) {
+  commit((d, record) => {
+    const idx = d.done.findIndex((x) => x.exerciseId === exerciseId && x.date === date);
+    if (idx < 0) return;
+    const copy = { ...d.done[idx] };
+    d.done.splice(idx, 1);
+    record((u) => { u.done.splice(Math.min(idx, u.done.length), 0, copy); });
+  }, { undoable: true, label: 'lift reopened' });
+}
+
+/** Flip it, and report which way it went so the caller can word its toast. */
+export function toggleDone(exerciseId, date = isoToday()) {
+  const now = isDone(exerciseId, date);
+  if (now) clearDone(exerciseId, date);
+  else markDone(exerciseId, date);
+  return !now;
+}
+
 export function updateEntry(id, patch) {
   commit((d, record) => {
     const e = d.entries.find((x) => x.id === id);
@@ -515,6 +597,7 @@ export function deleteExercise(id) {
   commit((d) => {
     d.exercises = d.exercises.filter((e) => e.id !== id);
     d.entries = d.entries.filter((e) => e.exerciseId !== id);
+    d.done = d.done.filter((e) => e.exerciseId !== id);
   }, { undoable: true, coarse: true, label: 'exercise deleted' });
 }
 
@@ -591,6 +674,7 @@ export function importJSON(text, { merge = false } = {}) {
     if (!merge) {
       d.exercises = incoming.exercises;
       d.entries = incoming.entries;
+      d.done = incoming.done;
       d.settings = incoming.settings;
       d.seq = incoming.seq;
       return;
@@ -613,6 +697,13 @@ export function importJSON(text, { merge = false } = {}) {
       seen.add(key);
       d.entries.push({ ...en, id: uid('en'), exerciseId: exId, seq: d.seq++ });
     }
+    const marked = new Set(d.done.map((x) => `${x.exerciseId}|${x.date}`));
+    for (const row of incoming.done) {
+      const exId = remap.get(row.exerciseId);
+      if (!exId || marked.has(`${exId}|${row.date}`)) continue;
+      marked.add(`${exId}|${row.date}`);
+      d.done.push({ exerciseId: exId, date: row.date });
+    }
   }, { undoable: true, coarse: true, label: 'backup restored' });
   return doc;
 }
@@ -622,6 +713,7 @@ export function resetToSeed() {
     const s = seedDoc();
     d.exercises = s.exercises;
     d.entries = s.entries;
+    d.done = s.done;
     d.settings = s.settings;
     d.seq = s.seq;
   }, { undoable: true, coarse: true, label: 'reset to spreadsheet data' });
@@ -637,11 +729,11 @@ export function setOnboarded(value = true) {
 
 /** Keep the standard lifts, drop the sample sessions — "this is my log now". */
 export function startFresh() {
-  commit((d) => { d.entries = []; d.onboarded = true; }, { undoable: true, coarse: true, label: 'started fresh' });
+  commit((d) => { d.entries = []; d.done = []; d.onboarded = true; }, { undoable: true, coarse: true, label: 'started fresh' });
 }
 
 export function clearAll() {
-  commit((d) => { d.entries = []; }, { undoable: true, coarse: true, label: 'log cleared' });
+  commit((d) => { d.entries = []; d.done = []; }, { undoable: true, coarse: true, label: 'log cleared' });
 }
 
 /* ----------------------------------------------------------------- theme */

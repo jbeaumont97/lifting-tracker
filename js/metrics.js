@@ -234,8 +234,12 @@ export function slope(points) {
 /**
  * Everything the Dashboard row computes, for one exercise.
  * `entries` may be the whole log; it is filtered here.
+ *
+ * `doneDates` is the set of days this lift was called finished. It is passed in
+ * rather than read, because this file knows nothing about storage — see
+ * core/select.js, which is where the two are put together.
  */
-export function exerciseStats(exercise, entries, settings, todayIso = isoToday()) {
+export function exerciseStats(exercise, entries, settings, todayIso = isoToday(), doneDates = null) {
   const todayDay = dayNumber(todayIso);
   const mine = entries
     .filter((e) => e.exerciseId === exercise.id)
@@ -253,12 +257,13 @@ export function exerciseStats(exercise, entries, settings, todayIso = isoToday()
     trendPerWeek: null, trendPerDay: null, trendReliable: false,
     trendWindowCount: 0, trendWindowDays: 0, proj4: null, proj12: null,
     baseTarget: null, nextTarget: null, readiness: null,
-    volume7: 0, sets7: 0, sessions: [],
+    volume7: 0, sets7: 0, sessions: [], doneToday: false,
     setsPerWeekTarget: exercise.setsPerWeek || null, setStatus: null,
     gainPerWeek: exercise.gainPerWeek ?? settings.defaultGainPerWeek,
     step: exercise.step || settings.defaultStep,
     base: Number(exercise.base) > 0 ? Number(exercise.base) : 0,
   };
+  stats.doneToday = doneDates ? doneDates.has(todayIso) : false;
   if (!mine.length) return stats;
 
   // One point per session date, anchored on that day's best RAW set — the
@@ -275,6 +280,7 @@ export function exerciseStats(exercise, entries, settings, todayIso = isoToday()
     s.rows = (s.rows || 0) + 1;
   }
   stats.sessions = [...byDate.values()].sort((a, b) => a.day - b.day);
+  for (const s of stats.sessions) s.done = doneDates ? doneDates.has(s.date) : false;
 
   // A session is worth its best set, credited for every set logged that
   // session — not just exact repeats of that one block. This overwrites the
@@ -354,8 +360,8 @@ export function exerciseStats(exercise, entries, settings, todayIso = isoToday()
   return stats;
 }
 
-export function allStats(exercises, entries, settings, todayIso = isoToday()) {
-  return exercises.map((ex) => exerciseStats(ex, entries, settings, todayIso));
+export function allStats(exercises, entries, settings, todayIso = isoToday(), doneFor = null) {
+  return exercises.map((ex) => exerciseStats(ex, entries, settings, todayIso, doneFor ? doneFor(ex.id) : null));
 }
 
 /* ------------------------------------------- fatigue, recovery, detraining */
@@ -440,8 +446,8 @@ export function readinessSettings(settings = {}) {
  * the session is assumed to have been a normal hard one rather than an easy or
  * a brutal one.
  */
-export function sessionSeverity(session, exercise) {
-  const usual = Number(exercise?.setsPerSession) > 0 ? Number(exercise.setsPerSession) : 3;
+export function sessionSeverity(session, exercise, sessions = null) {
+  const usual = usualSets(sessions, exercise);
   const sets = Number(session?.sets) > 0 ? Number(session.sets) : usual;
   const setPart = clamp(sets / usual, 0.5, 1.6);
   const rir = session?.best?.rir;
@@ -471,6 +477,31 @@ export function retentionAt(days, grace, rs = READINESS_DEFAULTS) {
   return floor + (1 - floor) * Math.pow(0.5, (days - grace) / rs.detrainHalfLife);
 }
 
+/**
+ * How many sets this lift's finished sessions actually run to.
+ *
+ * `setsPerSession` is a plan, and a plan is a guess. Measuring a five-set
+ * session against a guess of three pins setPart at its cap and calls an
+ * ordinary session brutal. Once enough sessions have been CALLED finished,
+ * their median is the honest answer — the same move typicalInterval() makes for
+ * the grace period, and for the same reason.
+ *
+ * Sessions that were never called done are left out rather than counted short:
+ * one you walked away from half-way through says nothing about how long a
+ * session normally is. Below three finished ones there is no median worth
+ * trusting, so the setting stands.
+ */
+export function usualSets(sessions, exercise) {
+  const fallback = Number(exercise?.setsPerSession) > 0 ? Number(exercise.setsPerSession) : 3;
+  const counts = (sessions || [])
+    .filter((s) => s && s.done && Number(s.sets) > 0)
+    .map((s) => Number(s.sets))
+    .sort((a, b) => a - b);
+  if (counts.length < 3) return fallback;
+  const mid = Math.floor(counts.length / 2);
+  return counts.length % 2 ? counts[mid] : (counts[mid - 1] + counts[mid]) / 2;
+}
+
 /** Median gap, in days, between this lift's sessions. Null until there are two. */
 export function typicalInterval(sessions) {
   if (!sessions || sessions.length < 3) return null;
@@ -497,7 +528,7 @@ export function readinessFor(stats, settings = {}) {
   const productiveWindow = Math.max(rs.productiveDays, typical ? typical * 1.5 : 0);
   const grace = Math.max(rs.graceDays, typical ? typical * 2 : 0);
   const last = stats.sessions.length ? stats.sessions[stats.sessions.length - 1] : null;
-  const severity = sessionSeverity(last, stats.exercise);
+  const severity = sessionSeverity(last, stats.exercise, stats.sessions);
 
   const out = {
     enabled: rs.enabled, days, typicalInterval: typical, severity,

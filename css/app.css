@@ -881,6 +881,7 @@ h1 .accent-dot { width: 11px; height: 11px; margin-right: 9px; vertical-align: m
 .day-strip-day { font-weight: var(--fw-bold); color: var(--text-primary); }
 .day-strip-sep { color: var(--muted); }
 .day-strip-fact { font-variant-numeric: tabular-nums; }
+.day-strip-fact.is-done { color: var(--good-ink); font-weight: var(--fw-semi); }
 
 .group-head { display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-1); }
 .group-count {
@@ -901,6 +902,11 @@ h1 .accent-dot { width: 11px; height: 11px; margin-right: 9px; vertical-align: m
 .stale-chip.is-recovering { background: var(--neutral-tint); color: var(--neutral-ink); }
 .stale-chip.is-holding    { background: var(--neutral-tint); color: var(--text-secondary); }
 .stale-chip.is-detrained  { background: var(--crit-tint); color: var(--crit-ink); }
+/* Not a phase of the model at all — a lift you have finished for the day. */
+.stale-chip.is-done       { background: var(--good-tint); color: var(--good-ink); }
+
+.card.is-finished { border-color: color-mix(in srgb, var(--good) 35%, var(--border)); }
+.done-line { display: flex; align-items: baseline; gap: var(--space-2); color: var(--good-ink); }
 
 /* ---------------------------------------------------------- chart motion */
 
@@ -1120,6 +1126,14 @@ h1 .accent-dot { width: 11px; height: 11px; margin-right: 9px; vertical-align: m
 .set-track-head .link-btn { padding: 0 var(--space-0); min-height: 22px; }
 .set-track-note { font-size: var(--text-xs); color: var(--good-ink); font-weight: var(--fw-medium); }
 
+/* Calling a lift done. Green while it is the thing to do, quiet once it is
+   done — at that point the button is only the way back, not the next step. */
+.done-btn { border: 1px solid var(--good); background: var(--good-tint); color: var(--good-ink); }
+.done-btn.is-done {
+  border-color: var(--border); background: transparent; color: var(--text-secondary);
+  font-weight: var(--fw-normal);
+}
+
 .set-pills { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .set-pill {
   display: inline-flex; align-items: center; justify-content: center;
@@ -1243,7 +1257,9 @@ h1 .accent-dot { width: 11px; height: 11px; margin-right: 9px; vertical-align: m
 .rail-seg.is-current {
   border-color: var(--series-1); background: var(--series-wash); color: var(--text-primary);
 }
+.rail-seg.is-complete { border-color: color-mix(in srgb, var(--good) 45%, var(--border)); }
 .rail-seg.is-complete .rail-seg-count { color: var(--good-ink); }
+.rail-seg-tick { flex: 0 0 auto; margin-left: auto; }
 .rail-seg-name {
   display: flex; align-items: center; gap: var(--space-1);
   font-size: var(--text-2xs); font-weight: var(--fw-semi); color: var(--text-primary);

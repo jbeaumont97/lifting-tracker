@@ -1401,6 +1401,146 @@ const fakeStats = {
     store.importJSON(JSON.stringify(doc)).exercises.every((e) => Array.isArray(e.tags) && e.tags.length === 0));
 }
 
+/* --------------------------------------------- 10. calling a lift done */
+
+// --- a lift can be called finished, and it is a decision, not a set count ---
+{
+  fresh();
+  const ex = store.getExercises()[0];
+  const day = '2026-08-18';
+
+  ok('nothing is finished to begin with', store.isDone(ex.id, day) === false);
+  ok('and the day lists nothing', store.doneOn(day).length === 0);
+
+  store.markDone(ex.id, day);
+  ok('marking it takes', store.isDone(ex.id, day) === true);
+  ok('the day lists it', store.doneOn(day).join() === ex.id);
+  ok('and the dates come back as a set', store.doneDatesFor(ex.id).has(day));
+
+  store.markDone(ex.id, day);
+  ok('marking twice does not double the row', store.getDone().length === 1, String(store.getDone().length));
+
+  store.undo();
+  ok('undo takes the marker back off', store.isDone(ex.id, day) === false);
+
+  store.markDone(ex.id, day);
+  ok('toggle reports which way it went', store.toggleDone(ex.id, day) === false);
+  ok('and clears it', store.isDone(ex.id, day) === false);
+
+  store.undo();
+  ok('clearing is undoable too', store.isDone(ex.id, day) === true);
+  ok('toggling a finished lift clears it again', store.toggleDone(ex.id, day) === false);
+}
+
+// --- the marker is about the day, so the sets underneath it can still move ---
+{
+  fresh();
+  const ex = store.getExercises()[0];
+  const day = '2026-08-18';
+  store.logSet({ exerciseId: ex.id, date: day, weight: 100, reps: 5 });
+  store.markDone(ex.id, day);
+
+  store.logSet({ exerciseId: ex.id, date: day, weight: 100, reps: 5 });
+  ok('logging another set after finishing does not unmark it', store.isDone(ex.id, day) === true);
+
+  store.removeLastSet(ex.id, day);
+  store.removeLastSet(ex.id, day);
+  ok('and taking every set back does not either — it is a decision, not a count',
+    store.isDone(ex.id, day) === true);
+  ok('a different day is untouched', store.isDone(ex.id, '2026-08-19') === false);
+}
+
+// --- markers belong to their lift and go when it does ---
+{
+  fresh();
+  const ex = store.addExercise({ name: 'Calf Raise' });
+  const other = store.getExercises()[0];
+  store.markDone(ex.id, '2026-08-18');
+  store.markDone(other.id, '2026-08-18');
+
+  store.deleteExercise(ex.id);
+  ok('deleting a lift drops its markers', store.isDone(ex.id, '2026-08-18') === false);
+  ok('and leaves everyone else alone', store.isDone(other.id, '2026-08-18') === true);
+
+  store.clearAll();
+  ok('clearing the log clears the markers with it', store.getDone().length === 0);
+}
+
+// --- it survives a backup, and a document written before it existed loads ---
+{
+  fresh();
+  const ex = store.getExercises()[0];
+  store.markDone(ex.id, '2026-08-18');
+
+  const doc = JSON.parse(store.exportJSON());
+  ok('the backup carries it', doc.done.length === 1, JSON.stringify(doc.done));
+  ok('it survives export and import',
+    store.importJSON(JSON.stringify(doc)).done.some((d) => d.exerciseId === ex.id && d.date === '2026-08-18'));
+
+  delete doc.done;
+  ok('a document written before lifts could be finished loads with none',
+    store.importJSON(JSON.stringify(doc)).done.length === 0);
+
+  const junk = JSON.parse(store.exportJSON());
+  junk.done = [{ exerciseId: 'no-such-lift', date: '2026-08-18' }, { exerciseId: ex.id }, null];
+  ok('and junk markers are dropped rather than kept',
+    store.importJSON(JSON.stringify(junk)).done.length === 0);
+}
+
+// --- what a finished session teaches the fatigue model ---
+{
+  const ex = { id: 'x', name: 'X', step: 2.5, base: 0, gainPerWeek: 0.0075, setsPerSession: 3, setsPerWeek: 15 };
+  const sess = (n) => ({ sets: n, done: true });
+
+  ok('with no finished sessions the setting stands',
+    M.usualSets(null, ex) === 3 && M.usualSets([], ex) === 3);
+  ok('two finished sessions are not yet a median worth trusting',
+    M.usualSets([sess(5), sess(5)], ex) === 3);
+  ok('three are', M.usualSets([sess(5), sess(5), sess(5)], ex) === 5);
+  ok('and it is a median, not a mean',
+    M.usualSets([sess(5), sess(5), sess(5), sess(30)], ex) === 5,
+    String(M.usualSets([sess(5), sess(5), sess(5), sess(30)], ex)));
+  ok('sessions never called done are not counted short',
+    M.usualSets([sess(5), sess(5), sess(5), { sets: 1 }, { sets: 1 }, { sets: 1 }], ex) === 5);
+  ok('a lift with no setting at all falls back to three', M.usualSets(null, {}) === 3);
+
+  // The point of all that: five sets stops reading as a brutal session once
+  // five sets is demonstrably what this lift's sessions run to.
+  const five = { sets: 5, best: { rir: 2 } };
+  const guessed = M.sessionSeverity(five, ex);
+  const measured = M.sessionSeverity(five, ex, [sess(5), sess(5), sess(5)]);
+  ok('against a guess of three, five sets reads as harder than normal', guessed > 1.2, String(guessed));
+  ok('against what this lift actually does, it reads as normal', Math.abs(measured - 1.01) < 0.02, String(measured));
+  ok('and a genuinely big session still reads as one',
+    M.sessionSeverity({ sets: 9, best: { rir: 0 } }, ex, [sess(5), sess(5), sess(5)]) > measured);
+
+  // Nothing moves for a document that has never called a lift finished.
+  ok('two-argument callers are unaffected',
+    M.sessionSeverity(five, ex) === M.sessionSeverity(five, ex, null));
+}
+
+// --- the stats carry the marker through to the views ---
+{
+  const anchor = '2026-01-01';
+  const ex = { id: 'x', name: 'X', step: 2.5, base: 0, gainPerWeek: 0.0075, setsPerSession: 3, setsPerWeek: 15 };
+  const entries = [{ id: 'a', date: anchor, exerciseId: 'x', weight: 100, reps: 5, sets: 3, rir: 2, seq: 1 }];
+
+  const plain = M.exerciseStats(ex, entries, settings, anchor);
+  ok('nothing is finished when no markers are handed over', plain.doneToday === false);
+  ok('and no session claims to be', plain.sessions.every((x) => x.done === false));
+
+  const marked = M.exerciseStats(ex, entries, settings, anchor, new Set([anchor]));
+  ok('a marked day reads as finished today', marked.doneToday === true);
+  ok('and the session itself carries it', marked.sessions[0].done === true);
+
+  const later = M.exerciseStats(ex, entries, settings, M.isoAddDays(anchor, 1), new Set([anchor]));
+  ok('yesterday being finished does not make today finished', later.doneToday === false);
+  ok('but the session it belongs to still says so', later.sessions[0].done === true);
+
+  const empty = M.exerciseStats(ex, [], settings, anchor, new Set([anchor]));
+  ok('a lift with nothing logged can still be called done', empty.doneToday === true);
+}
+
 /* ------------------------------------------------------------------ report */
 
 console.log(`\n${pass} checks passed`);
