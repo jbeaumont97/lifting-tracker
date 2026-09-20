@@ -106,11 +106,11 @@ every lift starts at 0 — set them in the app, or add the column and re-import.
 
 ## 3. Using it
 
-The app has two levels of detail, set in **Setup**. **Simple** — the default for a
-new install — gives you the prescription and how big a step it is, in plain words.
-**Detailed** adds the e1RM maths, the target each suggestion is measured against,
-the trade-off grid and the projections. Nothing is calculated differently; it is
-only what gets shown. An existing install stays on Detailed.
+Every screen is the same screen for everyone — there is no simple/detailed
+split any more, because two parallel designs is one too many. Each verdict is
+given in plain words, with the arithmetic behind it one tap away under **Show
+the numbers**. The only setting is whether those disclosures start open or
+folded, in **Setup**.
 
 **Next** — one card per lift, each with a single concrete prescription:
 `5 × 5 @ 82.5 kg`, plus how big a jump that is. Lifts are grouped by whether they
@@ -121,8 +121,18 @@ still recovering, a plain day count once rest has stopped adding anything, and
 `24 days · −4%` once a layoff has started costing you strength. Open a card and a
 line under the prescription says why today's number is what it is. Tap **Log
 this** and the log form opens pre-filled.
-Tap a card to open it and you get the reps/sets levers, and in the detailed view
-the target and the full trade-off grid.
+Tap a card to open it and you get the reps/sets levers, the target and the full
+trade-off grid.
+
+Under every prescription are **two ways to do it** — the best option for
+strength and the best one for size, each priced on its own scale and each one
+tap away. Neither is the recommendation; both are simply there, because "how
+heavy" and "how much" are different questions. Taking one moves the card onto
+that scale, and **Reset to automatic** puts it back.
+
+A lift you have finished for the day drops out of the readiness order into a
+**Done today** group at the bottom, and leads with what it did rather than what
+to do next.
 
 - **Weight** grid: the load to lift for every reps × sets combination that meets
   your target. Tap any cell to plan it.
@@ -159,6 +169,14 @@ There are two ways to log, because there are two situations:
 - **All at once** — the default for any earlier date. The whole block as one row,
   exactly as it has always worked.
 
+**Done with this lift** is how a lift ends, either way. Not the set count
+reaching a plan — four of a planned five can be the session you meant to have,
+and a sixth can be the one that mattered — so it is a button, and it stops the
+rest clock. Reaching the count you planned offers the same button in a toast
+rather than deciding for you. The session rail above the form turns each lift
+green as you finish it and counts them off: _2 of 3 lifts done_, then _Session
+done_.
+
 Both store the same thing. Sets that match on **weight and reps** are counted onto
 one entry, so `3 × 5 @ 100 kg` is a single row however you typed it, and logging
 set by set scores identically to writing the session up afterwards. A set that
@@ -176,7 +194,10 @@ marked as a personal best — once, not once per set from there on. Swipe a row 
 the history left to delete it; a toast offers **Undo**.
 
 **Progress** — the Dashboard, with charts. The list gives each lift's current
-adjusted e1RM, its trend and a sparkline; **Table** shows the full Dashboard grid.
+adjusted e1RM, its trend and a sparkline; **Table** shows the full Dashboard
+grid, now including each lift's work, its work target and its work trend. Each
+lift's own page carries both trends side by side: getting stronger and doing
+more are different achievements, and a lift can be doing one without the other.
 Personal bests are ringed on the chart and badged in the history. Tap a lift for
 its progression chart: every session, the fitted trend, the projection, and a ring
 marking your next target. Drag across the chart to read any
@@ -184,8 +205,9 @@ session. Below that: weekly sets against your budget, working sets per week over
 the last 8 weeks, and every session as a table.
 
 **Setup** — how much detail to show, the rest timer's target (0 turns it off), your
-lifts (tap one to edit), the maths dials, the fatigue/recovery/detraining model
-and its six coefficients, light/dark theme, and your backups. The welcome tour can
+lifts (tap one to edit), the maths dials, the three that govern the work scale,
+the fatigue/recovery/detraining model and its six coefficients, light/dark
+theme, and your backups. The welcome tour can
 be replayed from the bottom of the page.
 
 Each lift has a **starting weight** and a **weight step**, and together they
@@ -211,7 +233,7 @@ Unchanged from the workbook:
 - **Volume** = `weight × reps × sets`. Tracked separately because it measures a
   different thing: 3×8 at 60 kg is 1,440 kg against 1,050 kg for 3×5 at 70 kg,
   while losing to it on e1RM. Both readings are correct; they answer different
-  questions.
+  questions — and the second question now gets a full answer of its own, below.
 - **Weekly sets** — a plain count of working sets in the last 7 days, because sets
   per week is the unit training is actually prescribed in. Roughly 10–20 hard sets
   per muscle per week, spread across every lift that trains it.
@@ -220,6 +242,48 @@ Unchanged from the workbook:
 - **Flat target** = last session's adjusted e1RM × (1 + that lift's weekly gain).
   The planner then finds the lightest loadable weight that meets it — where
   _loadable_ means `starting weight + n × step` for that lift.
+
+### The second scale: work
+
+Everything above measures what you can lift. Nothing above measures how much you
+did, and those are the two things training is for. So **work** is a scale in its
+own right, carried alongside strength rather than instead of it:
+
+- **Work** = `weight × reps × sets`, summed over every block logged that day — or
+  **total reps** on a lift with nothing to load, because adding reps to a kilo
+  total would be adding two different things together. It is what sets of eight
+  to twelve are for, and it is the number that barely moves when you add a plate
+  to a heavy triple.
+- **Work target** = last session's work through the same fatigue, accrual and
+  detraining model the strength target uses. Those three take *capacity* off,
+  and capacity is what both scales measure, so they apply to both. One function
+  computes the multiplier for either, so the two cannot drift apart.
+- **The rate differs, though.** Volume climbs faster than a one-rep max does, so
+  the work target earns `gainPerWeek × 3` a week rather than needing a second
+  per-lift dial kept in step with the first. A lift set to 0.75%/week aims for
+  2.25%/week more work; a beginner at 1.5% aims for 4.5%.
+- **Its bands are much wider** — ideal to +6%, stretch to +15% — and chosen for
+  what they have to tell apart. On 3 × 10 at 65 kg, one rung of weight is +3.8%,
+  one more rep is +10% and one more set is +33%. So load reads as the small step
+  it is, a rep as a stretch, and a whole set as the deliberate jump in weekly
+  volume it is.
+- **Work trend** — the same least-squares fit as the strength trend, over the
+  same window and held to the same standard before it is called reliable.
+
+The grid can be solved either way. For strength it finds the lightest loadable
+weight whose e1RM meets the strength target; for size, the lightest whose tonnage
+meets the work one. Those are different sums and they give different weights,
+which is the entire reason both exist — and why the size pick, when you take it,
+hands back exactly the weight it advertised rather than quietly re-solving.
+
+The rep ranges are marked in the grid: 3–6 for strength, 6–12 for size. They
+overlap at six on purpose. Six reps is genuinely both, and a clean line between
+them would be a precision that does not exist — heavy triples build some size,
+and a hard set of ten builds some strength. What differs is which one they are
+efficient at.
+
+There is no mode and no per-lift goal setting. Both picks are on every card,
+always, and taking one is a per-lift override exactly like tapping a grid cell.
 
 Added on top (Setup → *Fatigue, recovery and detraining*, on by default; switch it
 off and every target falls back to the flat one above):
@@ -273,7 +337,7 @@ off and every target falls back to the flat one above):
 
 Everything the workbook publishes, the app reproduces to the decimal —
 `npm test` checks each Dashboard row and every cell of both planner grids against
-the values Excel itself calculated. Seven things are intentionally different:
+the values Excel itself calculated. Nine things are intentionally different:
 
 1. **Projections are withheld until the fit earns them.** The sheet will happily
    extrapolate two sessions three days apart to +12 weeks; on your August data that
@@ -306,6 +370,18 @@ the values Excel itself calculated. Seven things are intentionally different:
    lifted _too big a jump_: they are labelled **way back in**. Both numbers are
    still published — Progress → Table shows the flat target and the readiness one
    side by side — and the model can be switched off in Setup.
+8. **Finishing is something you say.** The sheet had no notion of it, and the app
+   used to infer it: a lift read as done once the sets logged reached the set
+   target. That number is a plan, and a plan is a guess. So there is a button,
+   and the set count is left to describe what happened rather than to decide it.
+   It earns its keep twice over — the fatigue model used to measure your sets
+   against that same guess, and now measures them against the median of the
+   sessions you actually finished.
+9. **Two scales, not one.** The sheet published e1RM and volume and progressed
+   only the first. Volume here has its own target, its own bands and its own
+   trend (section 4), and every card names the best option for each — because a
+   workbook that only knows how heavy you lifted cannot tell you whether you did
+   enough of it.
 
 ---
 
