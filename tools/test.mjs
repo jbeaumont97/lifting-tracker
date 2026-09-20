@@ -1654,7 +1654,29 @@ const fakeStats = {
   ok('the strength pick clears the strength target', plan.picks.strength.score >= plan.target - 1e-9);
   ok('the size pick clears the work target', plan.picks.hypertrophy.work >= plan.workTarget - 1e-9);
   ok('the size pick is the heavier session in reps', plan.picks.hypertrophy.reps > plan.picks.strength.reps);
-  ok('the size pick does not cut the set count', plan.picks.hypertrophy.sets >= 3, String(plan.picks.hypertrophy.sets));
+  ok('the two are comparable — same sets, different reps',
+    plan.picks.hypertrophy.sets === plan.picks.strength.sets);
+
+  // The picks have to be visibly two different sessions, or the card is
+  // showing the same answer twice. Minimising overshoot used to land both on
+  // six reps, because on the work scale every option meets the target by
+  // construction and the "gentlest" one is whichever the rounding favoured.
+  ok('neither pick sits on the boundary the other shares',
+    plan.picks.strength.reps < 6 && plan.picks.hypertrophy.reps > 6,
+    `${plan.picks.strength.reps} and ${plan.picks.hypertrophy.reps}`);
+  ok('and they are different weights', plan.picks.strength.weight !== plan.picks.hypertrophy.weight);
+  ok('the strength pick carries work too, rather than NaN',
+    Number.isFinite(plan.picks.strength.work), String(plan.picks.strength.work));
+
+  // Your own rep count stands when it is already in the range.
+  const triples = M.planFor(st, settings, { reps: 3, sets: 3 });
+  ok('somebody doing triples is not told five is the strength scheme',
+    triples.picks.strength.reps === 3, String(triples.picks.strength.reps));
+  const twelves = M.planFor(st, settings, { reps: 12, sets: 3 });
+  ok('and somebody doing twelves keeps them on the size side',
+    twelves.picks.hypertrophy.reps === 12, String(twelves.picks.hypertrophy.reps));
+  ok('while the other pick still names its own scheme',
+    twelves.picks.strength.reps === 5, String(twelves.picks.strength.reps));
   ok('both land on a loadable rung',
     [plan.picks.strength.weight, plan.picks.hypertrophy.weight]
       .every((w) => Math.abs((w - 20) / 2.5 - Math.round((w - 20) / 2.5)) < 1e-9));

@@ -25,11 +25,11 @@ export const SET_COLUMNS = [1, 2, 3, 4, 5, 6];
  */
 export const ZONES = {
   strength: {
-    key: 'strength', label: 'Strength', minReps: 3, maxReps: 6,
+    key: 'strength', label: 'Strength', minReps: 3, maxReps: 6, pickReps: 5,
     hint: 'Heavy, few reps — trains you to express force.',
   },
   hypertrophy: {
-    key: 'hypertrophy', label: 'Size', minReps: 6, maxReps: 12,
+    key: 'hypertrophy', label: 'Size', minReps: 6, maxReps: 12, pickReps: 10,
     hint: 'Moderate load, more reps and more sets — trains the muscle to grow.',
   },
 };
@@ -982,6 +982,7 @@ export function planFor(stats, settings, override = {}) {
       atBase: base > 0 && Math.abs(w - base) < 1e-9,
       isPick: r === snapReps(reps) && s === sets,
       volume: volume(w, r, s),
+      work: work(w, r, s, stats.exercise.kind),
     };
   };
 
@@ -1044,32 +1045,34 @@ export function planFor(stats, settings, override = {}) {
    * set count this lift normally runs to, because fewer sets at more reps is
    * not how volume goes up.
    */
+  /**
+   * One option per zone: today at the reps that serve strength, and today at
+   * the reps that serve size. Both are always computed.
+   *
+   * Neither is a search. On the strength scale the weight ladder is coarse, so
+   * which cell you pick genuinely matters and plan.gentlest is there for it. On
+   * the work scale it does not: the weight is solved from the target, so every
+   * rep and set combination in the range meets it by construction, and
+   * "smallest overshoot" only ever picks out whichever one the rounding
+   * happened to favour. Chasing that produced 6 x 6 — six reps being the very
+   * edge of the size range, and the same rep count the strength pick was
+   * already showing.
+   *
+   * So each zone names the scheme it is actually about, and the set count stays
+   * where you have it so the two are comparable. Your own rep count stands when
+   * it is already in the range: somebody doing triples does not need telling
+   * that five is the canonical strength scheme.
+   */
   let picks;
   Object.defineProperty(plan, 'picks', {
     enumerable: true,
     configurable: true,
     get() {
       if (picks !== undefined) return picks;
-      const clears = (cells, value, target) => cells
-        .filter((c) => Number.isFinite(c[value]) && c[value] >= target - 1e-9)
-        .reduce((a, b) => (a === null || b[value] < a[value] ? b : a), null);
-
-      const strengthCells = [];
-      for (const [ri, r] of REP_SCHEMES.entries()) {
-        if (!inZone(r, ZONES.strength)) continue;
-        for (const c of plan.grid[ri]) strengthCells.push(c);
-      }
-      const minSets = Math.max(1, Math.round(usualSets(stats.sessions, stats.exercise)));
-      const sizeCells = [];
-      for (const [ri, r] of (plan.workTarget > 0 ? REP_SCHEMES.entries() : [])) {
-        if (!inZone(r, ZONES.hypertrophy)) continue;
-        for (const c of plan.workGrid[ri]) if (c.sets >= minSets) sizeCells.push(c);
-      }
+      const repsFor = (zone) => (inZone(reps, zone) ? snapReps(reps) : zone.pickReps);
       picks = {
-        strength: clears(strengthCells, 'score', target)
-          || (strengthCells.length ? strengthCells.reduce((a, b) => (b.score > a.score ? b : a)) : null),
-        hypertrophy: clears(sizeCells, 'work', plan.workTarget)
-          || (sizeCells.length ? sizeCells.reduce((a, b) => (b.work > a.work ? b : a)) : null),
+        strength: cell(repsFor(ZONES.strength), sets),
+        hypertrophy: plan.workTarget > 0 ? workCell(repsFor(ZONES.hypertrophy), sets) : null,
       };
       return picks;
     },
