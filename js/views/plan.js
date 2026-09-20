@@ -546,33 +546,16 @@ function detail(stats, plan, ctx, settings) {
 
   if (repsOnly) {
     // --- one row, not a grid: sets against the reps they ask for ---
-    const bwForSize = plan.zone === 'hypertrophy' && Array.isArray(plan.workOptions);
-    const options = bwForSize ? plan.workOptions : plan.options;
-    const bwZoneSeg = plan.workOptions ? segmented({
-      label: 'Solve for', value: plan.zone,
-      options: [
-        { value: 'strength', label: ZONES.strength.label },
-        { value: 'hypertrophy', label: ZONES.hypertrophy.label },
-      ],
-      onChange: (v) => {
-        const pick = plan.picks && plan.picks[v];
-        setOv(id, pick ? { sets: pick.sets, zone: v } : { zone: v });
-        ctx.refresh({ transition: true });
-      },
-    }) : null;
     wrap.append(el('div', { class: 'grid-block' }, [
-      el('div', { class: 'grid-head' }, [el('h3', { text: 'Trade sets against reps' })]),
       el('div', { class: 'grid-head' }, [el('h3', { text: 'Trade sets against reps' })]),
       el('div', { class: 'grid-scroll' }, [
         el('table', { class: 'grid', 'aria-label': 'Reps needed at each number of sets' }, [
           el('thead', {}, [el('tr', {}, [
             el('th', { class: 'grid-corner', scope: 'col' }, [el('span', { text: 'sets' })]),
             ...plan.options.map((o) => el('th', { scope: 'col', class: o.isPick ? 'is-col' : '', text: String(o.sets) })),
-            ...plan.options.map((o) => el('th', { scope: 'col', class: o.isPick ? 'is-col' : '', text: String(o.sets) })),
           ])]),
           el('tbody', {}, [el('tr', {}, [
             el('th', { scope: 'row', class: 'is-row', text: 'reps' }),
-            ...plan.options.map((o) => el('td', {
             ...plan.options.map((o) => el('td', {
               class: `cell${o.isPick ? ' is-pick' : ''}`, dataset: { band: o.band.key },
             }, [
@@ -606,22 +589,6 @@ function detail(stats, plan, ctx, settings) {
     });
     gridHost.append(gridFor(mode, stats, plan, ctx, settings));
 
-    // Which scale the grid is solving against. Not a setting and not stored on
-    // the lift — the card names both picks whatever this says. A table can
-    // only print one set of numbers at a time, and this chooses which.
-    const zoneSeg = stats.workTarget > 0 ? segmented({
-      label: 'Solve for', value: plan.zone,
-      options: [
-        { value: 'strength', label: ZONES.strength.label },
-        { value: 'hypertrophy', label: ZONES.hypertrophy.label },
-      ],
-      onChange: (v) => {
-        const pick = plan.picks && plan.picks[v];
-        setOv(id, pick ? { reps: pick.reps, sets: pick.sets, zone: v } : { zone: v });
-        ctx.refresh({ transition: true });
-      },
-    }) : null;
-
     wrap.append(el('div', { class: 'grid-block' }, [
       el('div', { class: 'grid-head' }, [el('h3', { text: 'Trade sets against weight' }), seg]),
       el('p', { class: 'grid-note grid-zone-note', text:
@@ -654,7 +621,6 @@ function gridFor(mode, stats, plan, ctx, settings) {
   const cells = plan.grid;
   const table = el('table', {
     class: 'grid',
-    'aria-label': scores ? 'Adjusted e1RM each option scores' : 'Weight to lift for each reps and sets option',
     'aria-label': scores ? 'Adjusted e1RM each option scores' : 'Weight to lift for each reps and sets option',
   });
   const thead = el('thead', {}, [
@@ -696,16 +662,13 @@ function gridFor(mode, stats, plan, ctx, settings) {
   table.append(thead, tbody);
   const note = scores
     ? 'What each option actually scores once the weight is rounded up to a loadable step.'
-    ? 'What each option actually scores once the weight is rounded up to a loadable step.'
     : 'Tap any cell to plan that combination.';
   return el('div', { class: 'grid-scroll' }, [table, el('p', { class: 'grid-note', text: note })]);
 }
 
 function tableView(stats, plan) {
   const rows = plan.grid.map((row) => row.find((c) => c.sets === plan.sets)).filter(Boolean);
-  const rows = plan.grid.map((row) => row.find((c) => c.sets === plan.sets)).filter(Boolean);
   const table = el('table', { class: 'data-table' }, [
-    el('caption', { text: `Every rep scheme at ${plan.sets} sets, against a target of ${fmt(plan.target, 1)} kg.` }),
     el('caption', { text: `Every rep scheme at ${plan.sets} sets, against a target of ${fmt(plan.target, 1)} kg.` }),
     el('thead', {}, [
       el('tr', {}, [

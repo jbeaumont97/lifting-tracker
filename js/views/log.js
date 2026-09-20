@@ -559,7 +559,7 @@ function entryForm(st, ctx, settings) {
     const alreadyBest = bestBefore > -Infinity && adjSoFar > bestBefore + 1e-9;
     const beatsBest =
       bestBefore > -Infinity && adj > bestBefore + 1e-9 && !alreadyBest;
-    const work = repsOnly
+    const done = repsOnly
       ? todays.reduce((n, e) => n + e.reps * setCount(e), 0) +
         r * (live ? 1 : s)
       : volSoFar + volume(w, r, live ? 1 : s);
@@ -697,7 +697,7 @@ function entryForm(st, ctx, settings) {
       s = Math.round(Number(form.sets)) || "";
     const at = repsOnly ? `${r} reps` : `${r} @ ${w} ${settings.unit}`;
     primary.textContent = live
-      ? complete
+      ? finished || (target && doneSoFar >= target)
         ? `Log another set — ${at}`
         : `Log set ${doneSoFar + 1}${target ? ` of ${target}` : ""} — ${at}`
       : repsOnly
@@ -774,7 +774,14 @@ function entryForm(st, ctx, settings) {
       ? null
       : el("div", { class: "lever-row lever-row-wide" }, [weightStep]),
     el("div", { class: "lever-row" }, [repsStep, setsStep]),
-    live ? tracker(traceFig, doneSoFar, target, complete, ex, ctx) : null,
+    live
+      ? tracker(traceFig, doneSoFar, target, finished, ex, ctx)
+      : doneSoFar
+        ? el("div", { class: `set-track${finished ? " is-complete" : ""}` }, [
+            finished ? summary(doneSoFar, ex, ctx) : null,
+            doneControl(finished, ex, ctx),
+          ])
+        : null,
     preview,
     el("div", { class: "field-block" }, [
       el("span", {
@@ -852,16 +859,18 @@ function volSoFarAfter(entries) {
  * how long you actually rested — none of which was recordable before the
  * per-set log.
  */
-function tracker(traceFig, doneSoFar, target, complete, ex, ctx) {
-  return el("div", { class: `set-track${complete ? " is-complete" : ""}` }, [
+function tracker(traceFig, doneSoFar, target, finished, ex, ctx) {
+  return el("div", { class: `set-track${finished ? " is-complete" : ""}` }, [
     el("div", { class: "set-track-head" }, [
       el("span", {
         class: "set-track-label",
-        text: !target
-          ? `Set ${doneSoFar + 1}`
-          : complete
-            ? `${doneSoFar} of ${target} sets done`
-            : `Set ${doneSoFar + 1} of ${target}`,
+        text: finished
+          ? `${doneSoFar} set${doneSoFar === 1 ? "" : "s"} — done`
+          : !target
+            ? `Set ${doneSoFar + 1}`
+            : doneSoFar >= target
+              ? `${doneSoFar} of ${target} sets`
+              : `Set ${doneSoFar + 1} of ${target}`,
       }),
       doneSoFar
         ? el(

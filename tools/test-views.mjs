@@ -1646,34 +1646,73 @@ const motion2 = await import("../js/core/motion.js");
 {
   reset();
   const ex = store.getExercises()[0];
-  for (let i = 0; i < 3; i++)
-    store.logSet({
-      exerciseId: ex.id,
-      date: TODAY,
-      weight: 100,
-      reps: 5,
-      rir: 2,
-    });
+  for (let i = 0; i < 3; i++) store.logSet({ exerciseId: ex.id, date: TODAY, weight: 100, reps: 5, rir: 2 });
   select.invalidate();
-  setPrefill({
-    exerciseId: ex.id,
-    date: TODAY,
-    weight: 100,
-    reps: 5,
-    sets: 3,
-    mode: "sets",
-  });
-  const view = renderLog(ctx({ route: "log" }));
+  setPrefill({ exerciseId: ex.id, date: TODAY, weight: 100, reps: 5, sets: 3, mode: 'sets' });
 
-  const sum = view.querySelector(".session-summary");
-  ok("finishing the plan puts a summary on the screen", !!sum);
-  ok("it counts the sets", /3 sets/.test(sum.textContent), sum.textContent);
-  ok(
-    "it says what was moved",
-    /kg moved/.test(sum.textContent),
-    sum.textContent,
-  );
-  ok("and it names the lift", sum.textContent.includes(ex.name));
+  const planned = renderLog(ctx({ route: 'log' }));
+  ok('hitting the planned count does not call the lift done by itself',
+    planned.querySelector('.session-summary') === null);
+  const btn = planned.querySelector('.done-btn');
+  ok('it offers the decision instead', !!btn && /Done with this lift/.test(btn.textContent));
+
+  btn.click();
+  select.invalidate();
+  const view = renderLog(ctx({ route: 'log' }));
+
+  ok('the store now holds the marker', store.isDone(ex.id, TODAY) === true);
+  const sum = view.querySelector('.session-summary');
+  ok('saying so puts a summary on the screen', !!sum);
+  ok('it counts the sets', /3 sets/.test(sum.textContent), sum.textContent);
+  ok('it says what was moved', /kg moved/.test(sum.textContent), sum.textContent);
+  ok('and it names the lift', sum.textContent.includes(ex.name));
+  ok('the tracker reads as complete', !!view.querySelector('.set-track.is-complete'));
+  ok('and the button offers the way back',
+    /Not done after all/.test(view.querySelector('.done-btn').textContent));
+
+  view.querySelector('.done-btn').click();
+  select.invalidate();
+  const reopened = renderLog(ctx({ route: 'log' }));
+  ok('taking it back reopens the lift', store.isDone(ex.id, TODAY) === false);
+  ok('and the summary goes with it', reopened.querySelector('.session-summary') === null);
+}
+
+// --- stopping short of the plan is still a finished lift ---
+{
+  reset();
+  const ex = store.getExercises()[0];
+  store.logSet({ exerciseId: ex.id, date: TODAY, weight: 100, reps: 5, rir: 2 });
+  select.invalidate();
+  setPrefill({ exerciseId: ex.id, date: TODAY, weight: 100, reps: 5, sets: 5, mode: 'sets' });
+
+  const view = renderLog(ctx({ route: 'log' }));
+  ok('one set of a planned five can still be called done', !!view.querySelector('.done-btn'));
+  view.querySelector('.done-btn').click();
+  select.invalidate();
+
+  const after = renderLog(ctx({ route: 'log' }));
+  ok('and it is', after.querySelector('.session-summary') !== null);
+  ok('the count says what happened, not what was planned',
+    /1 set — done/.test(after.querySelector('.set-track-label').textContent),
+    after.querySelector('.set-track-label').textContent);
+}
+
+// --- a day written up afterwards can be called done too ---
+{
+  reset();
+  const ex = store.getExercises()[0];
+  const earlier = '2026-08-16';
+  store.addEntry({ exerciseId: ex.id, date: earlier, weight: 100, reps: 5, sets: 3 });
+  select.invalidate();
+  setPrefill({ exerciseId: ex.id, date: earlier, weight: 100, reps: 5, sets: 3, mode: 'bulk' });
+
+  const view = renderLog(ctx({ route: 'log' }));
+  const btn = view.querySelector('.done-btn');
+  ok('bulk mode offers the marker as well', !!btn);
+  btn.click();
+  select.invalidate();
+  ok('and it takes', store.isDone(ex.id, earlier) === true);
+  ok('the summary follows', renderLog(ctx({ route: 'log' })).querySelector('.session-summary') !== null);
 }
 
 // --- everything decorative stands down when asked ---
@@ -2492,7 +2531,8 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
 {
   const root = join(dirname(fileURLToPath(import.meta.url)), "..");
   const sw = readFileSync(join(root, "sw.js"), "utf8");
-  const shell = [...sw.matchAll(/'(\.\/[^']*)'/g)].map((m) => m[1]);
+  // Either quote style: the shell list is what matters, not how it is written.
+  const shell = [...sw.matchAll(/['"](\.\/[^'"]*)['"]/g)].map((m) => m[1]);
 
   ok("sw.js declares a shell", shell.length > 5);
   for (const rel of shell) {
@@ -2519,7 +2559,10 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
     );
   }
   ok("the stylesheet is precached", listed.has("./css/app.css"));
-  ok("the shell is versioned", /const CACHE = 'lifting-tracker-v\d+'/.test(sw));
+  ok(
+    "the shell is versioned",
+    /const CACHE = ['"]lifting-tracker-v\d+['"]/.test(sw),
+  );
 }
 
 /* ------------------------------------- 6n. a lift you have called done */
