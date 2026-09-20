@@ -59,7 +59,10 @@ export function startRest(seconds, { label = 'Rest', usual = null } = {}) {
   ]);
   const d = dockHost();
   d.replaceChildren(bar);
-  requestAnimationFrame(() => { bar.classList.add('is-in'); measure(); });
+  // The clock can be stopped before this frame arrives — logging a set and
+  // then calling the lift done takes two taps, but nothing says they cannot
+  // land in the same frame, and stopRest() has already dropped the node.
+  requestAnimationFrame(() => { if (bar) { bar.classList.add('is-in'); measure(); } });
   paint();
   state.tick = setInterval(paint, 500);
 }
