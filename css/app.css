@@ -474,6 +474,51 @@ table.grid td.cell.is-pick { box-shadow: inset 0 0 0 2px var(--series-1); }
   color: var(--band-ink, var(--neutral-ink));
 }
 
+/* ------------------------------------------------- strength and size */
+
+/* Both answers, always on the card. The current one is stated; the other is a
+   button, because the only thing standing between them is a tap. */
+.picks { display: flex; flex-direction: column; gap: var(--space-1); margin-top: var(--space-2); }
+.picks-label {
+  font-size: var(--text-3xs); text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--muted); font-weight: var(--fw-semi);
+}
+.pick {
+  display: flex; align-items: baseline; gap: var(--space-2); flex-wrap: wrap;
+  width: 100%; min-height: var(--tap); padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface-2); color: var(--text-primary);
+  text-align: left; cursor: pointer; touch-action: manipulation;
+  transition: border-color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+}
+.pick.is-current { cursor: default; border-color: var(--series-1); background: var(--series-wash); }
+.pick-zone {
+  flex: 0 0 auto; min-width: 58px;
+  font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--muted); font-weight: var(--fw-bold);
+}
+.pick-value { font-size: var(--text-sm); font-weight: var(--fw-semi); font-variant-numeric: tabular-nums; }
+.pick-sub { font-size: var(--text-2xs); color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.pick-tag {
+  margin-left: auto; font-size: var(--text-3xs); text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--series-1-deep); font-weight: var(--fw-bold);
+}
+.pick .band-chip { margin-left: auto; }
+.pick.is-current .band-chip { margin-left: 0; }
+
+/* Which rep ranges are which, drawn in the grid rather than left to memory.
+   A left edge, not a fill: the cells already carry the band colours and a
+   second colour system over the top of them would fight for the same meaning. */
+.grid tbody tr[data-zone="strength"] th[scope="row"] { box-shadow: inset 3px 0 0 var(--series-1); }
+.grid tbody tr[data-zone="hypertrophy"] th[scope="row"] { box-shadow: inset 3px 0 0 var(--series-1-deep); }
+.grid tbody tr[data-zone="both"] th[scope="row"] {
+  box-shadow: inset 3px 0 0 var(--series-1), inset 3px 0 0 var(--series-1-deep);
+}
+.grid-zone-row { display: flex; flex-direction: column; gap: var(--space-1); margin-bottom: var(--space-2); }
+.grid-zone-row .segmented { width: 100%; }
+.grid-zone-row .seg { flex: 1; }
+.grid-zone-row .grid-note { margin: 0; }
+
 /* ---------------------------------------------------------------- legend */
 
 .legend { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }

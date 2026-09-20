@@ -106,7 +106,7 @@ export function planFor(stats, settings, override = {}, today = isoToday()) {
   const c = ensure(settings, today);
   const id = stats && stats.exercise && stats.exercise.id;
   if (!id) return rawPlanFor(stats, settings, override);
-  const key = `${id}|${override.target ?? ''}|${override.reps ?? ''}|${override.sets ?? ''}`;
+  const key = `${id}|${override.target ?? ''}|${override.reps ?? ''}|${override.sets ?? ''}|${override.zone ?? ''}`;
   const hit = c.plans.get(key);
   if (hit) return hit;
   const plan = rawPlanFor(stats, settings, override);
