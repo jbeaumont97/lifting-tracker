@@ -14,6 +14,37 @@ export const ANCHOR = '2020-01-01';          // Settings!B3 — zero point for d
 export const REP_SCHEMES = [3, 4, 5, 6, 8, 10, 12];
 export const SET_COLUMNS = [1, 2, 3, 4, 5, 6];
 
+/**
+ * The two things sets are for, as rep ranges over the grid above.
+ *
+ * They overlap at six on purpose. Six reps is genuinely both, and drawing a
+ * clean line between them would be inventing a precision that does not exist —
+ * heavy triples build some size, and a hard set of ten builds some strength.
+ * What differs is which one they are efficient at, and that is what the two
+ * scales measure: e1RM is what you can lift, work is how much you did.
+ */
+export const ZONES = {
+  strength: {
+    key: 'strength', label: 'Strength', minReps: 3, maxReps: 6,
+    hint: 'Heavy, few reps — trains you to express force.',
+  },
+  hypertrophy: {
+    key: 'hypertrophy', label: 'Size', minReps: 6, maxReps: 12,
+    hint: 'Moderate load, more reps and more sets — trains the muscle to grow.',
+  },
+};
+
+/** Every zone a rep count belongs to — none below three, both at six. */
+export function zonesFor(reps) {
+  const r = Math.round(Number(reps));
+  return Object.values(ZONES).filter((z) => r >= z.minReps && r <= z.maxReps);
+}
+
+export function inZone(reps, zone) {
+  const r = Math.round(Number(reps));
+  return !!zone && r >= zone.minReps && r <= zone.maxReps;
+}
+
 /* ------------------------------------------------------------------ dates */
 
 /** Days between the anchor and an ISO date string — the sheet's "Day #". */
@@ -125,6 +156,27 @@ export function volume(weight, reps, sets) {
 }
 
 /**
+ * What one block of sets is WORTH DOING, as opposed to what it proves you can
+ * lift. Kilos moved on a weighted lift; reps performed on one with nothing to
+ * load, because adding reps to a kilo total would be adding two different
+ * things together — the same split setScore() makes for the strength scale.
+ *
+ * This is the quantity the size half of the app progresses. e1RM answers "how
+ * heavy"; this answers "how much", and no amount of the first is the second.
+ */
+export function work(weight, reps, sets, kind) {
+  const n = Number(sets) > 0 ? Number(sets) : 1;
+  return isBodyweight({ kind }) ? Number(reps) * n : volume(weight, reps, n);
+}
+
+/** What a whole session came to, summed over every block logged that day. */
+export function sessionWork(entries, kind) {
+  let total = 0;
+  for (const e of entries || []) total += work(e.weight, e.reps, e.sets, kind);
+  return total;
+}
+
+/**
  * The identity of a set: the weight and the reps, and deliberately nothing
  * else. Two sets that match here are the same set done twice and are stored as
  * one entry with a count — the shape the spreadsheet used, and what keeps 3x5
@@ -209,6 +261,19 @@ export function weightForTarget(target, reps, sets, settings, step, base = 0) {
 }
 
 /**
+ * The lightest loadable weight whose WORK meets `target` at reps x sets.
+ *
+ * The work analogue of weightForTarget, and a genuinely different solve: there
+ * is no rep factor and no set bonus, because work is not trying to estimate
+ * anything. Kilos times reps times sets is simply how much you moved.
+ */
+export function weightForWork(target, reps, sets, step, base = 0) {
+  const denom = Math.round(Number(reps)) * (Number(sets) > 0 ? Math.round(Number(sets)) : 1);
+  if (!(denom > 0) || !(target > 0)) return NaN;
+  return ceilToStep(target / denom, step, base);
+}
+
+/**
  * The fewest whole reps whose score meets `target` at this many sets.
  * The reps equivalent of weightForTarget: the ladder is the integers.
  */
@@ -258,6 +323,10 @@ export function exerciseStats(exercise, entries, settings, todayIso = isoToday()
     trendWindowCount: 0, trendWindowDays: 0, proj4: null, proj12: null,
     baseTarget: null, nextTarget: null, readiness: null,
     volume7: 0, sets7: 0, sessions: [], doneToday: false,
+    // The work scale, alongside the strength one rather than instead of it.
+    lastWork: null, bestWork: null, workTarget: null, work7: 0,
+    workTrendPerDay: null, workTrendPerWeek: null, workTrendReliable: false,
+    workGainPerWeek: 0,
     setsPerWeekTarget: exercise.setsPerWeek || null, setStatus: null,
     gainPerWeek: exercise.gainPerWeek ?? settings.defaultGainPerWeek,
     step: exercise.step || settings.defaultStep,
@@ -277,6 +346,7 @@ export function exerciseStats(exercise, entries, settings, todayIso = isoToday()
     const s = byDate.get(e.date);
     s.sets = (s.sets || 0) + (Number(e.sets) > 0 ? Number(e.sets) : 1);
     s.volume = (s.volume || 0) + e.volume;
+    s.work = (s.work || 0) + work(e.weight, e.reps, e.sets, exercise.kind);
     s.rows = (s.rows || 0) + 1;
   }
   stats.sessions = [...byDate.values()].sort((a, b) => a.day - b.day);
@@ -309,6 +379,8 @@ export function exerciseStats(exercise, entries, settings, todayIso = isoToday()
   stats.lastAdj = last.best.adj;
   stats.lastReps = last.best.reps;
   stats.lastSets = last.best.sets;
+  stats.lastWork = last.work;
+  stats.bestWork = stats.sessions.reduce((m, x) => (x.work > m ? x.work : m), 0);
 
   stats.bestEntry = mine.reduce((a, b) => (b.adj > a.adj ? b : a));
   stats.bestAdj = stats.bestEntry.adj;
@@ -346,10 +418,34 @@ export function exerciseStats(exercise, entries, settings, todayIso = isoToday()
   stats.readiness = readinessFor(stats, settings);
   stats.nextTarget = Number.isFinite(stats.readiness.target) ? stats.readiness.target : stats.baseTarget;
 
+  // The same model at a faster rate. Volume climbs quicker than a one-rep max
+  // does — a few percent a week against a fraction of one — so rather than a
+  // second per-lift dial to keep in step with the first, this is a multiple of
+  // whatever gain the lift is already set to earn. Fatigue and detraining
+  // discount it exactly as they discount strength: they take capacity off, and
+  // capacity is what both scales are measuring.
+  const multiple = Number(settings.workGainMultiple) > 0 ? Number(settings.workGainMultiple) : 3;
+  stats.workGainPerWeek = stats.gainPerWeek * multiple;
+  if (stats.lastWork > 0) {
+    stats.workTarget = stats.lastWork * factorFor(stats.readiness, stats.workGainPerWeek);
+  }
+
+  // The work trend, fitted exactly as the strength one is: one point per
+  // session inside the same window, held to the same standard before it is
+  // called reliable.
+  const workWin = win.filter((x) => Number.isFinite(x.work) && x.work > 0);
+  const workPerDay = slope(workWin.map((x) => [x.day, x.work]));
+  stats.workTrendReliable = workWin.length >= 3 && stats.trendWindowDays >= 14;
+  if (workPerDay !== null) {
+    stats.workTrendPerDay = Math.abs(workPerDay) < 1e-6 ? 0 : workPerDay;
+    stats.workTrendPerWeek = stats.workTrendPerDay * 7;
+  }
+
   // Last 7 days — the sheet's window is day >= today-7.
   for (const e of mine) {
     if (e.day >= todayDay - 7) {
       stats.volume7 += e.volume;
+      stats.work7 += work(e.weight, e.reps, e.sets, exercise.kind);
       stats.sets7 += Number(e.sets) > 0 ? Number(e.sets) : 1;
     }
   }
@@ -521,6 +617,20 @@ export function typicalInterval(sessions) {
  * squats every ten days is not detraining on day twelve, so the grace period
  * never sits below twice their normal gap.
  */
+/**
+ * What one week's-worth-of-gain becomes, given where this lift sits between
+ * fatigue and detraining.
+ *
+ * Extracted so the two scales cannot drift apart: strength and work are the
+ * same model at different rates, and the only honest way to say that is to run
+ * them through the same function. `r` is a readiness object; pass it the gain
+ * rate you want applied and it hands back the multiplier for it.
+ */
+export function factorFor(r, gainPerWeek) {
+  if (!r || !r.enabled) return 1 + (gainPerWeek > 0 ? gainPerWeek : 0);
+  return r.retention * (1 + accrualAt(r.days, gainPerWeek, r.productiveWindow) * r.durable) * (1 - r.fatigue);
+}
+
 export function readinessFor(stats, settings = {}) {
   const rs = readinessSettings(settings);
   const days = stats.daysSince;
@@ -533,7 +643,7 @@ export function readinessFor(stats, settings = {}) {
   const out = {
     enabled: rs.enabled, days, typicalInterval: typical, severity,
     productiveWindow, grace,
-    fatigue: 0, accrual: 0, retention: 1, factor: 1,
+    fatigue: 0, accrual: 0, retention: 1, factor: 1, durable: 1,
     baseline: stats.lastAdj, currentBest: stats.bestAdj,
     target: stats.baseTarget, phase: READINESS_PHASES.ready,
     recovered: true, readyIn: 0,
@@ -554,10 +664,10 @@ export function readinessFor(stats, settings = {}) {
   // What you gained in the gap is the first thing a layoff takes back: the
   // newest adaptations are the least durable, so accrual fades on the same
   // curve retention does rather than sitting there as a credit forever.
-  const durable = rs.retainedFloor < 1
+  out.durable = rs.retainedFloor < 1
     ? clamp((out.retention - rs.retainedFloor) / (1 - rs.retainedFloor), 0, 1) : 1;
-  out.accrual = accrualAt(days, stats.gainPerWeek, productiveWindow) * durable;
-  out.factor = out.retention * (1 + out.accrual) * (1 - out.fatigue);
+  out.accrual = accrualAt(days, stats.gainPerWeek, productiveWindow) * out.durable;
+  out.factor = factorFor(out, stats.gainPerWeek);
 
   // Detraining is a real loss of capacity, so it discounts your best too —
   // otherwise a comeback session is scored against a number you no longer own,
@@ -566,6 +676,7 @@ export function readinessFor(stats, settings = {}) {
   out.baseline = stats.lastAdj * out.retention;
   out.currentBest = Number.isFinite(stats.bestAdj) ? stats.bestAdj * out.retention : stats.bestAdj;
   out.target = stats.lastAdj * out.factor;
+
 
   // Whole days until the lift is fit to be trained hard again.
   if (!out.recovered) {
@@ -667,13 +778,28 @@ export function plainVerdict(band, delta, unit = 'kg') {
   }
 }
 
+/**
+ * Which band a candidate falls in. Both scales share this; only the gates
+ * differ, because a rung of weight and a whole extra set are not the same size
+ * of step and must not be called the same thing.
+ */
+function bandBetween(value, target, best, ideal, stretch) {
+  if (!Number.isFinite(value) || !(target > 0)) return null;
+  if (Number.isFinite(best) && value <= best) return BANDS.beaten;
+  if (value > target * (1 + stretch)) return BANDS.toobig;
+  if (value > target * (1 + ideal)) return BANDS.stretch;
+  return BANDS.ideal;
+}
+
 /** Which band a candidate score falls in, given the target and current best. */
 export function bandFor(score, target, bestAdj, settings) {
-  if (!Number.isFinite(score) || !(target > 0)) return null;
-  if (Number.isFinite(bestAdj) && score <= bestAdj) return BANDS.beaten;
-  if (score > target * (1 + settings.stretchBand)) return BANDS.toobig;
-  if (score > target * (1 + settings.idealBand)) return BANDS.stretch;
-  return BANDS.ideal;
+  return bandBetween(score, target, bestAdj, settings.idealBand, settings.stretchBand);
+}
+
+/** The same verdict on the work scale, against its own much wider bands. */
+export function bandForWork(value, target, bestWork, settings) {
+  return bandBetween(value, target, bestWork,
+    settings.workIdealBand ?? 0.06, settings.workStretchBand ?? 0.15);
 }
 
 /** The weight behind the best set of the most recent session. */
@@ -733,6 +859,11 @@ export function planFor(stats, settings, override = {}) {
    */
   const comebackUnder = readiness && readiness.phase && readiness.phase.key === 'detrained'
     ? lastSessionLoad(stats) : null;
+  // Detraining discounts what you have done on the work scale too, and for the
+  // same reason: a comeback session should not be told it failed to beat a
+  // session you are no longer in shape to repeat.
+  const bestWorkNow = Number.isFinite(stats.bestWork) && readiness && Number.isFinite(readiness.retention)
+    ? stats.bestWork * readiness.retention : stats.bestWork;
   const bandOf = (score, weight) => (
     comebackUnder !== null && weight < comebackUnder - 1e-9
       ? BANDS.return
@@ -753,9 +884,13 @@ export function planFor(stats, settings, override = {}) {
     bestAdj: stats.bestAdj,
     idealCeiling: target * (1 + settings.idealBand),
     stretchCeiling: target * (1 + settings.stretchBand),
-    grid: [], columns: SET_COLUMNS, rows: REP_SCHEMES,
+    grid: [], columns: SET_COLUMNS, rows: REP_SCHEMES, workOptions: null,
     gentlest: null, weight: NaN, score: NaN, overshoot: NaN, band: null,
     kind: isBodyweight(stats.exercise) ? 'bodyweight' : 'weight', options: null,
+    // The work scale, carried alongside. Everything below is a lazy getter for
+    // the same reason the strength grid is: a collapsed card reads none of it.
+    workTarget: stats.workTarget, lastWork: stats.lastWork, bestWork: stats.bestWork,
+    workGrid: [], picks: null,
   };
   if (!plan.ready) return plan;
 
@@ -773,8 +908,32 @@ export function planFor(stats, settings, override = {}) {
     plan.options = SET_COLUMNS.map((sn) => {
       const r = repsForTarget(target, sn, settings);
       const score = r * setBonus(sn, settings.setBonusK);
-      return { reps: r, sets: sn, weight: null, score, band: bandOf(score, r), isPick: sn === sets, volume: 0 };
+      return {
+        reps: r, sets: sn, weight: null, score, band: bandOf(score, r),
+        isPick: sn === sets, volume: 0, work: r * sn,
+      };
     });
+    // The work scale on a lift with nothing to load is simply total reps, and
+    // the only lever is how they are split up. So the same row again, with the
+    // reps solved against the work target rather than the strength one.
+    if (plan.workTarget > 0) {
+      plan.workOptions = SET_COLUMNS.map((sn) => {
+        const r = Math.max(1, Math.ceil(plan.workTarget / sn - 1e-9));
+        const done = r * sn;
+        return {
+          reps: r, sets: sn, weight: null, work: done,
+          band: bandForWork(done, plan.workTarget, bestWorkNow, settings),
+          isPick: sn === sets, score: r * setBonus(sn, settings.setBonusK),
+        };
+      });
+      const minSets = Math.max(1, Math.round(usualSets(stats.sessions, stats.exercise)));
+      const room = plan.workOptions.filter((o) => o.sets >= minSets);
+      plan.picks = {
+        strength: plan.options.reduce((a, b) => (a === null || b.score < a.score ? b : a), null),
+        hypertrophy: (room.length ? room : plan.workOptions)
+          .reduce((a, b) => (a === null || b.work < a.work ? b : a), null),
+      };
+    }
     // On a reps lift the smallest possible step is a whole rep, which low down
     // is a big one: 13 to 14 is nearly 8%. Adding a set instead is usually the
     // gentler way up, so the option that overshoots least is worth pointing at.
@@ -818,6 +977,81 @@ export function planFor(stats, settings, override = {}) {
     get() {
       if (!grid) grid = REP_SCHEMES.map((r) => SET_COLUMNS.map((s) => cell(r, s)));
       return grid;
+    },
+  });
+
+  /**
+   * The same trade-off, solved against work instead.
+   *
+   * A separate grid rather than another column on the first one, because the
+   * weight in each cell is the answer to a different question: there, the
+   * lightest load whose e1RM meets the strength target; here, the lightest
+   * load whose tonnage meets the work one. Relabelling the first would just be
+   * strength maths wearing a different name.
+   */
+  const workCell = (r, sn) => {
+    const w = weightForWork(plan.workTarget, r, sn, step, base);
+    const done = work(w, r, sn, stats.exercise.kind);
+    return {
+      reps: r, sets: sn, weight: w, work: done,
+      band: comebackUnder !== null && w < comebackUnder - 1e-9
+        ? BANDS.return
+        : bandForWork(done, plan.workTarget, bestWorkNow, settings),
+      atBase: base > 0 && Math.abs(w - base) < 1e-9,
+      isPick: r === snapReps(reps) && sn === sets,
+      score: w * repFactor(r, settings.formula) * setBonus(sn, settings.setBonusK),
+    };
+  };
+
+  let workGrid = null;
+  Object.defineProperty(plan, 'workGrid', {
+    enumerable: true,
+    configurable: true,
+    get() {
+      if (!(plan.workTarget > 0)) return [];
+      if (!workGrid) workGrid = REP_SCHEMES.map((r) => SET_COLUMNS.map((sn) => workCell(r, sn)));
+      return workGrid;
+    },
+  });
+
+  /**
+   * One option per zone: what today looks like if you are chasing strength,
+   * and what it looks like if you are chasing size. Both are always computed —
+   * there is no mode here, and nothing is hidden behind a choice.
+   *
+   * Each is the gentlest honest step inside its own rep range: the option that
+   * clears its own target by the least. The size pick will not drop below the
+   * set count this lift normally runs to, because fewer sets at more reps is
+   * not how volume goes up.
+   */
+  let picks;
+  Object.defineProperty(plan, 'picks', {
+    enumerable: true,
+    configurable: true,
+    get() {
+      if (picks !== undefined) return picks;
+      const clears = (cells, value, target) => cells
+        .filter((c) => Number.isFinite(c[value]) && c[value] >= target - 1e-9)
+        .reduce((a, b) => (a === null || b[value] < a[value] ? b : a), null);
+
+      const strengthCells = [];
+      for (const [ri, r] of REP_SCHEMES.entries()) {
+        if (!inZone(r, ZONES.strength)) continue;
+        for (const c of plan.grid[ri]) strengthCells.push(c);
+      }
+      const minSets = Math.max(1, Math.round(usualSets(stats.sessions, stats.exercise)));
+      const sizeCells = [];
+      for (const [ri, r] of (plan.workTarget > 0 ? REP_SCHEMES.entries() : [])) {
+        if (!inZone(r, ZONES.hypertrophy)) continue;
+        for (const c of plan.workGrid[ri]) if (c.sets >= minSets) sizeCells.push(c);
+      }
+      picks = {
+        strength: clears(strengthCells, 'score', target)
+          || (strengthCells.length ? strengthCells.reduce((a, b) => (b.score > a.score ? b : a)) : null),
+        hypertrophy: clears(sizeCells, 'work', plan.workTarget)
+          || (sizeCells.length ? sizeCells.reduce((a, b) => (b.work > a.work ? b : a)) : null),
+      };
+      return picks;
     },
   });
 

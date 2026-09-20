@@ -20,11 +20,13 @@ const STATS_KEYS = [
   'formula', 'setBonusK', 'lookbackDays', 'defaultStep', 'defaultGainPerWeek',
   'readiness', 'fatiguePeak', 'fatigueTau', 'productiveDays', 'graceDays',
   'detrainHalfLife', 'retainedFloor',
+  // Reaches the work target, which exerciseStats computes.
+  'workGainMultiple',
 ];
 
 // The bands live in bandFor(), which planFor() calls and exerciseStats() does
 // not — so widening the ideal band invalidates plans and leaves stats alone.
-const PLAN_KEYS = ['idealBand', 'stretchBand'];
+const PLAN_KEYS = ['idealBand', 'stretchBand', 'workIdealBand', 'workStretchBand'];
 
 function sig(settings, keys) {
   let out = '';
