@@ -1541,6 +1541,170 @@ const fakeStats = {
   ok('a lift with nothing logged can still be called done', empty.doneToday === true);
 }
 
+/* ------------------------------------------ 11. the work scale */
+
+// --- work is how much you did, on whichever scale the lift is loaded in ---
+{
+  close('work is weight x reps x sets', M.work(100, 5, 3, 'weight'), 1500);
+  close('a missing set count means one', M.work(100, 5, 0, 'weight'), 500);
+  close('a lift with nothing to load is counted in reps', M.work(0, 12, 3, 'bodyweight'), 36);
+  ok('and never mixes the two — press-ups are not zero kilos',
+    M.work(0, 12, 3, 'bodyweight') === 36 && M.work(0, 12, 3, 'weight') === 0);
+
+  const day = [{ weight: 100, reps: 5, sets: 3 }, { weight: 60, reps: 10, sets: 2 }];
+  close('a session is every block it held', M.sessionWork(day, 'weight'), 1500 + 1200);
+  close('and nothing is not a crash', M.sessionWork([], 'weight'), 0);
+}
+
+// --- the zones overlap at six, on purpose ---
+{
+  ok('three reps is strength alone', M.zonesFor(3).map((z) => z.key).join() === 'strength');
+  ok('ten reps is size alone', M.zonesFor(10).map((z) => z.key).join() === 'hypertrophy');
+  ok('six reps is both, and says so', M.zonesFor(6).length === 2);
+  ok('fifteen reps is neither zone the grid draws', M.zonesFor(15).length === 0);
+  ok('inZone agrees with the boundaries',
+    M.inZone(6, M.ZONES.strength) && M.inZone(6, M.ZONES.hypertrophy)
+    && !M.inZone(8, M.ZONES.strength) && !M.inZone(5, M.ZONES.hypertrophy));
+}
+
+// --- solving for work lands on a rung you can actually load ---
+{
+  const w = M.weightForWork(2000, 10, 3, 2.5, 20);
+  ok('the answer is loadable', Math.abs((w - 20) / 2.5 - Math.round((w - 20) / 2.5)) < 1e-9, String(w));
+  ok('and it never undershoots', M.work(w, 10, 3, 'weight') >= 2000 - 1e-9, String(M.work(w, 10, 3, 'weight')));
+  ok('nothing is suggested below the bar', M.weightForWork(1, 10, 3, 2.5, 20) === 20);
+  ok('a junk target gives no answer', Number.isNaN(M.weightForWork(0, 10, 3, 2.5, 0)));
+  ok('and so does a junk rep count', Number.isNaN(M.weightForWork(2000, 0, 3, 2.5, 0)));
+}
+
+// --- the work bands are wider than the strength ones, and deliberately so ---
+{
+  const st = { ...settings, workIdealBand: 0.06, workStretchBand: 0.15 };
+  const band = (v) => M.bandForWork(v, 1000, null, st).key;
+  ok('meeting the target exactly is the ideal step', band(1000) === 'ideal');
+  ok('and so is anything inside the ideal band', band(1060) === 'ideal');
+  ok('past it is a stretch', band(1061) === 'stretch');
+  ok('and past that is too big a jump', band(1151) === 'toobig');
+  ok('less work than your best session is not progression',
+    M.bandForWork(900, 1000, 950, st).key === 'beaten');
+
+  // The point of the wider gates, stated as the thing they were chosen for.
+  const base = M.work(65, 10, 3, 'weight');          // 1,950 kg
+  const t = base * 1.0225;
+  const g = (v) => M.bandForWork(v, t, null, st).key;
+  ok('one rung of weight reads as the small step it is', g(M.work(67.5, 10, 3, 'weight')) === 'ideal');
+  ok('one more rep reads as a stretch', g(M.work(65, 11, 3, 'weight')) === 'stretch');
+  ok('one more whole set reads as the big jump it is', g(M.work(65, 10, 4, 'weight')) === 'toobig');
+
+  // And the defaults hold when a document predates the settings entirely.
+  ok('a document with no work bands still bands',
+    M.bandForWork(1000, 1000, null, {}).key === 'ideal');
+}
+
+// --- one model, two rates: factorFor is what keeps them from drifting ---
+{
+  const anchor = '2026-01-01';
+  const ex = { id: 'x', name: 'X', step: 2.5, base: 0, gainPerWeek: 0.0075, setsPerSession: 3, setsPerWeek: 15 };
+  const entries = [{ id: 'a', date: anchor, exerciseId: 'x', weight: 100, reps: 5, sets: 3, rir: 2, seq: 1 }];
+  const at = (d, over = {}) => M.exerciseStats(ex, entries, { ...settings, ...over }, M.isoAddDays(anchor, d));
+
+  const d7 = at(7);
+  close('the strength target is exactly what factorFor says it is',
+    d7.nextTarget, d7.lastAdj * M.factorFor(d7.readiness, d7.gainPerWeek), 1e-9);
+  close('and the work target is the same function at the faster rate',
+    d7.workTarget, d7.lastWork * M.factorFor(d7.readiness, d7.workGainPerWeek), 1e-9);
+
+  close('work is the session, not the best set', d7.lastWork, 100 * 5 * 3);
+  close('the work rate is the lift gain times the multiple', d7.workGainPerWeek, 0.0075 * 3, 1e-12);
+  close('a custom multiple is honoured', at(7, { workGainMultiple: 5 }).workGainPerWeek, 0.0075 * 5, 1e-12);
+
+  // With the model off, both scales fall back to a flat step, as before.
+  const off = at(7, { readiness: 'off' });
+  close('off, the work target is a flat step on last session',
+    off.workTarget, off.lastWork * (1 + off.workGainPerWeek), 1e-9);
+
+  // Fatigue and detraining move work exactly as they move strength.
+  const d0 = at(0), d90 = at(90);
+  ok('a same-day repeat asks for less work than the session it follows', d0.workTarget < d0.lastWork);
+  ok('the work target climbs as the fatigue clears', d0.workTarget < d7.workTarget);
+  ok('and a layoff asks for less than you last did', d90.workTarget < d90.lastWork);
+  // The two share retention and fatigue and differ only in the rate they
+  // accrue at, which is the whole claim "one model, two rates" is making.
+  close('with nothing being earned, the two factors are identical',
+    M.factorFor(d90.readiness, 0),
+    d90.readiness.retention * (1 - d90.readiness.fatigue), 1e-12);
+  ok('and the work factor leads only by what the faster rate earned',
+    M.factorFor(d90.readiness, d90.workGainPerWeek) > M.factorFor(d90.readiness, d90.gainPerWeek));
+  ok('fatigue alone never touches what you have already done',
+    M.factorFor(at(1).readiness, 0) < 1 && at(1).readiness.retention === 1);
+}
+
+// --- both picks are always there, each inside its own rep range ---
+{
+  const anchor = '2026-01-01';
+  const ex = { id: 'x', name: 'X', step: 2.5, base: 20, gainPerWeek: 0.0075, setsPerSession: 3, setsPerWeek: 15 };
+  const entries = [{ id: 'a', date: anchor, exerciseId: 'x', weight: 100, reps: 5, sets: 3, rir: 2, seq: 1 }];
+  const st = M.exerciseStats(ex, entries, settings, M.isoAddDays(anchor, 3));
+  const plan = M.planFor(st, settings);
+
+  ok('the strength pick is in the strength range', M.inZone(plan.picks.strength.reps, M.ZONES.strength),
+    String(plan.picks.strength.reps));
+  ok('the size pick is in the size range', M.inZone(plan.picks.hypertrophy.reps, M.ZONES.hypertrophy),
+    String(plan.picks.hypertrophy.reps));
+  ok('the strength pick clears the strength target', plan.picks.strength.score >= plan.target - 1e-9);
+  ok('the size pick clears the work target', plan.picks.hypertrophy.work >= plan.workTarget - 1e-9);
+  ok('the size pick is the heavier session in reps', plan.picks.hypertrophy.reps > plan.picks.strength.reps);
+  ok('the size pick does not cut the set count', plan.picks.hypertrophy.sets >= 3, String(plan.picks.hypertrophy.sets));
+  ok('both land on a loadable rung',
+    [plan.picks.strength.weight, plan.picks.hypertrophy.weight]
+      .every((w) => Math.abs((w - 20) / 2.5 - Math.round((w - 20) / 2.5)) < 1e-9));
+
+  // The work grid is the same shape as the strength one, and a different solve.
+  ok('the work grid matches the axes', plan.workGrid.length === M.REP_SCHEMES.length
+    && plan.workGrid[0].length === M.SET_COLUMNS.length);
+  ok('its weights answer a different question than the strength grid',
+    plan.workGrid[0][0].weight !== plan.grid[0][0].weight);
+  ok('every work cell meets the work target',
+    plan.workGrid.every((row) => row.every((c) => c.work >= plan.workTarget - 1e-9)));
+  ok('and the strength grid is untouched by any of it',
+    plan.grid.every((row) => row.every((c) => Number.isFinite(c.score))));
+}
+
+// --- a lift with nothing to load gets both picks too ---
+{
+  const anchor = '2026-01-01';
+  const ex = { id: 'pu', name: 'Press-ups', kind: 'bodyweight', step: 1, base: 0, gainPerWeek: 0.015, setsPerSession: 3, setsPerWeek: 12 };
+  const entries = [{ id: 'a', date: anchor, exerciseId: 'pu', weight: 0, reps: 12, sets: 3, rir: 2, seq: 1 }];
+  const st = M.exerciseStats(ex, entries, settings, M.isoAddDays(anchor, 3));
+  const plan = M.planFor(st, settings);
+
+  close('work is total reps', st.lastWork, 36);
+  ok('it still carries a work target', st.workTarget > 36, String(st.workTarget));
+  ok('both picks exist', !!plan.picks.strength && !!plan.picks.hypertrophy);
+  ok('and the size one clears the work target',
+    plan.picks.hypertrophy.work >= plan.workTarget - 1e-9, String(plan.picks.hypertrophy.work));
+  ok('neither invents a weight to lift',
+    plan.picks.strength.weight === null && plan.picks.hypertrophy.weight === null);
+}
+
+// --- a lift with one session has no work trend to report, and says so ---
+{
+  const anchor = '2026-01-01';
+  const ex = { id: 'x', name: 'X', step: 2.5, base: 0, gainPerWeek: 0.0075, setsPerSession: 3, setsPerWeek: 15 };
+  const one = M.exerciseStats(ex, [{ id: 'a', date: anchor, exerciseId: 'x', weight: 100, reps: 5, sets: 3, seq: 1 }], settings, anchor);
+  ok('one session is not a trend', one.workTrendReliable === false && one.workTrendPerWeek === null);
+
+  const many = [];
+  for (let i = 0; i < 5; i++) {
+    many.push({ id: `e${i}`, date: M.isoAddDays(anchor, i * 7), exerciseId: 'x', weight: 100 + i * 5, reps: 5, sets: 3, seq: i + 1 });
+  }
+  const st = M.exerciseStats(ex, many, settings, M.isoAddDays(anchor, 28));
+  ok('five weekly sessions are', st.workTrendReliable === true);
+  ok('and the work trend is positive when the work is climbing',
+    st.workTrendPerWeek > 0, String(st.workTrendPerWeek));
+  close('the best session is the biggest one', st.bestWork, M.work(120, 5, 3, 'weight'));
+}
+
 /* ------------------------------------------------------------------ report */
 
 console.log(`\n${pass} checks passed`);
