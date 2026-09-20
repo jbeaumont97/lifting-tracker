@@ -200,6 +200,17 @@ export function renderPlan(ctx) {
       ], { open: ctx.numbersOpen }),
       legend(),
     ]),
+    details('Strength and size', [
+      el('p', { text: 'Every lift is read two ways, because "how heavy" and "how much" are different questions. Adding weight to a set of three moves the first and barely touches the second; adding a fourth set of ten moves the second and barely touches the first. Both are training; they are just not the same training.' }),
+      el('p', { text: 'Strength is your adjusted e1RM — an estimate of the most you could lift once, credited for the sets you did. Work is what you actually moved: weight × reps × sets across the session, or total reps on a lift with nothing to load.' }),
+      el('p', { text: `The rep ranges in the grid are marked accordingly: ${ZONES.strength.minReps}–${ZONES.strength.maxReps} for strength, ${ZONES.hypertrophy.minReps}–${ZONES.hypertrophy.maxReps} for size. They overlap at six on purpose. Six reps is genuinely both, and a clean line between them would be a precision that does not exist — heavy triples build some size, and a hard set of ten builds some strength. What differs is which one they are efficient at.` }),
+      el('p', { text: 'Neither is the app’s recommendation. Both picks are on every card, and taking one is a tap; nothing is stored against the lift and nothing is hidden behind a setting.' }),
+      disclose('Show the maths', [
+        el('p', { text: 'The work target is last session’s work moved by the same three things the strength target is moved by — fitness earned in the gap, strength lost to a layoff, and fatigue still owed — because they take capacity off, and capacity is what both scales measure. The only difference is the rate: volume climbs faster than a one-rep max, so the work target uses a multiple of the lift’s own weekly gain rather than a second dial to keep in step with the first.' }),
+        el('p', { text: 'Its colour bands are much wider than the e1RM ones, and chosen for what they have to tell apart: on 3 × 10 at 65 kg, one rung of weight is +3.8%, one more rep is +10% and one more set is +33%. So load reads as the small step it is, a rep as a stretch, and a whole set as the deliberate jump in weekly volume it is. All three are dials in Setup.' }),
+        el('p', { text: 'The grid can be solved either way. For strength it finds the lightest loadable weight whose e1RM meets the strength target; for size, the lightest whose tonnage meets the work one. They are different sums and they give different weights, which is the whole point of having both.' }),
+      ], { open: ctx.numbersOpen }),
+    ]),
   );
   return root;
 }
