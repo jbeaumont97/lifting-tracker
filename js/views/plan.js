@@ -201,14 +201,14 @@ export function renderPlan(ctx) {
       legend(),
     ]),
     details('Strength and size', [
-      el('p', { text: 'Every lift is read two ways, because "how heavy" and "how much" are different questions. Adding weight to a set of three moves the first and barely touches the second; adding a fourth set of ten moves the second and barely touches the first. Both are training; they are just not the same training.' }),
-      el('p', { text: 'Strength is your adjusted e1RM — an estimate of the most you could lift once, credited for the sets you did. Work is what you actually moved: weight × reps × sets across the session, or total reps on a lift with nothing to load.' }),
-      el('p', { text: `The rep ranges in the grid are marked accordingly: ${ZONES.strength.minReps}–${ZONES.strength.maxReps} for strength, ${ZONES.hypertrophy.minReps}–${ZONES.hypertrophy.maxReps} for size. They overlap at six on purpose. Six reps is genuinely both, and a clean line between them would be a precision that does not exist — heavy triples build some size, and a hard set of ten builds some strength. What differs is which one they are efficient at.` }),
-      el('p', { text: 'Neither is the app’s recommendation. Both picks are on every card, and taking one is a tap; nothing is stored against the lift and nothing is hidden behind a setting.' }),
+      el('p', { text: 'Every lift is read two ways, because "how heavy" and "how much of the right kind" are different questions. A heavy triple answers the first and barely touches the second; four sets of twelve answer the second and barely touch the first. Both are training; they are not the same training.' }),
+      el('p', { text: `The weight is worked out the same way either way — your adjusted e1RM tells the app what you can do for three reps or for twelve, and it rounds up to a loadable step. What changes is the rep range: ${ZONES.strength.minReps}–${ZONES.strength.maxReps} for strength, ${ZONES.hypertrophy.minReps}–${ZONES.hypertrophy.maxReps} for size, marked down the side of the grid. They overlap at six on purpose. Six reps is genuinely both, and a clean line between them would be a precision that does not exist.` }),
+      el('p', { text: 'Size is then measured in hard sets, not in tonnage. Tonnage cannot tell a single at 300 kg from thirty reps at 10 kg — the two multiply out the same — so it is a poor judge of something that depends almost entirely on how many reps you did and how close to failure you took them. A set counts fully inside the rep range and taken within a couple of reps of failure, and counts for less the further outside that it falls. Your weekly budget in Setup is what it counts against.' }),
+      el('p', { text: 'Neither pick is the app’s recommendation. Both are on every card, and taking one is a tap; nothing is stored against the lift and nothing is hidden behind a setting.' }),
       disclose('Show the maths', [
-        el('p', { text: 'The work target is last session’s work moved by the same three things the strength target is moved by — fitness earned in the gap, strength lost to a layoff, and fatigue still owed — because they take capacity off, and capacity is what both scales measure. The only difference is the rate: volume climbs faster than a one-rep max, so the work target uses a multiple of the lift’s own weekly gain rather than a second dial to keep in step with the first.' }),
-        el('p', { text: 'Its colour bands are much wider than the e1RM ones, and chosen for what they have to tell apart: on 3 × 10 at 65 kg, one rung of weight is +3.8%, one more rep is +10% and one more set is +33%. So load reads as the small step it is, a rep as a stretch, and a whole set as the deliberate jump in weekly volume it is. All three are dials in Setup.' }),
-        el('p', { text: 'The grid can be solved either way. For strength it finds the lightest loadable weight whose e1RM meets the strength target; for size, the lightest whose tonnage meets the work one. They are different sums and they give different weights, which is the whole point of having both.' }),
+        el('p', { text: `A set is worth its rep credit times its failure credit. Rep credit is 1 from ${ZONES.hypertrophy.minReps} to ${ZONES.hypertrophy.maxReps} reps, ramping up from zero over the three reps below that and tapering back to zero over the ten above — so a triple is worth nothing, five reps about two thirds, and a set of twenty-five about half. Failure credit is 1 at nought to two reps in reserve and falls away past that.` }),
+        el('p', { text: 'A set logged with no RIR is assumed to have been a normal hard one, so not recording it costs you nothing. Where the per-set log has RIR, each set is credited on its own: a block keeps the lowest RIR of the sets counted onto it, and using that for all of them would credit five sets as though they had all started at the hardest one.' }),
+        el('p', { text: 'Both numbers are heuristics, like the set bonus. The edges of the rep range are genuinely fuzzy and the falloff past two reps in reserve is a judgement, not a measurement. What is not a judgement is that a heavy single is not hypertrophy work, and tonnage said it was.' }),
       ], { open: ctx.numbersOpen }),
     ]),
   );
@@ -443,11 +443,10 @@ function card(stats, ctx, settings) {
  * The same session, read two ways.
  *
  * There is no mode here and nothing is hidden behind a choice: both answers
- * are on the card, always, because they are answers to different questions.
- * The strength one is the lightest load whose e1RM clears the strength target;
- * the size one is the lightest load whose tonnage clears the work target. They
- * are usually different weights, and pretending otherwise is what made this
- * app a strength app that happened to count kilos.
+ * are on the card, always. Both weights come off the same e1RM target, because
+ * working out what you can do for twelve reps is precisely what an e1RM
+ * estimate is for. What differs is the rep range — and, with it, what the set
+ * is worth as a hypertrophy dose.
  *
  * Tapping one adopts it, through exactly the same per-lift override that
  * tapping a grid cell writes — so the hero, the levers and "Log this" all
@@ -466,7 +465,7 @@ function zonePicks(stats, plan, ctx, settings) {
       ? `${pick.sets} × ${pick.reps} reps`
       : `${pick.sets} × ${pick.reps} @ ${fmtWeight(pick.weight)} kg`;
     const sub = zone.key === 'hypertrophy'
-      ? `${fmt(pick.work, 0)} ${repsOnly ? 'reps' : 'kg'} of work`
+      ? (pick.hardSets > 0 ? `${fmt(pick.hardSets, 1)} hard sets` : 'no hypertrophy credit')
       : `scores ${fmt(pick.score, 1)}`;
     const kids = [
       el('span', { class: 'pick-zone', text: zone.label }),
@@ -562,23 +561,24 @@ function detail(stats, plan, ctx, settings) {
       },
     }) : null;
     wrap.append(el('div', { class: 'grid-block' }, [
-      el('div', { class: 'grid-head' }, [el('h3', { text: 'Trade sets against reps' }), bwZoneSeg]),
+      el('div', { class: 'grid-head' }, [el('h3', { text: 'Trade sets against reps' })]),
+      el('div', { class: 'grid-head' }, [el('h3', { text: 'Trade sets against reps' })]),
       el('div', { class: 'grid-scroll' }, [
         el('table', { class: 'grid', 'aria-label': 'Reps needed at each number of sets' }, [
           el('thead', {}, [el('tr', {}, [
             el('th', { class: 'grid-corner', scope: 'col' }, [el('span', { text: 'sets' })]),
-            ...options.map((o) => el('th', { scope: 'col', class: o.isPick ? 'is-col' : '', text: String(o.sets) })),
+            ...plan.options.map((o) => el('th', { scope: 'col', class: o.isPick ? 'is-col' : '', text: String(o.sets) })),
+            ...plan.options.map((o) => el('th', { scope: 'col', class: o.isPick ? 'is-col' : '', text: String(o.sets) })),
           ])]),
           el('tbody', {}, [el('tr', {}, [
             el('th', { scope: 'row', class: 'is-row', text: 'reps' }),
-            ...options.map((o) => el('td', {
+            ...plan.options.map((o) => el('td', {
+            ...plan.options.map((o) => el('td', {
               class: `cell${o.isPick ? ' is-pick' : ''}`, dataset: { band: o.band.key },
             }, [
               el('button', {
                 type: 'button', class: 'cell-btn',
-                'aria-label': `${o.sets} sets of ${o.reps} reps, `
-                  + (bwForSize ? `${fmt(o.work, 0)} reps of work` : `scores ${fmt(o.score, 1)}`)
-                  + `, ${o.band.label}`,
+                'aria-label': `${o.sets} sets of ${o.reps} reps, scores ${fmt(o.score, 1)}, ${o.band.label}`,
                 onclick: () => { tap(); setOv(id, { sets: o.sets, zone: plan.zone }); ctx.refresh(); },
               }, [
                 el('span', { class: 'cell-value', text: String(o.reps) }),
@@ -624,12 +624,10 @@ function detail(stats, plan, ctx, settings) {
 
     wrap.append(el('div', { class: 'grid-block' }, [
       el('div', { class: 'grid-head' }, [el('h3', { text: 'Trade sets against weight' }), seg]),
-      zoneSeg ? el('div', { class: 'grid-zone-row' }, [
-        zoneSeg,
-        el('p', { class: 'grid-note', text: plan.zone === 'hypertrophy'
-          ? `Weights that meet ${fmt(stats.workTarget, 0)} ${repsOnly ? 'reps' : 'kg'} of work. ${ZONES.hypertrophy.hint}`
-          : `Weights that meet an adjusted e1RM of ${fmt(plan.target, 1)}. ${ZONES.strength.hint}` }),
-      ]) : null,
+      el('p', { class: 'grid-note grid-zone-note', text:
+        `Rows are marked by what the rep count is for: ${ZONES.strength.minReps}–${ZONES.strength.maxReps} strength, `
+        + `${ZONES.hypertrophy.minReps}–${ZONES.hypertrophy.maxReps} size. Every weight here meets the same target — `
+        + 'the range is what changes, not the sum.' }),
       gridHost,
       legend(),
     ]));
@@ -653,15 +651,11 @@ function gridFor(mode, stats, plan, ctx, settings) {
   const id = stats.exercise.id;
   const o = ov(id);
   const scores = mode === 'scores';
-  // Same axes either way; a different solve behind every cell.
-  const forSize = plan.zone === 'hypertrophy';
-  const cells = forSize ? plan.workGrid : plan.grid;
-  const unit = isBodyweight(stats.exercise) ? 'reps' : 'kg';
+  const cells = plan.grid;
   const table = el('table', {
     class: 'grid',
-    'aria-label': scores
-      ? (forSize ? 'Work each option comes to' : 'Adjusted e1RM each option scores')
-      : 'Weight to lift for each reps and sets option',
+    'aria-label': scores ? 'Adjusted e1RM each option scores' : 'Weight to lift for each reps and sets option',
+    'aria-label': scores ? 'Adjusted e1RM each option scores' : 'Weight to lift for each reps and sets option',
   });
   const thead = el('thead', {}, [
     el('tr', {}, [
@@ -682,15 +676,14 @@ function gridFor(mode, stats, plan, ctx, settings) {
     tr.append(el('th', { scope: 'row', class: reps === snapReps(plan.reps) ? 'is-row' : '', text: String(reps) }));
     for (const [ci, sets] of SET_COLUMNS.entries()) {
       const cell = cells[ri][ci];
-      const amount = forSize ? cell.work : cell.score;
-      const value = scores ? fmt(amount, forSize ? 0 : 1) : fmtWeight(cell.weight);
+      const value = scores ? fmt(cell.score, 1) : fmtWeight(cell.weight);
       const isPick = reps === snapReps(plan.reps) && sets === plan.sets;
       tr.append(el('td', { class: `cell${isPick ? ' is-pick' : ''}`, dataset: { band: cell.band.key } }, [
         el('button', {
           type: 'button', class: 'cell-btn',
           'aria-label': `${sets} sets of ${reps} reps at ${fmtWeight(cell.weight)} kg, `
-            + (forSize ? `${fmt(cell.work, 0)} ${unit} of work` : `scores ${fmt(cell.score, 1)}`)
-            + `, ${cell.band.label}`,
+            + `scores ${fmt(cell.score, 1)}, ${cell.band.label}`
+            + (cell.hardSets > 0 ? `, ${fmt(cell.hardSets, 1)} hard sets` : ', no hypertrophy credit'),
           onclick: () => { tap(); setOv(id, { reps, sets, zone: plan.zone }); ctx.refresh(); },
         }, [
           el('span', { class: 'cell-value', text: value }),
@@ -702,29 +695,25 @@ function gridFor(mode, stats, plan, ctx, settings) {
   }
   table.append(thead, tbody);
   const note = scores
-    ? (forSize
-      ? 'How much work each option comes to once the weight is rounded up to a loadable step.'
-      : 'What each option actually scores once the weight is rounded up to a loadable step.')
+    ? 'What each option actually scores once the weight is rounded up to a loadable step.'
+    ? 'What each option actually scores once the weight is rounded up to a loadable step.'
     : 'Tap any cell to plan that combination.';
   return el('div', { class: 'grid-scroll' }, [table, el('p', { class: 'grid-note', text: note })]);
 }
 
 function tableView(stats, plan) {
-  const forSize = plan.zone === 'hypertrophy';
-  const cells = forSize ? plan.workGrid : plan.grid;
-  const unit = isBodyweight(stats.exercise) ? 'reps' : 'kg';
-  const rows = cells.map((row) => row.find((c) => c.sets === plan.sets)).filter(Boolean);
+  const rows = plan.grid.map((row) => row.find((c) => c.sets === plan.sets)).filter(Boolean);
+  const rows = plan.grid.map((row) => row.find((c) => c.sets === plan.sets)).filter(Boolean);
   const table = el('table', { class: 'data-table' }, [
-    el('caption', { text: forSize
-      ? `Every rep scheme at ${plan.sets} sets, against ${fmt(plan.workTarget, 0)} ${unit} of work.`
-      : `Every rep scheme at ${plan.sets} sets, against a target of ${fmt(plan.target, 1)} kg.` }),
+    el('caption', { text: `Every rep scheme at ${plan.sets} sets, against a target of ${fmt(plan.target, 1)} kg.` }),
+    el('caption', { text: `Every rep scheme at ${plan.sets} sets, against a target of ${fmt(plan.target, 1)} kg.` }),
     el('thead', {}, [
       el('tr', {}, [
         el('th', { scope: 'col', text: 'Reps' }),
         el('th', { scope: 'col', text: 'Zone' }),
         el('th', { scope: 'col', text: 'Weight' }),
         el('th', { scope: 'col', text: 'Scores' }),
-        el('th', { scope: 'col', text: 'Work' }),
+        el('th', { scope: 'col', text: 'Hard sets' }),
         el('th', { scope: 'col', text: 'Verdict' }),
       ]),
     ]),
@@ -733,7 +722,7 @@ function tableView(stats, plan) {
       el('td', { text: zonesFor(c.reps).map((z) => z.label).join(' / ') || '—' }),
       el('td', { text: `${fmtWeight(c.weight)} kg` }),
       el('td', { text: fmt(c.score, 1) }),
-      el('td', { text: fmt(c.work ?? c.volume, 0) }),
+      el('td', { text: c.hardSets > 0 ? fmt(c.hardSets, 1) : '—' }),
       el('td', {}, [bandChip(c.band)]),
     ]))),
   ]);

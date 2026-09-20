@@ -514,10 +514,12 @@ table.grid td.cell.is-pick { box-shadow: inset 0 0 0 2px var(--series-1); }
 .grid tbody tr[data-zone="both"] th[scope="row"] {
   box-shadow: inset 3px 0 0 var(--series-1), inset 3px 0 0 var(--series-1-deep);
 }
-.grid-zone-row { display: flex; flex-direction: column; gap: var(--space-1); margin-bottom: var(--space-2); }
-.grid-zone-row .segmented { width: 100%; }
-.grid-zone-row .seg { flex: 1; }
-.grid-zone-row .grid-note { margin: 0; }
+/* Ten rows rather than seven: keep the row heads legible while it scrolls. */
+.grid tbody th[scope="row"] { position: sticky; left: 0; background: var(--surface-1); z-index: 1; }
+.grid-zone-note { margin-top: calc(var(--space-1) * -1); margin-bottom: var(--space-2); }
+
+/* What a set is worth as a hypertrophy dose, under the live score. */
+.preview-hard { font-size: var(--text-2xs); color: var(--text-secondary); font-variant-numeric: tabular-nums; }
 
 /* ---------------------------------------------------------------- legend */
 

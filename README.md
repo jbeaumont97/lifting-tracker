@@ -124,9 +124,9 @@ this** and the log form opens pre-filled.
 Tap a card to open it and you get the reps/sets levers, the target and the full
 trade-off grid.
 
-Under every prescription are **two ways to do it** — the best option for
-strength and the best one for size, each priced on its own scale and each one
-tap away. Neither is the recommendation; both are simply there, because "how
+Under every prescription are **two ways to do it** — the option for strength and
+the option for size, the first priced in what it scores and the second in hard
+sets, each one tap away. Neither is the recommendation; both are simply there, because "how
 heavy" and "how much" are different questions. Taking one moves the card onto
 that scale, and **Reset to automatic** puts it back.
 
@@ -195,9 +195,10 @@ the history left to delete it; a toast offers **Undo**.
 
 **Progress** — the Dashboard, with charts. The list gives each lift's current
 adjusted e1RM, its trend and a sparkline; **Table** shows the full Dashboard
-grid, now including each lift's work, its work target and its work trend. Each
-lift's own page carries both trends side by side: getting stronger and doing
-more are different achievements, and a lift can be doing one without the other.
+grid, now including each lift's tonnage and its hard sets for the week. Each
+lift's own page carries its strength trend beside its hard-set count: getting
+stronger and getting enough of the work that grows you are different
+achievements, and a lift can be doing one without the other.
 Personal bests are ringed on the chart and badged in the history. Tap a lift for
 its progression chart: every session, the fitted trend, the projection, and a ring
 marking your next target. Drag across the chart to read any
@@ -205,9 +206,10 @@ session. Below that: weekly sets against your budget, working sets per week over
 the last 8 weeks, and every session as a table.
 
 **Setup** — how much detail to show, the rest timer's target (0 turns it off), your
-lifts (tap one to edit), the maths dials, the three that govern the work scale,
-the fatigue/recovery/detraining model and its six coefficients, light/dark
-theme, and your backups. The welcome tour can
+lifts (tap one to edit), the maths dials, the fatigue/recovery/detraining model
+and its six coefficients, light/dark theme, and your backups. The welcome tour can
+lifts (tap one to edit), the maths dials, the fatigue/recovery/detraining model
+and its six coefficients, light/dark theme, and your backups. The welcome tour can
 be replayed from the bottom of the page.
 
 Each lift has a **starting weight** and a **weight step**, and together they
@@ -230,83 +232,113 @@ Unchanged from the workbook:
 - **Adjusted e1RM** = `e1RM × (1 + k × ln(sets))`, k = 0.05 by default. Extra sets
   earn credit with diminishing returns: 2 sets +3.5%, 3 sets +5.5%, 5 sets +8.0%.
   Set k to 0 to ignore sets entirely.
-- **Volume** = `weight × reps × sets`. Tracked separately because it measures a
-  different thing: 3×8 at 60 kg is 1,440 kg against 1,050 kg for 3×5 at 70 kg,
-  while losing to it on e1RM. Both readings are correct; they answer different
-  questions — and the second question now gets a full answer of its own, below.
-- **Weekly sets** — a plain count of working sets in the last 7 days, because sets
-  per week is the unit training is actually prescribed in. Roughly 10–20 hard sets
-  per muscle per week, spread across every lift that trains it.
+- **Volume** = `weight × reps × sets`. Kept as a readout, because it does say
+  something: 3×8 at 60 kg is 1,440 kg against 1,050 kg for 3×5 at 70 kg, while
+  losing to it on e1RM. What it is no longer asked to do is judge whether a
+  session built muscle — see _The second scale_ below for why it cannot.
+- **Weekly sets** — a plain count of working sets in the last 7 days. Still
+  reported, but the budget is measured in **hard sets** (below), because
+  "10–20 per muscle per week" was never a count of any three reps you happened
+  to do.
 - **Trend** — least-squares fit of adjusted e1RM against date over the lookback
   window (84 days by default), reported in kg/week.
 - **Flat target** = last session's adjusted e1RM × (1 + that lift's weekly gain).
   The planner then finds the lightest loadable weight that meets it — where
   _loadable_ means `starting weight + n × step` for that lift.
 
-### The second scale: work
+### The second scale: hard sets
 
-Everything above measures what you can lift. Nothing above measures how much you
-did, and those are the two things training is for. So **work** is a scale in its
-own right, carried alongside strength rather than instead of it:
+Everything above measures what you can lift. Nothing above measures whether you
+did enough of the kind of work that builds muscle, and those are different
+questions.
 
-- **Work** = `weight × reps × sets`, summed over every block logged that day — or
-  **total reps** on a lift with nothing to load, because adding reps to a kilo
-  total would be adding two different things together. It is what sets of eight
-  to twelve are for, and it is the number that barely moves when you add a plate
-  to a heavy triple.
-- **Work target** = last session's work through the same fatigue, accrual and
-  detraining model the strength target uses. Those three take *capacity* off,
-  and capacity is what both scales measure, so they apply to both. One function
-  computes the multiplier for either, so the two cannot drift apart.
-- **The rate differs, though.** Volume climbs faster than a one-rep max does, so
-  the work target earns `gainPerWeek × 3` a week rather than needing a second
-  per-lift dial kept in step with the first. A lift set to 0.75%/week aims for
-  2.25%/week more work; a beginner at 1.5% aims for 4.5%.
-- **Its bands are much wider** — ideal to +6%, stretch to +15% — and chosen for
-  what they have to tell apart. On 3 × 10 at 65 kg, one rung of weight is +3.8%,
-  one more rep is +10% and one more set is +33%. So load reads as the small step
-  it is, a rep as a stretch, and a whole set as the deliberate jump in weekly
-  volume it is.
-- **Work trend** — the same least-squares fit as the strength trend, over the
-  same window and held to the same standard before it is called reliable.
+The obvious candidate is volume load — `weight × reps × sets` — and it is a bad
+one. It cannot tell these apart:
 
-The grid can be solved either way. For strength it finds the lightest loadable
-weight whose e1RM meets the strength target; for size, the lightest whose tonnage
-meets the work one. Those are different sums and they give different weights,
-which is the entire reason both exist — and why the size pick, when you take it,
-hands back exactly the weight it advertised rather than quietly re-solving.
+| Session            | Tonnage  | Hard sets |
+| ------------------ | -------- | --------- |
+| `1 × 3 @ 926 kg`   | 2,778 kg | **0**     |
+| `5 × 8 @ 71 kg`    | 2,840 kg | **5**     |
+| `1 × 30 @ 92.6 kg` | 2,778 kg | **1**     |
 
-The rep ranges are marked in the grid: 3–6 for strength, 6–12 for size. They
-overlap at six on purpose. Six reps is genuinely both, and a clean line between
-them would be a precision that does not exist — heavy triples build some size,
-and a hard set of ten builds some strength. What differs is which one they are
-efficient at.
+Those are three completely different sessions and one number. Tonnage rewards
+whatever multiplies out largest, which is why it is still in the app as a
+readout and is not asked to judge anything.
 
-Each pick names the scheme its zone is actually about — five reps for strength,
-ten for size — at whatever set count you have, so the two are comparable. Your
-own rep count stands when it is already in range: somebody doing triples does
-not need telling that five is the canonical strength scheme. Neither is a
-search for the smallest step, because on the work scale there isn't one: the
-weight is solved from the target, so every combination meets it and "gentlest"
-only picks out whichever the rounding happened to favour. The **Weight** grid is
-where you trade one against another; `gentlest` still finds the smallest jump on
-the strength side.
+What hypertrophy actually responds to is **hard sets**: sets in a rep range that
+produces the stimulus, taken close enough to failure to have produced it, added
+up over the week. That is also the unit the usual advice is already phrased in —
+10 to 20 per muscle per week — and the unit your per-lift budget in Setup has
+always been set in. It was simply being counted badly.
+
+- **Rep credit** = 1 from **6 to 20 reps**, which is roughly where the evidence
+  sits: taken near failure, sets across that range grow muscle about as well as
+  each other. Below six it ramps down to zero over three reps, so five reps is
+  worth about two thirds of a set and a triple nothing. Above twenty it tapers
+  to zero over ten, so a set of twenty-five is about half.
+- **Failure credit** = 1 at **0–2 reps in reserve**, falling away past that. A
+  set left five in reserve is worth 0.4. A set logged with **no RIR at all is
+  assumed to have been a normal hard one**, so not recording it costs you
+  nothing.
+- **Hard sets** = rep credit × failure credit, summed. Where the per-set log has
+  RIR, each set is credited on its own — a merged block keeps the _lowest_ RIR
+  of the sets counted onto it, and applying that to all of them would credit
+  five sets as though every one had finished as hard as the last.
+- **Weekly budget** — hard sets in the last 7 days against that lift's
+  `setsPerWeek`, with the same ±20% under/on-target/over bands as before.
+
+Both numbers are heuristics, like the set bonus. The edges of the rep range are
+genuinely fuzzy and the falloff past two reps in reserve is a judgement rather
+than a measurement. What is not a judgement is that a heavy single is not
+hypertrophy work, and tonnage said it was.
+
+### One target, two rep ranges
+
+There is no second weight calculation. Working out what you can do for twelve
+reps is exactly what an e1RM estimate is _for_, so both picks on a card come off
+the same target and the same ladder of loadable weights. What differs is the rep
+range:
+
+```
+ 3  ┐
+ 4  │ STRENGTH  3–6
+ 5  │
+ 6  ┴─┐   ← six is genuinely both
+ 8    │
+10    │
+12    │ SIZE  6–20
+14    │
+16    │
+20    ┘
+```
+
+The grid runs to twenty reps now; the spreadsheet stopped at twelve, and a
+hypertrophy range that stops there is not one. The original seven rep schemes
+keep their exact positions, so `npm test` still checks them against the
+workbook's own values cell by cell.
+
+Each pick names the scheme its zone is about — five reps and twelve — at
+whatever set count you have, so the two are comparable. Your own rep count
+stands when it is already in range: somebody doing triples does not need telling
+that five is the canonical strength scheme. Every cell in the grid also carries
+what it is worth as a dose, so `3 × 3 @ 87.5 kg` reads _no hypertrophy credit_
+and `3 × 12 @ 70 kg` reads _3 hard sets_.
 
 There is no mode and no per-lift goal setting. Both picks are on every card,
 always, and taking one is a per-lift override exactly like tapping a grid cell.
 
-Added on top (Setup → *Fatigue, recovery and detraining*, on by default; switch it
+Added on top (Setup → _Fatigue, recovery and detraining_, on by default; switch it
 off and every target falls back to the flat one above):
 
 - **Next target** = `last adj e1RM × retention × (1 + accrual) × (1 − fatigue)`.
   Three separate things move between one session and the next, so they are
   modelled separately:
-  - **Accrual** — the weekly gain, earned *per week of elapsed time* rather than
+  - **Accrual** — the weekly gain, earned _per week of elapsed time_ rather than
     per session. Train a lift twice in a week and each session asks for half of
     it. Rest past the productive window (10 days by default) adds no more.
   - **Fatigue** — `peak × severity × e^(−days / τ)`, peak 6% and τ 1.5 days, so a
     normal hard session costs ~3% the next day and is spent inside three.
-    *Severity* comes from data you already log: sets relative to this lift's usual
+    _Severity_ comes from data you already log: sets relative to this lift's usual
     count, and RIR — eight sets to failure leaves a bigger hole than three easy
     ones. A lift counts as **ready** once the deficit drops under 3%.
   - **Retention** — detraining. Nothing for the first 14 days, then
@@ -387,11 +419,12 @@ the values Excel itself calculated. Nine things are intentionally different:
    It earns its keep twice over — the fatigue model used to measure your sets
    against that same guess, and now measures them against the median of the
    sessions you actually finished.
-9. **Two scales, not one.** The sheet published e1RM and volume and progressed
-   only the first. Volume here has its own target, its own bands and its own
-   trend (section 4), and every card names the best option for each — because a
-   workbook that only knows how heavy you lifted cannot tell you whether you did
-   enough of it.
+9. **Sets are counted for what they are worth.** The sheet counted working sets
+   and compared them to a weekly budget borrowed from hypertrophy advice, which
+   makes a week of heavy triples read as on target. The app counts hard sets
+   instead — in range, near enough to failure — so the budget measures the thing
+   it was always a budget for (section 4). The rep axis runs to twenty for the
+   same reason, and every card names a strength option and a size one.
 
 ---
 
