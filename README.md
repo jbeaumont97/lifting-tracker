@@ -282,6 +282,16 @@ them would be a precision that does not exist — heavy triples build some size,
 and a hard set of ten builds some strength. What differs is which one they are
 efficient at.
 
+Each pick names the scheme its zone is actually about — five reps for strength,
+ten for size — at whatever set count you have, so the two are comparable. Your
+own rep count stands when it is already in range: somebody doing triples does
+not need telling that five is the canonical strength scheme. Neither is a
+search for the smallest step, because on the work scale there isn't one: the
+weight is solved from the target, so every combination meets it and "gentlest"
+only picks out whichever the rounding happened to favour. The **Weight** grid is
+where you trade one against another; `gentlest` still finds the smallest jump on
+the strength side.
+
 There is no mode and no per-lift goal setting. Both picks are on every card,
 always, and taking one is a per-lift override exactly like tapping a grid cell.
 
