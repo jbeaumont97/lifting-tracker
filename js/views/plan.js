@@ -27,6 +27,7 @@ import {
   readinessMaths,
   READY_AT,
   isBodyweight,
+  describeSet,
   REP_SCHEMES,
   SET_COLUMNS,
 } from '../metrics.js';
@@ -93,18 +94,26 @@ export function renderPlan(ctx) {
   root.append(sessionStrip(ctx, trained));
 
   // --- who is ready, stalest first ---
-  const ready = trained
+  // A lift you have called done today is not a question any more, so it leaves
+  // the readiness order entirely rather than sitting in "still recovering"
+  // looking like something you have yet to get to.
+  // Every lift, not just the trained ones: a lift with nothing logged can still
+  // be called done, and it has to land in a group or it leaves the screen.
+  const finishedToday = stats.filter((s) => s.doneToday);
+  const outstanding = trained.filter((s) => !s.doneToday);
+  const ready = outstanding
     .filter(isReady)
     .sort((a, b) => (b.daysSince ?? 0) - (a.daysSince ?? 0));
-  const resting = trained
+  const resting = outstanding
     .filter((s) => !isReady(s))
     .sort((a, b) => (a.daysSince ?? 0) - (b.daysSince ?? 0));
-  const unlogged = stats.filter((s) => !s.entryCount);
+  const unlogged = stats.filter((s) => !s.entryCount && !s.doneToday);
 
   // The top of the readiness order opens itself: a home screen should show you
   // a weight, not four collapsed rows. Driven off the unfiltered order, so
   // typing in the search box never changes which card opened on first load.
   if (openId() === undefined) setOpenId((ready[0] || resting[0])?.exercise.id ?? null);
+
 
   const allTags = [...new Set(stats.flatMap((s) => s.exercise.tags || []))].sort((a, b) => a.localeCompare(b));
 
@@ -123,6 +132,7 @@ export function renderPlan(ctx) {
       { title: 'Ready now', rows: ready.filter(match), hint: 'Recovered from the last session — stalest first.' },
       { title: 'Still recovering', rows: resting.filter(match), hint: 'Trained recently enough that a hard session would be uphill. The plans below are held back to match.' },
       { title: 'Not logged yet', rows: unlogged.filter(match), hint: null },
+      { title: 'Done today', rows: finishedToday.filter(match), hint: 'Finished. Nothing here needs doing again today.' },
     ];
     const nodes = [];
     for (const group of groups) {
@@ -197,15 +207,19 @@ function sessionStrip(ctx, trained) {
   const { stats, today } = ctx;
   const lastDate = trained.map((s) => s.lastDate).sort().pop();
   const sets7 = stats.reduce((n, s) => n + s.sets7, 0);
-  const readyCount = trained.filter(isReady).length;
+  const doneCount = stats.filter((s) => s.doneToday).length;
+  const readyCount = trained.filter((s) => !s.doneToday && isReady(s)).length;
+  const sep = () => el('span', { class: 'day-strip-sep', 'aria-hidden': 'true', text: '·' });
   return el('div', { class: 'day-strip' }, [
     el('span', { class: 'day-strip-day', text: weekdayName(today) }),
-    el('span', { class: 'day-strip-sep', 'aria-hidden': 'true', text: '·' }),
+    sep(),
     el('span', { class: 'day-strip-fact', text: lastDate ? `last trained ${relativeDate(lastDate).toLowerCase()}` : 'nothing logged yet' }),
-    el('span', { class: 'day-strip-sep', 'aria-hidden': 'true', text: '·' }),
+    sep(),
     el('span', { class: 'day-strip-fact', text: `${sets7} set${sets7 === 1 ? '' : 's'} this week` }),
-    el('span', { class: 'day-strip-sep', 'aria-hidden': 'true', text: '·' }),
+    sep(),
     el('span', { class: 'day-strip-fact', text: `${readyCount} ready` }),
+    doneCount ? sep() : null,
+    doneCount ? el('span', { class: 'day-strip-fact is-done', text: `${doneCount} done today` }) : null,
   ]);
 }
 
@@ -237,6 +251,41 @@ function card(stats, ctx, settings) {
   ]);
 
   const body = el('div', { class: 'card-body' });
+
+  // A lift you have finished is answering a different question: not "what do I
+  // do today" but "what did I do". The plan is still there, one disclosure
+  // away, for when today turns out not to be over after all.
+  if (stats.doneToday) {
+    const todays = stats.sessions.find((x) => x.date === ctx.today);
+    const bits = [];
+    if (todays) {
+      bits.push(`${todays.sets} set${todays.sets === 1 ? '' : 's'}`);
+      bits.push(describeSet(stats.exercise, todays.sets, todays.best.reps, todays.best.weight));
+      if (todays.volume > 0) bits.push(`${fmt(todays.volume, 0)} kg of work`);
+    }
+    body.append(el('p', { class: 'presc-explain done-line' }, [
+      el('span', { class: 'summary-tick', 'aria-hidden': 'true', text: '✓' }),
+      el('span', { text: bits.length ? bits.join(' · ') : 'Called done for today.' }),
+    ]));
+    if (isOpen) {
+      body.append(disclose(plan && plan.ready ? 'Today’s plan, if you go back to it' : 'Changed your mind?', [
+        plan && plan.ready
+          ? el('p', { class: 'card-note', text: describeSet(stats.exercise, plan.sets, plan.reps, plan.weight) })
+          : null,
+        el('button', {
+          type: 'button', class: 'btn btn-ghost btn-block btn-sm',
+          onclick: () => {
+            store.clearDone(id, ctx.today);
+            ctx.refresh({ transition: true });
+            toast(`${stats.exercise.name} is open again.`, {
+              action: () => { store.undo(); ctx.refresh(); }, actionLabel: 'Undo',
+            });
+          },
+        }, ['Not done after all']),
+      ], { open: false }));
+    }
+    return el('article', { class: `card is-finished${isOpen ? ' is-open' : ''}`, style: `view-transition-name: card-${cssName(id)}` }, [head, body]);
+  }
 
   if (!plan || !plan.ready) {
     // A lift whose every session was logged with no weight has no score to
@@ -579,6 +628,7 @@ function targetSub(stats, plan) {
 
 /** The phase badge on the card head. Silent when a lift is simply ready. */
 function readinessChip(stats) {
+  if (stats.doneToday) return el('span', { class: 'stale-chip is-done', text: 'done today' });
   const r = stats.readiness;
   if (!r || !r.enabled || r.days === null) {
     return (stats.daysSince ?? 0) >= STALE_DAYS

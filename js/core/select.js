@@ -73,8 +73,11 @@ function build(c, exercise, settings) {
   if (hit) return hit;
   // exerciseStats filters by exerciseId itself, so handing it the pre-filtered
   // bucket produces exactly the same object it would have produced from the
-  // whole log — the filter simply has nothing left to remove.
-  const st = exerciseStats(exercise, index(c).get(exercise.id) || [], settings, c.today);
+  // whole log — the filter simply has nothing left to remove. The done markers
+  // come from the store here rather than from metrics, which knows no storage;
+  // marking one goes through commit(), so getVersion() has already rotated the
+  // cache by the time anything reads this.
+  const st = exerciseStats(exercise, index(c).get(exercise.id) || [], settings, c.today, store.doneDatesFor(exercise.id));
   c.stats.set(exercise.id, st);
   return st;
 }

@@ -1020,20 +1020,77 @@ const motion2 = await import('../js/core/motion.js');
   ok('the climb is consumed, not repeated', uistate.get('log.scoreFrom', null) === null);
 }
 
-// --- what the lift just did, once the plan is done ---
+// --- what the lift just did, once YOU say it is done ---
 {
   reset();
   const ex = store.getExercises()[0];
   for (let i = 0; i < 3; i++) store.logSet({ exerciseId: ex.id, date: TODAY, weight: 100, reps: 5, rir: 2 });
   select.invalidate();
   setPrefill({ exerciseId: ex.id, date: TODAY, weight: 100, reps: 5, sets: 3, mode: 'sets' });
+
+  const planned = renderLog(ctx({ route: 'log' }));
+  ok('hitting the planned count does not call the lift done by itself',
+    planned.querySelector('.session-summary') === null);
+  const btn = planned.querySelector('.done-btn');
+  ok('it offers the decision instead', !!btn && /Done with this lift/.test(btn.textContent));
+
+  btn.click();
+  select.invalidate();
   const view = renderLog(ctx({ route: 'log' }));
 
+  ok('the store now holds the marker', store.isDone(ex.id, TODAY) === true);
   const sum = view.querySelector('.session-summary');
-  ok('finishing the plan puts a summary on the screen', !!sum);
+  ok('saying so puts a summary on the screen', !!sum);
   ok('it counts the sets', /3 sets/.test(sum.textContent), sum.textContent);
   ok('it says what was moved', /kg moved/.test(sum.textContent), sum.textContent);
   ok('and it names the lift', sum.textContent.includes(ex.name));
+  ok('the tracker reads as complete', !!view.querySelector('.set-track.is-complete'));
+  ok('and the button offers the way back',
+    /Not done after all/.test(view.querySelector('.done-btn').textContent));
+
+  view.querySelector('.done-btn').click();
+  select.invalidate();
+  const reopened = renderLog(ctx({ route: 'log' }));
+  ok('taking it back reopens the lift', store.isDone(ex.id, TODAY) === false);
+  ok('and the summary goes with it', reopened.querySelector('.session-summary') === null);
+}
+
+// --- stopping short of the plan is still a finished lift ---
+{
+  reset();
+  const ex = store.getExercises()[0];
+  store.logSet({ exerciseId: ex.id, date: TODAY, weight: 100, reps: 5, rir: 2 });
+  select.invalidate();
+  setPrefill({ exerciseId: ex.id, date: TODAY, weight: 100, reps: 5, sets: 5, mode: 'sets' });
+
+  const view = renderLog(ctx({ route: 'log' }));
+  ok('one set of a planned five can still be called done', !!view.querySelector('.done-btn'));
+  view.querySelector('.done-btn').click();
+  select.invalidate();
+
+  const after = renderLog(ctx({ route: 'log' }));
+  ok('and it is', after.querySelector('.session-summary') !== null);
+  ok('the count says what happened, not what was planned',
+    /1 set — done/.test(after.querySelector('.set-track-label').textContent),
+    after.querySelector('.set-track-label').textContent);
+}
+
+// --- a day written up afterwards can be called done too ---
+{
+  reset();
+  const ex = store.getExercises()[0];
+  const earlier = '2026-08-16';
+  store.addEntry({ exerciseId: ex.id, date: earlier, weight: 100, reps: 5, sets: 3 });
+  select.invalidate();
+  setPrefill({ exerciseId: ex.id, date: earlier, weight: 100, reps: 5, sets: 3, mode: 'bulk' });
+
+  const view = renderLog(ctx({ route: 'log' }));
+  const btn = view.querySelector('.done-btn');
+  ok('bulk mode offers the marker as well', !!btn);
+  btn.click();
+  select.invalidate();
+  ok('and it takes', store.isDone(ex.id, earlier) === true);
+  ok('the summary follows', renderLog(ctx({ route: 'log' })).querySelector('.session-summary') !== null);
 }
 
 // --- everything decorative stands down when asked ---
@@ -1572,6 +1629,66 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
   }
   ok('the stylesheet is precached', listed.has('./css/app.css'));
   ok('the shell is versioned', /const CACHE = 'lifting-tracker-v\d+'/.test(sw));
+}
+
+/* ------------------------------------- 6n. a lift you have called done */
+
+// --- it leaves the readiness order and says what it did instead ---
+{
+  reset();
+  const ex = store.getExercises()[0];
+  store.logSet({ exerciseId: ex.id, date: TODAY, weight: 100, reps: 5 });
+  select.invalidate();
+
+  const before = renderPlan(ctx({ route: 'plan' }));
+  ok('before it is finished, the screen has no such group',
+    !/Done today/.test(before.textContent));
+
+  store.markDone(ex.id, TODAY);
+  select.invalidate();
+  const view = renderPlan(ctx({ route: 'plan' }));
+
+  ok('a finished lift gets its own group', /Done today/.test(view.textContent));
+  const chip = view.querySelectorAll('.stale-chip').find((n) => /done today/.test(n.textContent));
+  ok('and a chip saying so', !!chip);
+  ok('the card is marked finished', !!view.querySelector('.card.is-finished'));
+  ok('it leads with what the lift did, not what to do',
+    !!view.querySelector('.done-line') && /set/.test(view.querySelector('.done-line').textContent),
+    view.querySelector('.done-line')?.textContent);
+  ok('the day strip counts it', /1 done today/.test(view.textContent));
+
+  store.clearDone(ex.id, TODAY);
+  select.invalidate();
+  const reopened = renderPlan(ctx({ route: 'plan' }));
+  ok('reopening puts it back in the order', !/Done today/.test(reopened.textContent));
+  ok('and the prescription comes back', !!reopened.querySelector('.presc'));
+}
+
+// --- a lift with nothing logged at all can still be called done ---
+// It belongs to no readiness group and has no session to describe, which is
+// exactly how it used to fall through every filter and leave the screen.
+{
+  reset();
+  const blank = store.addExercise({ name: 'Calf Raise' });
+  store.markDone(blank.id, TODAY);
+  select.invalidate();
+  const view = renderPlan(ctx({ route: 'plan' }));
+
+  ok('it is still on the screen', view.textContent.includes('Calf Raise'));
+  ok('in the finished group', /Done today/.test(view.textContent));
+  ok('and says so plainly, with no session to report',
+    /Called done for today/.test(view.textContent));
+}
+
+// --- a lift trained today but not finished stays in the order ---
+{
+  reset();
+  const ex = store.getExercises()[0];
+  store.logSet({ exerciseId: ex.id, date: TODAY, weight: 100, reps: 5 });
+  select.invalidate();
+  const view = renderPlan(ctx({ route: 'plan' }));
+  ok('logging alone never calls a lift done', !/Done today/.test(view.textContent));
+  ok('and it still carries a prescription', !!view.querySelector('.presc'));
 }
 
 /* ------------------------------------------------------------------ report */

@@ -133,6 +133,7 @@ export function renderLog(ctx) {
   for (const ex of exercises) {
     const selected = ex.id === form.exerciseId;
     const done = store.entriesOn(ex.id, form.date).reduce((n, e) => n + setCount(e), 0);
+    const finished = store.isDone(ex.id, form.date);
     picker.append(el('button', {
       type: 'button', class: `chip chip-lift${selected ? ' is-selected' : ''}`, role: 'radio',
       'aria-checked': selected ? 'true' : 'false',
@@ -140,8 +141,10 @@ export function renderLog(ctx) {
     }, [
       accentDot(ex.id),
       el('span', { text: ex.name }),
-      // What you have already done today, so the picker doubles as a checklist.
-      done ? el('span', { class: 'chip-done', text: `${done}` }) : null,
+      // What you have already done today, so the picker doubles as a checklist —
+      // a tick once the lift is finished, a running count until then.
+      finished ? el('span', { class: 'chip-done', 'aria-label': 'done', text: '✓' })
+        : done ? el('span', { class: 'chip-done', text: `${done}` }) : null,
     ]));
   }
   root.append(el('div', { class: 'field-block' }, [
@@ -199,7 +202,7 @@ function sessionRail(ctx) {
       : (Number(ex.setsPerSession) > 0 ? Math.round(Number(ex.setsPerSession)) : 0);
     const started = sessionSets(entries).find((x) => x.measured);
     rows.push({
-      ex, done, target,
+      ex, done, target, finished: store.isDone(id, date),
       startedAt: started ? started.at : Infinity,
       seq: entries.length ? Math.min(...entries.map((e) => e.seq || 0)) : Infinity,
     });
@@ -209,21 +212,33 @@ function sessionRail(ctx) {
 
   const totalDone = rows.reduce((n, r) => n + r.done, 0);
   const totalTarget = rows.reduce((n, r) => n + r.target, 0);
-  const complete = totalTarget > 0 && totalDone >= totalTarget;
+  // Once anything has been called done, the session is counted in lifts rather
+  // than in sets: "two of three lifts" is the question you are actually asking
+  // between exercises, and sets are the wrong unit to add up across them.
+  const started = rows.filter((r) => r.done > 0);
+  const finishedCount = started.filter((r) => r.finished).length;
+  const anyFinished = finishedCount > 0;
+  const complete = started.length > 0 && finishedCount === started.length;
 
   const track = el('div', { class: 'rail-track', role: 'tablist', 'aria-label': 'Lifts in this session' });
   for (const r of rows) {
     const id = r.ex.id;
     const isCurrent = id === form.exerciseId;
-    const filled = r.target > 0 ? Math.min(100, (r.done / r.target) * 100) : (r.done ? 100 : 0);
+    const filled = r.finished ? 100 : r.target > 0 ? Math.min(100, (r.done / r.target) * 100) : (r.done ? 100 : 0);
     track.append(el('button', {
       type: 'button', role: 'tab',
-      class: `rail-seg${isCurrent ? ' is-current' : ''}${r.target && r.done >= r.target ? ' is-complete' : ''}`,
+      class: `rail-seg${isCurrent ? ' is-current' : ''}${r.finished ? ' is-complete' : ''}`,
       'aria-selected': isCurrent ? 'true' : 'false',
       onclick: () => { tap(); setPrefill({ exerciseId: id, date: form.date, mode: form.mode }); ctx.refresh({ transition: true }); },
     }, [
-      el('span', { class: 'rail-seg-name' }, [accentDot(id), el('span', { text: r.ex.name })]),
-      el('span', { class: 'rail-seg-count', text: r.target ? `${r.done} of ${r.target} sets` : `${r.done} set${r.done === 1 ? '' : 's'}` }),
+      el('span', { class: 'rail-seg-name' }, [
+        accentDot(id),
+        el('span', { text: r.ex.name }),
+        r.finished ? el('span', { class: 'chip-done rail-seg-tick', 'aria-label': 'done', text: '✓' }) : null,
+      ]),
+      el('span', { class: 'rail-seg-count', text: r.finished ? `${r.done} set${r.done === 1 ? '' : 's'} — done`
+        : r.target ? `${r.done} of ${r.target} sets`
+        : `${r.done} set${r.done === 1 ? '' : 's'}` }),
       el('div', { class: 'rail-seg-bar', 'aria-hidden': 'true' }, [
         el('span', { class: 'rail-seg-fill', style: `width:${filled}%` }),
       ]),
@@ -242,7 +257,18 @@ function sessionRail(ctx) {
       el('span', { class: 'rail-title', text: date === isoToday() ? 'This session' : formatDate(date) }),
       facts.length ? el('span', { class: 'rail-sub', text: facts.join(' · ') }) : null,
     ]),
-    totalTarget > 0 ? el('div', { class: `rail-total${complete ? ' is-complete' : ''}` }, [
+    anyFinished ? el('div', { class: `rail-total${complete ? ' is-complete' : ''}` }, [
+      el('div', {
+        class: 'rail-total-track', role: 'meter',
+        'aria-valuenow': finishedCount, 'aria-valuemin': '0', 'aria-valuemax': started.length,
+        'aria-label': 'Lifts finished in this session',
+      }, [
+        el('span', { class: 'rail-total-fill', style: `width:${Math.min(100, (finishedCount / started.length) * 100)}%` }),
+      ]),
+      el('span', { class: 'rail-total-value', text: complete
+        ? `Session done · ${totalDone} set${totalDone === 1 ? '' : 's'}`
+        : `${finishedCount} of ${started.length} lift${started.length === 1 ? '' : 's'} done` }),
+    ]) : totalTarget > 0 ? el('div', { class: 'rail-total' }, [
       el('div', {
         class: 'rail-total-track', role: 'meter',
         'aria-valuenow': totalDone, 'aria-valuemin': '0', 'aria-valuemax': totalTarget,
@@ -250,7 +276,7 @@ function sessionRail(ctx) {
       }, [
         el('span', { class: 'rail-total-fill', style: `width:${Math.min(100, (totalDone / totalTarget) * 100)}%` }),
       ]),
-      el('span', { class: 'rail-total-value', text: complete ? `${totalDone} sets — done` : `${totalDone} of ${totalTarget} sets` }),
+      el('span', { class: 'rail-total-value', text: `${totalDone} of ${totalTarget} sets` }),
     ]) : null,
     track,
   ]);
@@ -290,7 +316,11 @@ function entryForm(st, ctx, settings) {
   if (form.sets == null) form.sets = plan?.ready ? plan.sets : last?.sets ?? 3;
 
   const target = Number(form.sets) > 0 ? Math.round(Number(form.sets)) : 0;
-  const complete = live && target > 0 && doneSoFar >= target;
+  // Finished is something you say, not something the set count works out. The
+  // planned number is still worth showing — "set 4 of 5" tells you where you
+  // are — but it decides nothing now: stopping at four is not a lift left
+  // hanging, and a sixth is not a session that never ended.
+  const finished = store.isDone(ex.id, form.date);
 
   // A personal best has to beat the sessions that came BEFORE today. Measured
   // against everything, adding a fourth set to today's block would "beat" the
@@ -406,7 +436,7 @@ function entryForm(st, ctx, settings) {
     const w = fmtWeight(form.weight), r = Math.round(Number(form.reps)) || '', s = Math.round(Number(form.sets)) || '';
     const at = repsOnly ? `${r} reps` : `${r} @ ${w} ${settings.unit}`;
     primary.textContent = live
-      ? (complete ? `Log another set — ${at}`
+      ? (finished || (target && doneSoFar >= target) ? `Log another set — ${at}`
         : `Log set ${doneSoFar + 1}${target ? ` of ${target}` : ''} — ${at}`)
       : (repsOnly ? `Save ${s} × ${r} reps` : `Save ${s} × ${r} @ ${w} ${settings.unit}`);
   };
@@ -446,7 +476,11 @@ function entryForm(st, ctx, settings) {
     ]) : null,
     repsOnly ? null : el('div', { class: 'lever-row lever-row-wide' }, [weightStep]),
     el('div', { class: 'lever-row' }, [repsStep, setsStep]),
-    live ? tracker(traceFig, doneSoFar, target, complete, ex, ctx) : null,
+    live ? tracker(traceFig, doneSoFar, target, finished, ex, ctx)
+      : doneSoFar ? el('div', { class: `set-track${finished ? ' is-complete' : ''}` }, [
+        finished ? summary(doneSoFar, ex, ctx) : null,
+        doneControl(finished, ex, ctx),
+      ]) : null,
     preview,
     el('div', { class: 'field-block' }, [
       el('span', { class: 'field-label', text: live
@@ -508,11 +542,12 @@ function volSoFarAfter(entries) {
  * how long you actually rested — none of which was recordable before the
  * per-set log.
  */
-function tracker(traceFig, doneSoFar, target, complete, ex, ctx) {
-  return el('div', { class: `set-track${complete ? ' is-complete' : ''}` }, [
+function tracker(traceFig, doneSoFar, target, finished, ex, ctx) {
+  return el('div', { class: `set-track${finished ? ' is-complete' : ''}` }, [
     el('div', { class: 'set-track-head' }, [
-      el('span', { class: 'set-track-label', text: !target ? `Set ${doneSoFar + 1}`
-        : complete ? `${doneSoFar} of ${target} sets done`
+      el('span', { class: 'set-track-label', text: finished ? `${doneSoFar} set${doneSoFar === 1 ? '' : 's'} — done`
+        : !target ? `Set ${doneSoFar + 1}`
+        : doneSoFar >= target ? `${doneSoFar} of ${target} sets`
         : `Set ${doneSoFar + 1} of ${target}` }),
       doneSoFar ? el('button', {
         type: 'button', class: 'link-btn',
@@ -528,8 +563,33 @@ function tracker(traceFig, doneSoFar, target, complete, ex, ctx) {
       }, ['Undo last set']) : null,
     ]),
     traceFig,
-    complete ? summary(doneSoFar, ex, ctx) : null,
+    finished ? summary(doneSoFar, ex, ctx) : null,
+    doneSoFar ? doneControl(finished, ex, ctx) : null,
   ]);
+}
+
+/**
+ * The one thing that says a lift is finished.
+ *
+ * It is a button rather than a threshold because only you know: four of a
+ * planned five can be the session you meant to have, and a sixth can be the
+ * one that mattered. Marking it stops the rest clock — you are not between
+ * sets any more — and nothing about the log itself moves, so logging another
+ * set afterwards simply changes what the marker is true of.
+ */
+function doneControl(finished, ex, ctx) {
+  return el('button', {
+    type: 'button', class: `btn btn-ghost btn-block btn-sm done-btn${finished ? ' is-done' : ''}`,
+    onclick: () => {
+      const nowDone = store.toggleDone(ex.id, form.date);
+      tap();
+      if (nowDone) stopRest();
+      ctx.refresh({ transition: true });
+      toast(nowDone ? `${ex.name} done for the day.` : `${ex.name} is open again.`, {
+        action: () => { store.undo(); ctx.refresh(); }, actionLabel: 'Undo',
+      });
+    },
+  }, [finished ? 'Not done after all' : 'Done with this lift']);
 }
 
 /**
@@ -603,24 +663,30 @@ function logOneSet(st, ctx, settings) {
     toast(`🏆 New best for ${st.exercise.name} — ${fmt(adj, 1)}`);
   }
 
-  // Only the set that finishes the plan ends the session. Carrying on past it
-  // is a decision to keep training, so the clock comes back.
-  if (target && doneAfter === target) {
-    stopRest();
+  // Reaching the count you planned is worth saying — and it is not the same as
+  // being finished, so it offers rather than decides. The clock keeps running
+  // either way: until you say you are done, you are still between sets.
+  // Past the plan there is no "of five" to count towards any more.
+  const ofTarget = target && doneAfter + 1 <= target ? ` of ${target}` : '';
+  startRest(settings.restSeconds, {
+    label: `${st.exercise.name} · set ${doneAfter + 1}${ofTarget} next`,
+    // What this lift has actually been getting today, rather than the setting.
+    usual: typicalRest(sessionSets(after)),
+  });
+
+  if (target && doneAfter === target && !store.isDone(form.exerciseId, form.date)) {
     const spent = sessionDuration(sessionSets(after));
+    const repsOnlyLift = isBodyweight(st.exercise);
     const bits = [`${doneAfter} set${doneAfter === 1 ? '' : 's'}`];
     if (spent !== null && spent >= 60) bits.push(`${Math.round(spent / 60)} min`);
-    bits.push(`${fmt(volSoFarAfter(after), 0)} kg`);
-    toast(`${st.exercise.name} done · ${bits.join(' · ')}`, {
-      action: () => { store.undo(); setLastSetId(null); ctx.refresh(); }, actionLabel: 'Undo',
-    });
-  } else {
-    // Past the plan there is no "of five" to count towards any more.
-    const ofTarget = target && doneAfter + 1 <= target ? ` of ${target}` : '';
-    startRest(settings.restSeconds, {
-      label: `${st.exercise.name} · set ${doneAfter + 1}${ofTarget} next`,
-      // What this lift has actually been getting today, rather than the setting.
-      usual: typicalRest(sessionSets(after)),
+    bits.push(repsOnlyLift
+      ? `${fmt(after.reduce((n, e) => n + e.reps * setCount(e), 0), 0)} reps`
+      : `${fmt(volSoFarAfter(after), 0)} kg`);
+    const id = form.exerciseId;
+    const date = form.date;
+    toast(`That is the ${target} you planned · ${bits.join(' · ')}`, {
+      action: () => { store.markDone(id, date); stopRest(); ctx.refresh({ transition: true }); },
+      actionLabel: 'Done',
     });
   }
   ctx.refresh();
