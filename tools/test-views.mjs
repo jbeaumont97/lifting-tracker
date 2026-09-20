@@ -1691,6 +1691,104 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
   ok('and it still carries a prescription', !!view.querySelector('.presc'));
 }
 
+/* ----------------------------------- 6o. strength and size, side by side */
+
+// --- both answers are on the card, and neither is hidden behind a choice ---
+{
+  reset();
+  const ex = store.getExercises()[0];
+  uistate.set('plan.openId', ex.id);
+  select.invalidate();
+  const card = renderPlan(ctx({ route: 'plan' })).querySelector('.card.is-open');
+
+  const picks = card.querySelector('.picks');
+  ok('the card names both ways of doing it', !!picks);
+  ok('it labels them', /Strength/.test(picks.textContent) && /Size/.test(picks.textContent));
+  const rows = card.querySelectorAll('.pick');
+  ok('one row each', rows.length === 2, String(rows.length));
+  ok('exactly one is marked as today', rows.filter((r) => /is-current/.test(r.className)).length === 1);
+  ok('and the other is a button you can take', rows.some((r) => r.localName === 'button'));
+  ok('the size row is priced in work', /of work/.test(picks.textContent), picks.textContent);
+}
+
+// --- taking the size pick moves the whole card onto the work scale ---
+{
+  reset();
+  const ex = store.getExercises()[0];
+  uistate.set('plan.openId', ex.id);
+  select.invalidate();
+
+  const before = renderPlan(ctx({ route: 'plan' })).querySelector('.card.is-open');
+  const sizeRow = before.querySelectorAll('.pick').find((r) => r.dataset.zone === 'hypertrophy');
+  ok('the size row starts out as the one on offer', sizeRow.localName === 'button');
+  const offered = sizeRow.querySelector('.pick-value').textContent;
+
+  sizeRow.click();
+  select.invalidate();
+  const after = renderPlan(ctx({ route: 'plan' })).querySelector('.card.is-open');
+
+  const o = uistate.forExercise('plan.overrides', ex.id, {});
+  ok('it writes the zone through to the override', o.zone === 'hypertrophy', JSON.stringify(o));
+  const nowCurrent = after.querySelectorAll('.pick').find((r) => /is-current/.test(r.className));
+  ok('the size row is now the current one', nowCurrent.dataset.zone === 'hypertrophy');
+  ok('and it advertises what it delivered',
+    nowCurrent.querySelector('.pick-value').textContent === offered,
+    `${nowCurrent.querySelector('.pick-value').textContent} vs ${offered}`);
+
+  // The hero is built from pieces, so compare on the spoken form, which the
+  // card writes out in full for exactly this reason.
+  const spoken = after.querySelector('.presc .visually-hidden').textContent;
+  const m = /(\d+) sets of (\d+) reps at ([\d.]+)/.exec(spoken);
+  ok('the hero is now the size prescription', !!m, spoken);
+  ok('with the reps the size pick offered', `${m[1]} × ${m[2]}` === offered.split(' @')[0], `${m[1]} × ${m[2]} vs ${offered}`);
+  ok('and the weight it offered', offered.includes(m[3]), `${m[3]} not in ${offered}`);
+}
+
+// --- the grid can be solved either way, and says which ---
+{
+  reset();
+  const ex = store.getExercises()[0];
+  uistate.set('plan.openId', ex.id);
+  select.invalidate();
+  const view = renderPlan(ctx({ route: 'plan' })).querySelector('.card.is-open');
+
+  const zoneSeg = view.querySelectorAll('.segmented').find((n) => /Strength/.test(n.textContent) && /Size/.test(n.textContent));
+  ok('the grid offers both scales', !!zoneSeg);
+
+  const strengthWeights = view.querySelectorAll('.cell-value').map((n) => n.textContent).join();
+  const rows = view.querySelectorAll('.grid tbody tr');
+  ok('every rep row declares its zone', rows.every((r) => !!r.dataset.zone), rows.map((r) => r.dataset.zone).join());
+  ok('three reps is strength', rows[0].dataset.zone === 'strength');
+  ok('six reps is both', rows[3].dataset.zone === 'both', rows[3].dataset.zone);
+  ok('ten reps is size', rows[5].dataset.zone === 'hypertrophy', rows[5].dataset.zone);
+
+  zoneSeg.querySelectorAll('.seg').find((b) => /Size/.test(b.textContent)).click();
+  select.invalidate();
+  const sized = renderPlan(ctx({ route: 'plan' })).querySelector('.card.is-open');
+  const sizeWeights = sized.querySelectorAll('.cell-value').map((n) => n.textContent).join();
+  ok('solving for size gives different weights', sizeWeights !== strengthWeights);
+  ok('and the note says what it is solving for',
+    /of work/.test(sized.querySelector('.grid-zone-row').textContent),
+    sized.querySelector('.grid-zone-row').textContent);
+}
+
+// --- resetting to automatic puts the strength scale back ---
+{
+  reset();
+  const ex = store.getExercises()[0];
+  uistate.set('plan.openId', ex.id);
+  uistate.setForExercise('plan.overrides', ex.id, { reps: 10, sets: 3, zone: 'hypertrophy' });
+  select.invalidate();
+
+  const view = renderPlan(ctx({ route: 'plan' })).querySelector('.card.is-open');
+  const reset1 = view.querySelectorAll('button').find((b) => /Reset to automatic/.test(b.textContent));
+  ok('a zone override is enough to offer the way back', !!reset1);
+  reset1.click();
+  ok('and it clears the zone with everything else',
+    uistate.forExercise('plan.overrides', ex.id, {}).zone === undefined,
+    JSON.stringify(uistate.forExercise('plan.overrides', ex.id, {})));
+}
+
 /* ------------------------------------------------------------------ report */
 
 stopRest({ quiet: true });

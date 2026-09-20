@@ -131,6 +131,21 @@ export function renderSetup(ctx) {
       stepper({ label: 'Default gain (%/week)', value: s.defaultGainPerWeek * 100, step: 0.05, min: 0, max: 5, dp: 2, id: 'set-gain',
         onChange: (v) => { store.updateSettings({ defaultGainPerWeek: v / 100 }); ctx.refresh(); } }),
     ]),
+    el('div', { class: 'field-block' }, [
+      el('span', { class: 'field-label', text: 'The work scale' }),
+      el('div', { class: 'lever-row' }, [
+        stepper({ label: 'Work climbs faster by', value: s.workGainMultiple, step: 0.5, min: 1, max: 10, dp: 1, suffix: '×', id: 'set-work-mult',
+          onChange: (v) => { store.updateSettings({ workGainMultiple: v }); ctx.refresh(); } }),
+      ]),
+      el('p', { class: 'field-hint', text: `How much you do climbs faster than how much you can lift, so the work target is this multiple of each lift’s own weekly gain. At ${s.workGainMultiple}×, a lift set to ${pct2(s.defaultGainPerWeek)}/week aims for ${pct2(s.defaultGainPerWeek * s.workGainMultiple)}/week more work.` }),
+      el('div', { class: 'lever-row' }, [
+        stepper({ label: 'Work ideal band (%)', value: s.workIdealBand * 100, step: 1, min: 0, max: 40, dp: 0, id: 'set-work-ideal',
+          onChange: (v) => { store.updateSettings({ workIdealBand: v / 100 }); ctx.refresh(); } }),
+        stepper({ label: 'Work stretch band (%)', value: s.workStretchBand * 100, step: 1, min: 0, max: 60, dp: 0, id: 'set-work-stretch',
+          onChange: (v) => { store.updateSettings({ workStretchBand: v / 100 }); ctx.refresh(); } }),
+      ]),
+      el('p', { class: 'field-hint', text: 'Much wider than the e1RM bands above, because the steps are much bigger: on 3 × 10 at 65 kg, one rung of weight is +3.8%, one more rep is +10% and one more set is +33%. These are where those land.' }),
+    ]),
   ]);
 
   /* --------------------------------- fatigue, recovery and detraining */
@@ -247,6 +262,11 @@ function pct(mult) {
 
 function pct1(fraction) {
   return `${(Number(fraction) * 100).toFixed(1).replace(/\.0$/, '')}%`;
+}
+
+/** Gain rates live in hundredths of a percent, so one decimal is not enough. */
+function pct2(fraction) {
+  return `${(Number(fraction) * 100).toFixed(2).replace(/\.?0+$/, '')}%`;
 }
 
 /** "day 1 −3.1%, day 2 −1.6%, day 3 recovered" — the dials, made concrete. */

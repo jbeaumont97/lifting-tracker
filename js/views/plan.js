@@ -28,6 +28,8 @@ import {
   READY_AT,
   isBodyweight,
   describeSet,
+  ZONES,
+  zonesFor,
   REP_SCHEMES,
   SET_COLUMNS,
 } from '../metrics.js';
@@ -57,7 +59,7 @@ function isReady(s) {
 
 /** The card's manual overrides. A read-only copy — write through setOv(). */
 function ov(id) {
-  return ui.forExercise(OV, id, { target: null, reps: null, sets: null });
+  return ui.forExercise(OV, id, { target: null, reps: null, sets: null, zone: null });
 }
 
 function setOv(id, patch) { ui.setForExercise(OV, id, patch); }
@@ -350,6 +352,8 @@ function card(stats, ctx, settings) {
     ]),
   );
 
+  body.append(zonePicks(stats, plan, ctx, settings));
+
   // Plain words carry the verdict; the arithmetic sits under them.
   body.append(el('p', {
     class: 'presc-explain',
@@ -424,6 +428,64 @@ function card(stats, ctx, settings) {
   }, [head, body]);
 }
 
+/**
+ * The same session, read two ways.
+ *
+ * There is no mode here and nothing is hidden behind a choice: both answers
+ * are on the card, always, because they are answers to different questions.
+ * The strength one is the lightest load whose e1RM clears the strength target;
+ * the size one is the lightest load whose tonnage clears the work target. They
+ * are usually different weights, and pretending otherwise is what made this
+ * app a strength app that happened to count kilos.
+ *
+ * Tapping one adopts it, through exactly the same per-lift override that
+ * tapping a grid cell writes — so the hero, the levers and "Log this" all
+ * follow, and nothing is stored on the lift itself.
+ */
+function zonePicks(stats, plan, ctx, settings) {
+  const picks = plan.picks;
+  if (!picks || (!picks.strength && !picks.hypertrophy)) return null;
+  const id = stats.exercise.id;
+  const repsOnly = plan.kind === 'bodyweight';
+
+  const row = (zone, pick) => {
+    if (!pick) return null;
+    const current = plan.zone === zone.key;
+    const value = repsOnly
+      ? `${pick.sets} × ${pick.reps} reps`
+      : `${pick.sets} × ${pick.reps} @ ${fmtWeight(pick.weight)} kg`;
+    const sub = zone.key === 'hypertrophy'
+      ? `${fmt(pick.work, 0)} ${repsOnly ? 'reps' : 'kg'} of work`
+      : `scores ${fmt(pick.score, 1)}`;
+    const kids = [
+      el('span', { class: 'pick-zone', text: zone.label }),
+      el('span', { class: 'pick-value', text: value }),
+      el('span', { class: 'pick-sub', text: sub }),
+      pick.band ? bandChip(pick.band, { compact: true }) : null,
+    ];
+    if (current) {
+      return el('div', { class: 'pick is-current', dataset: { zone: zone.key } }, [
+        ...kids, el('span', { class: 'pick-tag', text: 'today' }),
+      ]);
+    }
+    return el('button', {
+      type: 'button', class: 'pick', dataset: { zone: zone.key },
+      'aria-label': `Plan for ${zone.label.toLowerCase()} instead: ${value}`,
+      onclick: () => {
+        tap();
+        setOv(id, { reps: pick.reps, sets: pick.sets, zone: zone.key });
+        ctx.refresh({ transition: true });
+      },
+    }, kids);
+  };
+
+  return el('div', { class: 'picks' }, [
+    el('span', { class: 'picks-label', text: 'Two ways to do this' }),
+    row(ZONES.strength, picks.strength),
+    row(ZONES.hypertrophy, picks.hypertrophy),
+  ]);
+}
+
 function detail(stats, plan, ctx, settings) {
   const id = stats.exercise.id;
   const o = ov(id);
@@ -474,23 +536,39 @@ function detail(stats, plan, ctx, settings) {
 
   if (repsOnly) {
     // --- one row, not a grid: sets against the reps they ask for ---
+    const bwForSize = plan.zone === 'hypertrophy' && Array.isArray(plan.workOptions);
+    const options = bwForSize ? plan.workOptions : plan.options;
+    const bwZoneSeg = plan.workOptions ? segmented({
+      label: 'Solve for', value: plan.zone,
+      options: [
+        { value: 'strength', label: ZONES.strength.label },
+        { value: 'hypertrophy', label: ZONES.hypertrophy.label },
+      ],
+      onChange: (v) => {
+        const pick = plan.picks && plan.picks[v];
+        setOv(id, pick ? { sets: pick.sets, zone: v } : { zone: v });
+        ctx.refresh({ transition: true });
+      },
+    }) : null;
     wrap.append(el('div', { class: 'grid-block' }, [
-      el('div', { class: 'grid-head' }, [el('h3', { text: 'Trade sets against reps' })]),
+      el('div', { class: 'grid-head' }, [el('h3', { text: 'Trade sets against reps' }), bwZoneSeg]),
       el('div', { class: 'grid-scroll' }, [
         el('table', { class: 'grid', 'aria-label': 'Reps needed at each number of sets' }, [
           el('thead', {}, [el('tr', {}, [
             el('th', { class: 'grid-corner', scope: 'col' }, [el('span', { text: 'sets' })]),
-            ...plan.options.map((o) => el('th', { scope: 'col', class: o.isPick ? 'is-col' : '', text: String(o.sets) })),
+            ...options.map((o) => el('th', { scope: 'col', class: o.isPick ? 'is-col' : '', text: String(o.sets) })),
           ])]),
           el('tbody', {}, [el('tr', {}, [
             el('th', { scope: 'row', class: 'is-row', text: 'reps' }),
-            ...plan.options.map((o) => el('td', {
+            ...options.map((o) => el('td', {
               class: `cell${o.isPick ? ' is-pick' : ''}`, dataset: { band: o.band.key },
             }, [
               el('button', {
                 type: 'button', class: 'cell-btn',
-                'aria-label': `${o.sets} sets of ${o.reps} reps, scores ${fmt(o.score, 1)}, ${o.band.label}`,
-                onclick: () => { tap(); setOv(id, { sets: o.sets }); ctx.refresh(); },
+                'aria-label': `${o.sets} sets of ${o.reps} reps, `
+                  + (bwForSize ? `${fmt(o.work, 0)} reps of work` : `scores ${fmt(o.score, 1)}`)
+                  + `, ${o.band.label}`,
+                onclick: () => { tap(); setOv(id, { sets: o.sets, zone: plan.zone }); ctx.refresh(); },
               }, [
                 el('span', { class: 'cell-value', text: String(o.reps) }),
                 el('span', { class: 'cell-glyph', 'aria-hidden': 'true', text: o.band.glyph }),
@@ -517,14 +595,36 @@ function detail(stats, plan, ctx, settings) {
     });
     gridHost.append(gridFor(mode, stats, plan, ctx, settings));
 
+    // Which scale the grid is solving against. Not a setting and not stored on
+    // the lift — the card names both picks whatever this says. A table can
+    // only print one set of numbers at a time, and this chooses which.
+    const zoneSeg = stats.workTarget > 0 ? segmented({
+      label: 'Solve for', value: plan.zone,
+      options: [
+        { value: 'strength', label: ZONES.strength.label },
+        { value: 'hypertrophy', label: ZONES.hypertrophy.label },
+      ],
+      onChange: (v) => {
+        const pick = plan.picks && plan.picks[v];
+        setOv(id, pick ? { reps: pick.reps, sets: pick.sets, zone: v } : { zone: v });
+        ctx.refresh({ transition: true });
+      },
+    }) : null;
+
     wrap.append(el('div', { class: 'grid-block' }, [
       el('div', { class: 'grid-head' }, [el('h3', { text: 'Trade sets against weight' }), seg]),
+      zoneSeg ? el('div', { class: 'grid-zone-row' }, [
+        zoneSeg,
+        el('p', { class: 'grid-note', text: plan.zone === 'hypertrophy'
+          ? `Weights that meet ${fmt(stats.workTarget, 0)} ${repsOnly ? 'reps' : 'kg'} of work. ${ZONES.hypertrophy.hint}`
+          : `Weights that meet an adjusted e1RM of ${fmt(plan.target, 1)}. ${ZONES.strength.hint}` }),
+      ]) : null,
       gridHost,
       legend(),
     ]));
   }
 
-  if (o.reps !== null || o.sets !== null || o.target !== null) {
+  if (o.reps !== null || o.sets !== null || o.target !== null || o.zone !== null) {
     wrap.append(el('button', {
       type: 'button', class: 'btn btn-ghost btn-block',
       onclick: () => {
@@ -542,9 +642,15 @@ function gridFor(mode, stats, plan, ctx, settings) {
   const id = stats.exercise.id;
   const o = ov(id);
   const scores = mode === 'scores';
+  // Same axes either way; a different solve behind every cell.
+  const forSize = plan.zone === 'hypertrophy';
+  const cells = forSize ? plan.workGrid : plan.grid;
+  const unit = isBodyweight(stats.exercise) ? 'reps' : 'kg';
   const table = el('table', {
     class: 'grid',
-    'aria-label': scores ? 'Adjusted e1RM each option scores' : 'Weight to lift for each reps and sets option',
+    'aria-label': scores
+      ? (forSize ? 'Work each option comes to' : 'Adjusted e1RM each option scores')
+      : 'Weight to lift for each reps and sets option',
   });
   const thead = el('thead', {}, [
     el('tr', {}, [
@@ -557,17 +663,24 @@ function gridFor(mode, stats, plan, ctx, settings) {
   ]);
   const tbody = el('tbody');
   for (const [ri, reps] of REP_SCHEMES.entries()) {
-    const tr = el('tr');
+    // Which zone the row belongs to, so the rep ranges are visible in the grid
+    // rather than being something you have to already know. Six reps is both,
+    // and gets the marker that says so.
+    const zs = zonesFor(reps).map((z) => z.key);
+    const tr = el('tr', { dataset: { zone: zs.length === 2 ? 'both' : zs[0] || 'none' } });
     tr.append(el('th', { scope: 'row', class: reps === snapReps(plan.reps) ? 'is-row' : '', text: String(reps) }));
     for (const [ci, sets] of SET_COLUMNS.entries()) {
-      const cell = plan.grid[ri][ci];
-      const value = scores ? fmt(cell.score, 1) : fmtWeight(cell.weight);
+      const cell = cells[ri][ci];
+      const amount = forSize ? cell.work : cell.score;
+      const value = scores ? fmt(amount, forSize ? 0 : 1) : fmtWeight(cell.weight);
       const isPick = reps === snapReps(plan.reps) && sets === plan.sets;
       tr.append(el('td', { class: `cell${isPick ? ' is-pick' : ''}`, dataset: { band: cell.band.key } }, [
         el('button', {
           type: 'button', class: 'cell-btn',
-          'aria-label': `${sets} sets of ${reps} reps at ${fmtWeight(cell.weight)} kg, scores ${fmt(cell.score, 1)}, ${cell.band.label}`,
-          onclick: () => { tap(); setOv(id, { reps, sets }); ctx.refresh(); },
+          'aria-label': `${sets} sets of ${reps} reps at ${fmtWeight(cell.weight)} kg, `
+            + (forSize ? `${fmt(cell.work, 0)} ${unit} of work` : `scores ${fmt(cell.score, 1)}`)
+            + `, ${cell.band.label}`,
+          onclick: () => { tap(); setOv(id, { reps, sets, zone: plan.zone }); ctx.refresh(); },
         }, [
           el('span', { class: 'cell-value', text: value }),
           el('span', { class: 'cell-glyph', 'aria-hidden': 'true', text: cell.band.glyph }),
@@ -578,29 +691,38 @@ function gridFor(mode, stats, plan, ctx, settings) {
   }
   table.append(thead, tbody);
   const note = scores
-    ? 'What each option actually scores once the weight is rounded up to a loadable step.'
+    ? (forSize
+      ? 'How much work each option comes to once the weight is rounded up to a loadable step.'
+      : 'What each option actually scores once the weight is rounded up to a loadable step.')
     : 'Tap any cell to plan that combination.';
   return el('div', { class: 'grid-scroll' }, [table, el('p', { class: 'grid-note', text: note })]);
 }
 
 function tableView(stats, plan) {
-  const rows = plan.grid.map((row) => row.find((c) => c.sets === plan.sets)).filter(Boolean);
+  const forSize = plan.zone === 'hypertrophy';
+  const cells = forSize ? plan.workGrid : plan.grid;
+  const unit = isBodyweight(stats.exercise) ? 'reps' : 'kg';
+  const rows = cells.map((row) => row.find((c) => c.sets === plan.sets)).filter(Boolean);
   const table = el('table', { class: 'data-table' }, [
-    el('caption', { text: `Every rep scheme at ${plan.sets} sets, against a target of ${fmt(plan.target, 1)} kg.` }),
+    el('caption', { text: forSize
+      ? `Every rep scheme at ${plan.sets} sets, against ${fmt(plan.workTarget, 0)} ${unit} of work.`
+      : `Every rep scheme at ${plan.sets} sets, against a target of ${fmt(plan.target, 1)} kg.` }),
     el('thead', {}, [
       el('tr', {}, [
         el('th', { scope: 'col', text: 'Reps' }),
+        el('th', { scope: 'col', text: 'Zone' }),
         el('th', { scope: 'col', text: 'Weight' }),
         el('th', { scope: 'col', text: 'Scores' }),
-        el('th', { scope: 'col', text: 'Volume' }),
+        el('th', { scope: 'col', text: 'Work' }),
         el('th', { scope: 'col', text: 'Verdict' }),
       ]),
     ]),
     el('tbody', {}, rows.map((c) => el('tr', { class: c.isPick ? 'is-pick' : '' }, [
       el('th', { scope: 'row', text: String(c.reps) }),
+      el('td', { text: zonesFor(c.reps).map((z) => z.label).join(' / ') || '—' }),
       el('td', { text: `${fmtWeight(c.weight)} kg` }),
       el('td', { text: fmt(c.score, 1) }),
-      el('td', { text: fmt(c.volume, 0) }),
+      el('td', { text: fmt(c.work ?? c.volume, 0) }),
       el('td', {}, [bandChip(c.band)]),
     ]))),
   ]);

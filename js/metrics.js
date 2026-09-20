@@ -831,7 +831,13 @@ export function snapReps(reps) {
 
 /**
  * The whole NextSession sheet for one exercise.
- * `override` = { target, reps, sets } — any field may be null/'' for "auto".
+ *
+ * `override` = { target, reps, sets, zone } — any field may be null/'' for
+ * "auto". `zone` picks which scale the weight is solved against: 'strength'
+ * (the default) finds the lightest load whose e1RM meets the strength target;
+ * 'hypertrophy' finds the lightest load whose tonnage meets the work one.
+ * They are different questions and they give different answers, which is the
+ * entire reason both exist.
  */
 export function planFor(stats, settings, override = {}) {
   const step = stats.step;
@@ -876,8 +882,10 @@ export function planFor(stats, settings, override = {}) {
     : Number(stats.exercise.setsPerSession) > 0 ? Math.round(Number(stats.exercise.setsPerSession))
     : Number(stats.lastSets) > 0 ? Math.round(Number(stats.lastSets)) : 3;
 
+  const forSize = override.zone === 'hypertrophy' && stats.workTarget > 0;
   const plan = {
     ready: Number.isFinite(target) && target > 0,
+    zone: forSize ? 'hypertrophy' : 'strength',
     autoTarget, target, reps, sets, step, base,
     usingManualTarget: Number(override.target) > 0,
     readiness, baseTarget: stats.baseTarget, bestNow,
@@ -885,7 +893,7 @@ export function planFor(stats, settings, override = {}) {
     idealCeiling: target * (1 + settings.idealBand),
     stretchCeiling: target * (1 + settings.stretchBand),
     grid: [], columns: SET_COLUMNS, rows: REP_SCHEMES, workOptions: null,
-    gentlest: null, weight: NaN, score: NaN, overshoot: NaN, band: null,
+    gentlest: null, weight: NaN, score: NaN, work: NaN, overshoot: NaN, band: null,
     kind: isBodyweight(stats.exercise) ? 'bodyweight' : 'weight', options: null,
     // The work scale, carried alongside. Everything below is a lazy getter for
     // the same reason the strength grid is: a collapsed card reads none of it.
@@ -899,10 +907,15 @@ export function planFor(stats, settings, override = {}) {
     plan.weight = null;
     plan.atBase = false;
     plan.lastWeight = null;
-    plan.reps = repsForTarget(target, sets, settings);
+    plan.reps = forSize
+      ? Math.max(1, Math.ceil(stats.workTarget / sets - 1e-9))
+      : repsForTarget(target, sets, settings);
     plan.score = plan.reps * setBonus(sets, settings.setBonusK);
-    plan.overshoot = plan.score - target;
-    plan.band = bandOf(plan.score, plan.reps);
+    plan.work = plan.reps * sets;
+    plan.overshoot = forSize ? plan.work - stats.workTarget : plan.score - target;
+    plan.band = forSize
+      ? bandForWork(plan.work, stats.workTarget, bestWorkNow, settings)
+      : bandOf(plan.score, plan.reps);
     // No rep-scheme axis to trade against: the only choice is how many sets,
     // and each answer is the reps that gets you there. One row, not a grid.
     plan.options = SET_COLUMNS.map((sn) => {
@@ -944,12 +957,19 @@ export function planFor(stats, settings, override = {}) {
     return plan;
   }
 
-  plan.weight = weightForTarget(target, reps, sets, settings, step, base);
+  plan.weight = forSize
+    ? weightForWork(stats.workTarget, reps, sets, step, base)
+    : weightForTarget(target, reps, sets, settings, step, base);
   // True when the bar alone is already heavier than the target needs.
   plan.atBase = base > 0 && Math.abs(plan.weight - base) < 1e-9;
   plan.score = plan.weight * repFactor(reps, settings.formula) * setBonus(sets, settings.setBonusK);
-  plan.overshoot = plan.score - target;
-  plan.band = bandOf(plan.score, plan.weight);
+  plan.work = work(plan.weight, reps, sets, stats.exercise.kind);
+  plan.overshoot = forSize ? plan.work - stats.workTarget : plan.score - target;
+  plan.band = forSize
+    ? (comebackUnder !== null && plan.weight < comebackUnder - 1e-9
+      ? BANDS.return
+      : bandForWork(plan.work, stats.workTarget, bestWorkNow, settings))
+    : bandOf(plan.score, plan.weight);
   plan.lastWeight = stats.lastAdj != null ? stats.entries[stats.entries.length - 1].weight : null;
 
   /** One cell of the trade-off grid: the lightest loadable weight at reps x sets. */

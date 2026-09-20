@@ -1705,6 +1705,54 @@ const fakeStats = {
   close('the best session is the biggest one', st.bestWork, M.work(120, 5, 3, 'weight'));
 }
 
+// --- planning for size solves for a different weight, and says so ---
+{
+  const anchor = '2026-01-01';
+  const ex = { id: 'x', name: 'X', step: 2.5, base: 20, gainPerWeek: 0.0075, setsPerSession: 3, setsPerWeek: 15 };
+  const entries = [{ id: 'a', date: anchor, exerciseId: 'x', weight: 100, reps: 5, sets: 3, rir: 2, seq: 1 }];
+  const st = M.exerciseStats(ex, entries, settings, M.isoAddDays(anchor, 3));
+
+  const forStrength = M.planFor(st, settings, { reps: 10, sets: 3 });
+  const forSize = M.planFor(st, settings, { reps: 10, sets: 3, zone: 'hypertrophy' });
+
+  ok('the default is the strength scale', forStrength.zone === 'strength');
+  ok('and asking for size says so', forSize.zone === 'hypertrophy');
+  ok('the same reps and sets give different weights',
+    forSize.weight !== forStrength.weight, `${forSize.weight} vs ${forStrength.weight}`);
+  ok('the strength plan meets the strength target', forStrength.score >= forStrength.target - 1e-9);
+  ok('the size plan meets the work target', forSize.work >= st.workTarget - 1e-9);
+  ok('the size plan is banded on work, not on e1RM',
+    forSize.band === M.bandForWork(forSize.work, st.workTarget, forSize.bestWork, settings));
+  ok('both land on a loadable rung',
+    [forStrength.weight, forSize.weight].every((w) => Math.abs((w - 20) / 2.5 - Math.round((w - 20) / 2.5)) < 1e-9));
+
+  // Adopting the size pick must give back exactly the numbers it advertised.
+  const pick = forStrength.picks.hypertrophy;
+  const adopted = M.planFor(st, settings, { reps: pick.reps, sets: pick.sets, zone: 'hypertrophy' });
+  close('adopting a pick reproduces its weight', adopted.weight, pick.weight, 1e-9);
+  close('and its work', adopted.work, pick.work, 1e-9);
+  ok('and its verdict', adopted.band.key === pick.band.key);
+
+  // A lift with no work target to aim at falls back rather than breaking.
+  const blank = M.exerciseStats(ex, [], settings, anchor);
+  ok('a lift with no history has no size plan to give',
+    M.planFor(blank, settings, { zone: 'hypertrophy' }).zone === 'strength');
+}
+
+// --- the same, for a lift with nothing to load ---
+{
+  const anchor = '2026-01-01';
+  const ex = { id: 'pu', name: 'Press-ups', kind: 'bodyweight', step: 1, base: 0, gainPerWeek: 0.015, setsPerSession: 3, setsPerWeek: 12 };
+  const entries = [{ id: 'a', date: anchor, exerciseId: 'pu', weight: 0, reps: 12, sets: 3, rir: 2, seq: 1 }];
+  const st = M.exerciseStats(ex, entries, settings, M.isoAddDays(anchor, 3));
+
+  const forSize = M.planFor(st, settings, { sets: 3, zone: 'hypertrophy' });
+  ok('it is planned in reps, as it always was', forSize.weight === null);
+  ok('and the reps chase the work target', forSize.work >= st.workTarget - 1e-9, String(forSize.work));
+  ok('more sets means fewer reps each for the same total work',
+    M.planFor(st, settings, { sets: 6, zone: 'hypertrophy' }).reps < forSize.reps);
+}
+
 /* ------------------------------------------------------------------ report */
 
 console.log(`\n${pass} checks passed`);
