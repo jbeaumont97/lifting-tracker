@@ -396,13 +396,18 @@ export function sparkline(values, { width = 72, height = 24 } = {}) {
  */
 export function setsMeter(stats) {
   const target = stats.setsPerWeekTarget;
-  const value = stats.sets7;
-  const status = stats.setStatus;
+  // The budget is a hypertrophy budget — "10 to 20 hard sets per muscle per
+  // week" is where the number came from — so it is counted in hard sets. A
+  // week of heavy triples is twelve sets by the plain count and none by this
+  // one, and the plain count was quietly calling that on target.
+  const value = stats.hardSets7;
+  const status = stats.hardSetStatus;
+  const shown = value.toFixed(1).replace(/\.0$/, '');
   const wrap = el('div', { class: 'meter' });
   if (!target) {
     wrap.append(el('div', { class: 'meter-head' }, [
-      el('span', { class: 'meter-label', text: 'Sets last 7 days' }),
-      el('span', { class: 'meter-value', text: String(value) }),
+      el('span', { class: 'meter-label', text: 'Hard sets last 7 days' }),
+      el('span', { class: 'meter-value', text: shown }),
     ]));
     return wrap;
   }
@@ -410,10 +415,10 @@ export function setsMeter(stats) {
   const glyph = status === 'under' ? '↓' : status === 'over' ? '↑' : '✓';
   wrap.append(
     el('div', { class: 'meter-head' }, [
-      el('span', { class: 'meter-label', text: 'Sets last 7 days' }),
-      el('span', { class: 'meter-value', text: `${value} / ${target}` }),
+      el('span', { class: 'meter-label', text: 'Hard sets last 7 days' }),
+      el('span', { class: 'meter-value', text: `${shown} / ${target}` }),
     ]),
-    el('div', { class: 'meter-track', role: 'meter', 'aria-valuenow': value, 'aria-valuemin': '0', 'aria-valuemax': target, 'aria-label': 'Working sets in the last 7 days' }, [
+    el('div', { class: 'meter-track', role: 'meter', 'aria-valuenow': value, 'aria-valuemin': '0', 'aria-valuemax': target, 'aria-label': 'Hard sets in the last 7 days' }, [
       el('div', { class: `meter-fill is-${(status || 'none').replace(' ', '-')}`, style: `width:${pct}%` }),
       el('div', { class: 'meter-mark', style: `left:${Math.min(100, 80)}%`, title: '80% of target' }),
     ]),

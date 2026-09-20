@@ -7,38 +7,44 @@
 //
 // Runs on tools/dom-shim.mjs: no jsdom, no dependencies, no build step.
 
-import { readFileSync, readdirSync, existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, join, relative } from 'node:path';
-import { installDom } from './dom-shim.mjs';
+import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join, relative } from "node:path";
+import { installDom } from "./dom-shim.mjs";
 
 installDom();
 
-const store = await import('../js/store.js');
-const select = await import('../js/core/select.js');
-const bindings = await import('../js/core/bind.js');
-const uistate = await import('../js/core/uistate.js');
-const { stopRest } = await import('../js/timer.js');
+const store = await import("../js/store.js");
+const M0 = await import("../js/metrics.js");
+const GRID_CELLS = M0.REP_SCHEMES.length * M0.SET_COLUMNS.length;
+const select = await import("../js/core/select.js");
+const bindings = await import("../js/core/bind.js");
+const uistate = await import("../js/core/uistate.js");
+const { stopRest } = await import("../js/timer.js");
 const ui = uistate;
-const { renderPlan, openCard } = await import('../js/views/plan.js');
-const { renderLog, setPrefill, clearForm } = await import('../js/views/log.js');
-const { renderProgress, openExercise, clearSelection } = await import('../js/views/progress.js');
-const { renderSetup } = await import('../js/views/setup.js');
-const { showWelcome } = await import('../js/views/welcome.js');
+const { renderPlan, openCard } = await import("../js/views/plan.js");
+const { renderLog, setPrefill, clearForm } = await import("../js/views/log.js");
+const { renderProgress, openExercise, clearSelection } =
+  await import("../js/views/progress.js");
+const { renderSetup } = await import("../js/views/setup.js");
+const { showWelcome } = await import("../js/views/welcome.js");
 
 let pass = 0;
 const failures = [];
 
-function ok(name, condition, detail = '') {
-  if (condition) { pass++; return; }
-  failures.push(`${name}${detail ? ' — ' + detail : ''}`);
+function ok(name, condition, detail = "") {
+  if (condition) {
+    pass++;
+    return;
+  }
+  failures.push(`${name}${detail ? " — " + detail : ""}`);
 }
 
 /** Render and report the throw rather than letting it kill the run. */
 function render(name, fn) {
   try {
     const node = fn();
-    ok(`${name} renders`, !!node && node.nodeType === 1, 'returned nothing');
+    ok(`${name} renders`, !!node && node.nodeType === 1, "returned nothing");
     return node;
   } catch (err) {
     ok(`${name} renders`, false, `threw ${err && err.message}`);
@@ -46,7 +52,7 @@ function render(name, fn) {
   }
 }
 
-const TODAY = '2026-08-18';
+const TODAY = "2026-08-18";
 let refreshes = 0;
 let ticks = 0;
 
@@ -54,7 +60,11 @@ let ticks = 0;
 const settle = () => new Promise((r) => setTimeout(r, 10));
 
 /** The app formats to one decimal through toLocaleString; match it exactly. */
-const fmtOf = (v) => Number(v).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const fmtOf = (v) =>
+  Number(v).toLocaleString(undefined, {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  });
 
 function ctx(over = {}) {
   const settings = store.getSettings();
@@ -63,9 +73,14 @@ function ctx(over = {}) {
     numbersOpen: settings.numbersOpen === true,
     stats: select.allStats(settings, TODAY),
     today: TODAY,
-    route: 'plan',
-    refresh: () => { refreshes++; },
-    tick: () => { ticks++; bindings.tick(); },
+    route: "plan",
+    refresh: () => {
+      refreshes++;
+    },
+    tick: () => {
+      ticks++;
+      bindings.tick();
+    },
     goTo: () => {},
     onResize: () => {},
     ...over,
@@ -93,66 +108,121 @@ for (const open of [false, true]) {
   reset();
   store.updateSettings({ numbersOpen: open });
   const c = ctx();
-  const label = open ? '[numbers open]' : '[numbers folded]';
+  const label = open ? "[numbers open]" : "[numbers folded]";
 
   const plan = render(`${label} Next`, () => renderPlan(c));
-  ok(`${label} Next is a view section`, plan && plan.classList.contains('view'));
-  ok(`${label} Next shows a prescription`, plan && plan.querySelectorAll('.presc').length > 0);
-  ok(`${label} Next names every lift`,
-    plan && store.getExercises().every((ex) => plan.textContent.includes(ex.name)));
+  ok(
+    `${label} Next is a view section`,
+    plan && plan.classList.contains("view"),
+  );
+  ok(
+    `${label} Next shows a prescription`,
+    plan && plan.querySelectorAll(".presc").length > 0,
+  );
+  ok(
+    `${label} Next names every lift`,
+    plan &&
+      store.getExercises().every((ex) => plan.textContent.includes(ex.name)),
+  );
 
   setPrefill({});
-  const bare = render(`${label} Log with nothing chosen`, () => renderLog(ctx({ route: 'log' })));
-  ok(`${label} Log offers the lift picker`, bare && bare.querySelectorAll('.chip-lift').length > 0);
-  ok(`${label} Log asks you to pick a lift first`,
-    bare && bare.textContent.includes('Pick a lift to log'));
+  const bare = render(`${label} Log with nothing chosen`, () =>
+    renderLog(ctx({ route: "log" })),
+  );
+  ok(
+    `${label} Log offers the lift picker`,
+    bare && bare.querySelectorAll(".chip-lift").length > 0,
+  );
+  ok(
+    `${label} Log asks you to pick a lift first`,
+    bare && bare.textContent.includes("Pick a lift to log"),
+  );
 
   setPrefill({ exerciseId: store.getExercises()[0].id, date: TODAY });
-  const log = render(`${label} Log with a lift chosen`, () => renderLog(ctx({ route: 'log' })));
-  ok(`${label} Log shows the form once a lift is chosen`, log && log.querySelectorAll('.stepper').length >= 3);
-  ok(`${label} Log has a save button`, log && log.querySelectorAll('.btn-save').length === 1);
+  const log = render(`${label} Log with a lift chosen`, () =>
+    renderLog(ctx({ route: "log" })),
+  );
+  ok(
+    `${label} Log shows the form once a lift is chosen`,
+    log && log.querySelectorAll(".stepper").length >= 3,
+  );
+  ok(
+    `${label} Log has a save button`,
+    log && log.querySelectorAll(".btn-save").length === 1,
+  );
 
   clearSelection();
-  const prog = render(`${label} Progress list`, () => renderProgress(ctx({ route: 'progress' })));
-  ok(`${label} Progress lists the lifts`, prog && prog.querySelectorAll('.card-row').length > 0);
+  const prog = render(`${label} Progress list`, () =>
+    renderProgress(ctx({ route: "progress" })),
+  );
+  ok(
+    `${label} Progress lists the lifts`,
+    prog && prog.querySelectorAll(".card-row").length > 0,
+  );
 
   const trained = c.stats.find((s) => s.entryCount > 0);
   openExercise(trained.exercise.id);
-  const detail = render(`${label} Progress detail`, () => renderProgress(ctx({ route: 'progress' })));
-  ok(`${label} Progress detail leads with the hero number`, detail && detail.querySelectorAll('.hero-value').length > 0);
+  const detail = render(`${label} Progress detail`, () =>
+    renderProgress(ctx({ route: "progress" })),
+  );
+  ok(
+    `${label} Progress detail leads with the hero number`,
+    detail && detail.querySelectorAll(".hero-value").length > 0,
+  );
   // The charts are painted in a requestAnimationFrame, exactly as they are in
   // the browser, so the assertion has to wait for the frame the same way.
   await settle();
-  ok(`${label} Progress detail draws the progression chart`,
-    detail && detail.querySelectorAll('.chart-svg').length > 0);
-  ok(`${label} Progress detail draws the weekly sets chart`,
-    detail && detail.querySelectorAll('.meter').length > 0);
+  ok(
+    `${label} Progress detail draws the progression chart`,
+    detail && detail.querySelectorAll(".chart-svg").length > 0,
+  );
+  ok(
+    `${label} Progress detail draws the weekly sets chart`,
+    detail && detail.querySelectorAll(".meter").length > 0,
+  );
   clearSelection();
 
-  const setup = render(`${label} Setup`, () => renderSetup(ctx({ route: 'setup' })));
-  ok(`${label} Setup offers the steppers`, setup && setup.querySelectorAll('.stepper').length > 5);
+  const setup = render(`${label} Setup`, () =>
+    renderSetup(ctx({ route: "setup" })),
+  );
+  ok(
+    `${label} Setup offers the steppers`,
+    setup && setup.querySelectorAll(".stepper").length > 5,
+  );
 
   // One design for everyone: the arithmetic is present on every screen, and
   // the setting only decides whether it starts open.
-  const discs = plan.querySelectorAll('.disclose');
+  const discs = plan.querySelectorAll(".disclose");
   ok(`${label} Next offers the numbers`, discs.length > 0);
 
   // "Show the numbers" and friends follow the setting. The target override is
   // not a reading aid — it is an input, and it opens when an override is
   // actually in force, which is a different question.
-  const labelOf = (d) => (d.querySelector('.disclose-label') || {}).textContent || '';
+  const labelOf = (d) =>
+    (d.querySelector(".disclose-label") || {}).textContent || "";
   const numbers = discs.filter((d) => /^(Show|Where)/.test(labelOf(d)));
-  ok(`${label} at least one numbers disclosure is on the screen`, numbers.length > 0);
-  ok(`${label} the numbers disclosures follow the setting`,
-    numbers.every((d) => d.hasAttribute('open') === open),
-    numbers.map((d) => `${labelOf(d)}=${d.hasAttribute('open')}`).join(', '));
-  const override = discs.filter((d) => labelOf(d) === 'Set the target myself');
-  ok(`${label} the target override stays shut until it is used`,
-    override.every((d) => !d.hasAttribute('open')));
-  ok(`${label} the verdict is on the surface either way`,
-    plan.querySelectorAll('.presc-explain').length > 0);
-  ok(`${label} the numbers are reachable either way`,
-    plan.textContent.includes('against a target of'));
+  ok(
+    `${label} at least one numbers disclosure is on the screen`,
+    numbers.length > 0,
+  );
+  ok(
+    `${label} the numbers disclosures follow the setting`,
+    numbers.every((d) => d.hasAttribute("open") === open),
+    numbers.map((d) => `${labelOf(d)}=${d.hasAttribute("open")}`).join(", "),
+  );
+  const override = discs.filter((d) => labelOf(d) === "Set the target myself");
+  ok(
+    `${label} the target override stays shut until it is used`,
+    override.every((d) => !d.hasAttribute("open")),
+  );
+  ok(
+    `${label} the verdict is on the surface either way`,
+    plan.querySelectorAll(".presc-explain").length > 0,
+  );
+  ok(
+    `${label} the numbers are reachable either way`,
+    plan.textContent.includes("against a target of"),
+  );
 }
 
 /* ------------------------- 1b. nothing is gated behind a setting any more */
@@ -164,38 +234,56 @@ for (const open of [false, true]) {
     reset();
     store.updateSettings({ numbersOpen: open });
     select.invalidate();
-    const label = open ? '[numbers open]' : '[numbers folded]';
+    const label = open ? "[numbers open]" : "[numbers folded]";
     const c = ctx();
     const trained = c.stats.find((s) => s.entryCount > 0);
 
     openCard(trained.exercise.id);
     const plan = renderPlan(ctx());
-    ok(`${label} the trade-off grid is always there`,
-      plan.querySelectorAll('.cell-btn').length === 42);
-    ok(`${label} so is the target override`,
-      plan.textContent.includes('Set the target myself'));
-    ok(`${label} and the upsell to a hidden mode is gone`,
-      !plan.textContent.includes('Show the trade-off grid'));
+    ok(
+      `${label} the trade-off grid is always there`,
+      plan.querySelectorAll(".cell-btn").length === GRID_CELLS,
+    );
+    ok(
+      `${label} so is the target override`,
+      plan.textContent.includes("Set the target myself"),
+    );
+    ok(
+      `${label} and the upsell to a hidden mode is gone`,
+      !plan.textContent.includes("Show the trade-off grid"),
+    );
 
     // And it opens itself once an override is actually in force.
-    ui.setForExercise('plan.overrides', trained.exercise.id, { target: 999 });
+    ui.setForExercise("plan.overrides", trained.exercise.id, { target: 999 });
     const withOverride = renderPlan(ctx());
-    const od = withOverride.querySelectorAll('.disclose')
-      .find((d) => ((d.querySelector('.disclose-label') || {}).textContent || '') === 'Set the target myself');
-    ok(`${label} the target override opens when one is set`, !!od && od.hasAttribute('open'));
-    ui.clearForExercise('plan.overrides', trained.exercise.id);
+    const od = withOverride
+      .querySelectorAll(".disclose")
+      .find(
+        (d) =>
+          ((d.querySelector(".disclose-label") || {}).textContent || "") ===
+          "Set the target myself",
+      );
+    ok(
+      `${label} the target override opens when one is set`,
+      !!od && od.hasAttribute("open"),
+    );
+    ui.clearForExercise("plan.overrides", trained.exercise.id);
 
-    ui.set('progress.listMode', 'table');
+    ui.set("progress.listMode", "table");
     clearSelection();
-    const prog = renderProgress(ctx({ route: 'progress' }));
-    ok(`${label} the dashboard table is always reachable`,
-      prog.querySelectorAll('.data-table-wide').length === 1);
-    ui.set('progress.listMode', 'cards');
+    const prog = renderProgress(ctx({ route: "progress" }));
+    ok(
+      `${label} the dashboard table is always reachable`,
+      prog.querySelectorAll(".data-table-wide").length === 1,
+    );
+    ui.set("progress.listMode", "cards");
 
     openExercise(trained.exercise.id);
-    const detail = renderProgress(ctx({ route: 'progress' }));
-    ok(`${label} the projections are always there`,
-      detail.textContent.includes('Projected +12 wks'));
+    const detail = renderProgress(ctx({ route: "progress" }));
+    ok(
+      `${label} the projections are always there`,
+      detail.textContent.includes("Projected +12 wks"),
+    );
     clearSelection();
   }
 }
@@ -205,38 +293,68 @@ for (const open of [false, true]) {
 {
   reset();
   const [squat, bench] = store.getExercises();
-  store.updateExercise(squat.id, { tags: ['Legs'] });
-  store.updateExercise(bench.id, { tags: ['Push', 'Chest'] });
+  store.updateExercise(squat.id, { tags: ["Legs"] });
+  store.updateExercise(bench.id, { tags: ["Push", "Chest"] });
   select.invalidate();
 
   const c = ctx();
   const plan = renderPlan(c);
-  const totalCards = plan.querySelectorAll('.card').length;
-  ok('every lift shows with no filter active', totalCards === store.getExercises().length, String(totalCards));
+  const totalCards = plan.querySelectorAll(".card").length;
+  ok(
+    "every lift shows with no filter active",
+    totalCards === store.getExercises().length,
+    String(totalCards),
+  );
 
   const search = plan.querySelector('input[type="search"]');
-  ok('the search box is on the page', !!search);
+  ok("the search box is on the page", !!search);
 
   const before = refreshes;
-  search.value = 'squat';
-  search.dispatchEvent('input');
-  const narrowed = plan.querySelectorAll('.card-list .card').map((n) => n.querySelector('.card-title')?.textContent);
-  ok('typing narrows the list to matching names', narrowed.length === 1 && narrowed[0] === 'Squat', narrowed.join(','));
-  ok('typing into the search box does not trigger a full refresh', refreshes === before, `${refreshes - before} refreshes`);
+  search.value = "squat";
+  search.dispatchEvent("input");
+  const narrowed = plan
+    .querySelectorAll(".card-list .card")
+    .map((n) => n.querySelector(".card-title")?.textContent);
+  ok(
+    "typing narrows the list to matching names",
+    narrowed.length === 1 && narrowed[0] === "Squat",
+    narrowed.join(","),
+  );
+  ok(
+    "typing into the search box does not trigger a full refresh",
+    refreshes === before,
+    `${refreshes - before} refreshes`,
+  );
 
-  search.value = 'zzz no such lift';
-  search.dispatchEvent('input');
-  ok('a query matching nothing shows the empty note', plan.textContent.includes('No lifts match'));
-  const clearBtn = plan.querySelectorAll('button').find((n) => n.textContent === 'Clear filters');
-  ok('with a way back out', !!clearBtn);
+  search.value = "zzz no such lift";
+  search.dispatchEvent("input");
+  ok(
+    "a query matching nothing shows the empty note",
+    plan.textContent.includes("No lifts match"),
+  );
+  const clearBtn = plan
+    .querySelectorAll("button")
+    .find((n) => n.textContent === "Clear filters");
+  ok("with a way back out", !!clearBtn);
   clearBtn.click();
-  ok('clearing restores the full list', plan.querySelectorAll('.card').length === totalCards);
+  ok(
+    "clearing restores the full list",
+    plan.querySelectorAll(".card").length === totalCards,
+  );
 
-  const tagChip = plan.querySelectorAll('.chips .chip').find((n) => n.textContent === 'Legs');
-  ok('a tag actually in use on a lift appears as a filter chip', !!tagChip);
+  const tagChip = plan
+    .querySelectorAll(".chips .chip")
+    .find((n) => n.textContent === "Legs");
+  ok("a tag actually in use on a lift appears as a filter chip", !!tagChip);
   tagChip.click();
-  const byTag = plan.querySelectorAll('.card-list .card').map((n) => n.querySelector('.card-title')?.textContent);
-  ok('selecting it narrows to lifts carrying that tag', byTag.length === 1 && byTag[0] === 'Squat', byTag.join(','));
+  const byTag = plan
+    .querySelectorAll(".card-list .card")
+    .map((n) => n.querySelector(".card-title")?.textContent);
+  ok(
+    "selecting it narrows to lifts carrying that tag",
+    byTag.length === 1 && byTag[0] === "Squat",
+    byTag.join(","),
+  );
 }
 
 /* ------------------------------------------------------- 2. the empty states */
@@ -246,12 +364,22 @@ for (const open of [false, true]) {
   store.clearAll();
   select.invalidate();
   const c = ctx();
-  const plan = render('Next with an empty log', () => renderPlan(c));
-  ok('an empty log invites a first set', plan && plan.textContent.includes('Nothing logged yet'));
-  const prog = render('Progress with an empty log', () => renderProgress(ctx({ route: 'progress' })));
-  ok('an empty Progress says so', prog && prog.textContent.includes('Nothing to show yet'));
-  const log = render('Log with an empty log', () => renderLog(ctx({ route: 'log' })));
-  ok('Log still works with no history', !!log);
+  const plan = render("Next with an empty log", () => renderPlan(c));
+  ok(
+    "an empty log invites a first set",
+    plan && plan.textContent.includes("Nothing logged yet"),
+  );
+  const prog = render("Progress with an empty log", () =>
+    renderProgress(ctx({ route: "progress" })),
+  );
+  ok(
+    "an empty Progress says so",
+    prog && prog.textContent.includes("Nothing to show yet"),
+  );
+  const log = render("Log with an empty log", () =>
+    renderLog(ctx({ route: "log" })),
+  );
+  ok("Log still works with no history", !!log);
 }
 
 /* ------------------------------------------ 3. the interactions that mutate */
@@ -262,16 +390,22 @@ for (const open of [false, true]) {
   const before = store.getEntries().length;
 
   setPrefill({ exerciseId: ex.id, date: TODAY, weight: 100, reps: 5, sets: 3 });
-  const log = renderLog(ctx({ route: 'log' }));
-  const save = log.querySelectorAll('.btn-primary').find((b) => /Log set|Save/.test(b.textContent));
-  ok('the save button says what it will do', !!save, save ? save.textContent : 'not found');
+  const log = renderLog(ctx({ route: "log" }));
+  const save = log
+    .querySelectorAll(".btn-primary")
+    .find((b) => /Log set|Save/.test(b.textContent));
+  ok(
+    "the save button says what it will do",
+    !!save,
+    save ? save.textContent : "not found",
+  );
   save.click();
-  ok('tapping save logs a set', store.getEntries().length > before);
+  ok("tapping save logs a set", store.getEntries().length > before);
 
   const logged = store.entriesOn(ex.id, TODAY);
-  ok('the set landed on the right lift and day', logged.length > 0);
+  ok("the set landed on the right lift and day", logged.length > 0);
   store.undo();
-  ok('undo takes it back off', store.getEntries().length === before);
+  ok("undo takes it back off", store.getEntries().length === before);
 }
 
 {
@@ -281,11 +415,15 @@ for (const open of [false, true]) {
   const trained = c.stats.find((s) => s.entryCount > 0);
   openCard(trained.exercise.id);
   const plan = renderPlan(ctx());
-  const cells = plan.querySelectorAll('.cell-btn');
-  ok('the open card draws the trade-off grid', cells.length === 42, `${cells.length} cells`);
+  const cells = plan.querySelectorAll(".cell-btn");
+  ok(
+    "the open card draws the trade-off grid",
+    cells.length === GRID_CELLS,
+    `${cells.length} cells`,
+  );
   const was = refreshes;
   cells[10].click();
-  ok('tapping a grid cell asks for a repaint', refreshes > was);
+  ok("tapping a grid cell asks for a repaint", refreshes > was);
 }
 
 /* --------------------------------------------- 4. bindings update in place */
@@ -293,15 +431,26 @@ for (const open of [false, true]) {
 {
   reset();
   bindings.resetBindings();
-  const node = globalThis.document.createElement('span');
+  const node = globalThis.document.createElement("span");
   let value = 1;
   bindings.bindText(node, () => `${value} kg`);
-  ok('a binding paints its initial value', node.textContent === '1 kg', node.textContent);
+  ok(
+    "a binding paints its initial value",
+    node.textContent === "1 kg",
+    node.textContent,
+  );
   value = 2;
-  ok('a binding does not repaint until it is ticked', node.textContent === '1 kg');
+  ok(
+    "a binding does not repaint until it is ticked",
+    node.textContent === "1 kg",
+  );
   bindings.tick();
   await new Promise((r) => setTimeout(r, 10));
-  ok('ticking repaints the bound node', node.textContent === '2 kg', node.textContent);
+  ok(
+    "ticking repaints the bound node",
+    node.textContent === "2 kg",
+    node.textContent,
+  );
 
   // The point of all this: the node is the same node, so focus and animation
   // state survive a value change.
@@ -309,33 +458,56 @@ for (const open of [false, true]) {
   value = 3;
   bindings.tick();
   await new Promise((r) => setTimeout(r, 10));
-  ok('the bound node keeps its identity', node === same && node.textContent === '3 kg');
+  ok(
+    "the bound node keeps its identity",
+    node === same && node.textContent === "3 kg",
+  );
 
   bindings.resetBindings();
   value = 4;
   bindings.tick();
   await new Promise((r) => setTimeout(r, 10));
-  ok('a reset binding stops updating', node.textContent === '3 kg', node.textContent);
+  ok(
+    "a reset binding stops updating",
+    node.textContent === "3 kg",
+    node.textContent,
+  );
 }
 
 /* ------------------------------------------- 5. keyed patch keeps identity */
 
 {
   const doc = globalThis.document;
-  const parent = doc.createElement('div');
-  const make = (item) => { const n = doc.createElement('i'); n.textContent = item.id; return n; };
-  bindings.patch(parent, [{ id: 'a' }, { id: 'b' }], (i) => i.id, make);
+  const parent = doc.createElement("div");
+  const make = (item) => {
+    const n = doc.createElement("i");
+    n.textContent = item.id;
+    return n;
+  };
+  bindings.patch(parent, [{ id: "a" }, { id: "b" }], (i) => i.id, make);
   const [a, b] = parent.children;
-  ok('patch renders the list', parent.children.length === 2);
+  ok("patch renders the list", parent.children.length === 2);
 
-  bindings.patch(parent, [{ id: 'a' }, { id: 'b' }, { id: 'c' }], (i) => i.id, make);
-  ok('patch appends without touching what was there',
-    parent.children.length === 3 && parent.children[0] === a && parent.children[1] === b);
+  bindings.patch(
+    parent,
+    [{ id: "a" }, { id: "b" }, { id: "c" }],
+    (i) => i.id,
+    make,
+  );
+  ok(
+    "patch appends without touching what was there",
+    parent.children.length === 3 &&
+      parent.children[0] === a &&
+      parent.children[1] === b,
+  );
 
-  bindings.patch(parent, [{ id: 'c' }, { id: 'a' }], (i) => i.id, make);
-  ok('patch removes what is gone', parent.children.length === 2);
-  ok('patch reorders what remains', parent.children[1] === a);
-  ok('patch keeps identity across a reorder', parent.children[0].textContent === 'c');
+  bindings.patch(parent, [{ id: "c" }, { id: "a" }], (i) => i.id, make);
+  ok("patch removes what is gone", parent.children.length === 2);
+  ok("patch reorders what remains", parent.children[1] === a);
+  ok(
+    "patch keeps identity across a reorder",
+    parent.children[0].textContent === "c",
+  );
 }
 
 /* ------------------------------------------------------- 6. the welcome tour */
@@ -344,12 +516,19 @@ for (const open of [false, true]) {
   reset();
   let done = false;
   try {
-    showWelcome({ onDone: () => { done = true; } });
-    const overlay = globalThis.document.body.querySelector('.welcome');
-    ok('the welcome tour mounts', !!overlay);
-    ok('the tour offers a way out', !!overlay && overlay.querySelectorAll('button').length > 0);
+    showWelcome({
+      onDone: () => {
+        done = true;
+      },
+    });
+    const overlay = globalThis.document.body.querySelector(".welcome");
+    ok("the welcome tour mounts", !!overlay);
+    ok(
+      "the tour offers a way out",
+      !!overlay && overlay.querySelectorAll("button").length > 0,
+    );
   } catch (err) {
-    ok('the welcome tour mounts', false, `threw ${err && err.message}`);
+    ok("the welcome tour mounts", false, `threw ${err && err.message}`);
   }
   void done;
 }
@@ -360,41 +539,69 @@ for (const open of [false, true]) {
   reset();
   const ex = store.getExercises()[0];
   setPrefill({ exerciseId: ex.id, date: TODAY, weight: 100, reps: 5, sets: 3 });
-  const c = ctx({ route: 'log' });
+  const c = ctx({ route: "log" });
   const view = renderLog(c);
 
-  const preview = view.querySelector('.preview');
-  const save = view.querySelector('.btn-save');
-  const plus = view.querySelectorAll('.stepper-btn')
-    .find((b) => /Increase Weight/.test(b.getAttribute('aria-label') || ''));
+  const preview = view.querySelector(".preview");
+  const save = view.querySelector(".btn-save");
+  const plus = view
+    .querySelectorAll(".stepper-btn")
+    .find((b) => /Increase Weight/.test(b.getAttribute("aria-label") || ""));
 
-  ok('the weight stepper has an increase button', !!plus);
-  ok('the preview starts painted', !!preview && preview.textContent.length > 0);
+  ok("the weight stepper has an increase button", !!plus);
+  ok("the preview starts painted", !!preview && preview.textContent.length > 0);
   const label0 = save.textContent;
   const preview0 = preview.textContent;
-  ok('the save button starts labelled with the set', /100/.test(label0), label0);
+  ok(
+    "the save button starts labelled with the set",
+    /100/.test(label0),
+    label0,
+  );
 
   const refreshesBefore = refreshes;
-  plus.click();                                   // nudge the weight up one rung
+  plus.click(); // nudge the weight up one rung
   await settle();
 
-  ok('nudging a stepper does NOT trigger a full re-render',
-    refreshes === refreshesBefore, `${refreshes - refreshesBefore} refreshes`);
-  ok('the preview is the same node', view.querySelector('.preview') === preview);
-  ok('the save button is the same node', view.querySelector('.btn-save') === save);
-  ok('the save button relabelled itself', save.textContent !== label0, save.textContent);
-  ok('the new weight is in the label', /102\.5/.test(save.textContent), save.textContent);
-  ok('the preview repainted', preview.textContent !== preview0);
+  ok(
+    "nudging a stepper does NOT trigger a full re-render",
+    refreshes === refreshesBefore,
+    `${refreshes - refreshesBefore} refreshes`,
+  );
+  ok(
+    "the preview is the same node",
+    view.querySelector(".preview") === preview,
+  );
+  ok(
+    "the save button is the same node",
+    view.querySelector(".btn-save") === save,
+  );
+  ok(
+    "the save button relabelled itself",
+    save.textContent !== label0,
+    save.textContent,
+  );
+  ok(
+    "the new weight is in the label",
+    /102\.5/.test(save.textContent),
+    save.textContent,
+  );
+  ok("the preview repainted", preview.textContent !== preview0);
 
   // The form is what actually moved, and it persisted on the way.
-  ok('the form followed the stepper', Number(uistate.get('log.form', {}).weight) === 102.5,
-    String(uistate.get('log.form', {}).weight));
+  ok(
+    "the form followed the stepper",
+    Number(uistate.get("log.form", {}).weight) === 102.5,
+    String(uistate.get("log.form", {}).weight),
+  );
 
   // Something the preview does not depend on must not repaint it.
   const steady = preview.textContent;
   c.tick();
   await settle();
-  ok('ticking with nothing changed repaints nothing', preview.textContent === steady);
+  ok(
+    "ticking with nothing changed repaints nothing",
+    preview.textContent === steady,
+  );
 }
 
 /* ------------------------------------------ 6c. the motion primitives */
@@ -403,55 +610,111 @@ for (const open of [false, true]) {
 // substrate the live session score is going to be built on, so they get
 // verified before anything depends on them.
 {
-  const motion = await import('../js/core/motion.js');
+  const motion = await import("../js/core/motion.js");
   const doc = globalThis.document;
 
   // Timings come off the CSS tokens. The shim's getComputedStyle returns
   // nothing, so this is really checking the fallbacks hold.
-  ok('durations resolve to numbers',
-    [motion.durations.fast, motion.durations.base, motion.durations.slow].every(Number.isFinite),
-    `${motion.durations.fast}/${motion.durations.base}/${motion.durations.slow}`);
-  ok('durations are in a sane order',
-    motion.durations.fast < motion.durations.base && motion.durations.base < motion.durations.slow);
-  ok('easings resolve to curves', /cubic-bezier/.test(motion.easings.out) && /cubic-bezier/.test(motion.easings.spring));
+  ok(
+    "durations resolve to numbers",
+    [motion.durations.fast, motion.durations.base, motion.durations.slow].every(
+      Number.isFinite,
+    ),
+    `${motion.durations.fast}/${motion.durations.base}/${motion.durations.slow}`,
+  );
+  ok(
+    "durations are in a sane order",
+    motion.durations.fast < motion.durations.base &&
+      motion.durations.base < motion.durations.slow,
+  );
+  ok(
+    "easings resolve to curves",
+    /cubic-bezier/.test(motion.easings.out) &&
+      /cubic-bezier/.test(motion.easings.spring),
+  );
 
   // countUp lands on the target whatever route it takes.
-  const n = doc.createElement('span');
-  n.textContent = '100.0';
+  const n = doc.createElement("span");
+  n.textContent = "100.0";
   motion.countUp(n, 118.3, { duration: 40, format: (v) => v.toFixed(1) });
-  ok('countUp starts from where the node already was', n.textContent !== '118.3', n.textContent);
+  ok(
+    "countUp starts from where the node already was",
+    n.textContent !== "118.3",
+    n.textContent,
+  );
   await new Promise((r) => setTimeout(r, 120));
-  ok('countUp lands exactly on the target', n.textContent === '118.3', n.textContent);
+  ok(
+    "countUp lands exactly on the target",
+    n.textContent === "118.3",
+    n.textContent,
+  );
 
   // Interrupting mid-run must not snap backwards.
   motion.countUp(n, 90, { duration: 200, format: (v) => v.toFixed(1) });
   await new Promise((r) => setTimeout(r, 30));
   const mid = Number(n.textContent);
   motion.countUp(n, 130, { duration: 40, format: (v) => v.toFixed(1) });
-  ok('a second countUp picks up mid-flight', Number.isFinite(mid) && mid < 118.3 && mid > 90, String(mid));
+  ok(
+    "a second countUp picks up mid-flight",
+    Number.isFinite(mid) && mid < 118.3 && mid > 90,
+    String(mid),
+  );
   await new Promise((r) => setTimeout(r, 120));
-  ok('and still lands on the newest target', n.textContent === '130.0', n.textContent);
+  ok(
+    "and still lands on the newest target",
+    n.textContent === "130.0",
+    n.textContent,
+  );
 
   // No animation to run: same value, or a value that was never a number.
-  const same = doc.createElement('span');
-  same.textContent = '42.0';
+  const same = doc.createElement("span");
+  same.textContent = "42.0";
   motion.countUp(same, 42, { format: (v) => v.toFixed(1) });
-  ok('countUp to the same value writes it straight out', same.textContent === '42.0');
+  ok(
+    "countUp to the same value writes it straight out",
+    same.textContent === "42.0",
+  );
 
-  const blank = doc.createElement('span');
+  const blank = doc.createElement("span");
   motion.countUp(blank, 7, { format: (v) => v.toFixed(1) });
-  ok('countUp from an empty node writes the target', blank.textContent === '7.0', blank.textContent);
+  ok(
+    "countUp from an empty node writes the target",
+    blank.textContent === "7.0",
+    blank.textContent,
+  );
 
-  const bad = doc.createElement('span');
-  motion.countUp(bad, NaN, { format: (v) => (Number.isFinite(v) ? v.toFixed(1) : '—') });
-  ok('countUp handles a value that is not a number', bad.textContent === '—', bad.textContent);
-  ok('countUp on nothing does not throw', (() => { try { motion.countUp(null, 5); return true; } catch { return false; } })());
+  const bad = doc.createElement("span");
+  motion.countUp(bad, NaN, {
+    format: (v) => (Number.isFinite(v) ? v.toFixed(1) : "—"),
+  });
+  ok(
+    "countUp handles a value that is not a number",
+    bad.textContent === "—",
+    bad.textContent,
+  );
+  ok(
+    "countUp on nothing does not throw",
+    (() => {
+      try {
+        motion.countUp(null, 5);
+        return true;
+      } catch {
+        return false;
+      }
+    })(),
+  );
 
   // spring/pulse need Web Animations, which the shim does not have — they must
   // decline rather than throw, exactly as they would on an old browser.
-  ok('spring declines without Web Animations', motion.spring(doc.createElement('i')) === null);
-  ok('pulse declines without Web Animations', motion.pulse(doc.createElement('i')) === null);
-  ok('reduced-motion is reported', motion.prefersReducedMotion() === false);
+  ok(
+    "spring declines without Web Animations",
+    motion.spring(doc.createElement("i")) === null,
+  );
+  ok(
+    "pulse declines without Web Animations",
+    motion.pulse(doc.createElement("i")) === null,
+  );
+  ok("reduced-motion is reported", motion.prefersReducedMotion() === false);
 }
 
 /* ------------------------------------------- 6d. in-workout momentum */
@@ -467,102 +730,196 @@ for (const open of [false, true]) {
   select.invalidate();
   setPrefill({ exerciseId: b.id, date: TODAY });
 
-  const view = renderLog(ctx({ route: 'log' }));
-  const rail = view.querySelector('.rail');
-  ok('the rail appears once a session is under way', !!rail);
+  const view = renderLog(ctx({ route: "log" }));
+  const rail = view.querySelector(".rail");
+  ok("the rail appears once a session is under way", !!rail);
 
-  const segs = rail.querySelectorAll('.rail-seg');
-  ok('one segment per lift in the session', segs.length === 2, String(segs.length));
-  ok('the lift you are on is the current one',
-    segs.filter((n) => n.classList.contains('is-current')).length === 1);
-  ok('and it is the right one',
-    segs.find((n) => n.classList.contains('is-current')).textContent.includes(b.name));
+  const segs = rail.querySelectorAll(".rail-seg");
+  ok(
+    "one segment per lift in the session",
+    segs.length === 2,
+    String(segs.length),
+  );
+  ok(
+    "the lift you are on is the current one",
+    segs.filter((n) => n.classList.contains("is-current")).length === 1,
+  );
+  ok(
+    "and it is the right one",
+    segs
+      .find((n) => n.classList.contains("is-current"))
+      .textContent.includes(b.name),
+  );
 
   // The identity hues are not pairwise separable under deuteranopia, so a dot
   // may never be the only thing saying which lift a segment is.
-  ok('every segment names its lift in words',
-    segs.every((n) => n.querySelectorAll('.rail-seg-name').length === 1
-      && n.querySelector('.rail-seg-name').textContent.trim().length > 1),
-    'a segment identified by colour alone is unreadable to some users');
+  ok(
+    "every segment names its lift in words",
+    segs.every(
+      (n) =>
+        n.querySelectorAll(".rail-seg-name").length === 1 &&
+        n.querySelector(".rail-seg-name").textContent.trim().length > 1,
+    ),
+    "a segment identified by colour alone is unreadable to some users",
+  );
 
-  ok('each segment counts its sets', segs.every((n) => /\d+/.test(n.querySelector('.rail-seg-count').textContent)));
-  ok('the session total is a meter', rail.querySelectorAll('.rail-total-track').length === 1);
-  ok('and it counts every set logged today', rail.textContent.includes('3 of'), rail.textContent.slice(0, 120));
+  ok(
+    "each segment counts its sets",
+    segs.every((n) =>
+      /\d+/.test(n.querySelector(".rail-seg-count").textContent),
+    ),
+  );
+  ok(
+    "the session total is a meter",
+    rail.querySelectorAll(".rail-total-track").length === 1,
+  );
+  ok(
+    "and it counts every set logged today",
+    rail.textContent.includes("3 of"),
+    rail.textContent.slice(0, 120),
+  );
 
   // Ordering is by when the first set actually happened, which is only knowable
   // because of the per-set log.
-  ok('the lift trained first comes first', segs[0].textContent.includes(a.name),
-    segs.map((n) => n.querySelector('.rail-seg-name').textContent).join(' | '));
+  ok(
+    "the lift trained first comes first",
+    segs[0].textContent.includes(a.name),
+    segs.map((n) => n.querySelector(".rail-seg-name").textContent).join(" | "),
+  );
 
   const was = refreshes;
   segs[0].click();
-  ok('tapping a segment switches lift', refreshes > was);
-  ok('and the form follows it', uistate.get('log.form', {}).exerciseId === a.id);
+  ok("tapping a segment switches lift", refreshes > was);
+  ok(
+    "and the form follows it",
+    uistate.get("log.form", {}).exerciseId === a.id,
+  );
 }
 
 {
   reset();
   setPrefill({});
-  const bare = renderLog(ctx({ route: 'log' }));
-  ok('no session and no lift chosen means no rail', bare.querySelectorAll('.rail').length === 0);
+  const bare = renderLog(ctx({ route: "log" }));
+  ok(
+    "no session and no lift chosen means no rail",
+    bare.querySelectorAll(".rail").length === 0,
+  );
 }
 
 // The set trace: the pill row with an axis on it.
 {
   reset();
   const ex = store.getExercises()[0];
-  store.logSet({ exerciseId: ex.id, date: TODAY, weight: 100, reps: 5, rir: 3 });
-  store.logSet({ exerciseId: ex.id, date: TODAY, weight: 100, reps: 4, rir: 1 });
+  store.logSet({
+    exerciseId: ex.id,
+    date: TODAY,
+    weight: 100,
+    reps: 5,
+    rir: 3,
+  });
+  store.logSet({
+    exerciseId: ex.id,
+    date: TODAY,
+    weight: 100,
+    reps: 4,
+    rir: 1,
+  });
   select.invalidate();
   // The fixture date is in the past, and the live tracker is only for a session
   // happening now, so the mode is stated rather than inferred from the date.
-  setPrefill({ exerciseId: ex.id, date: TODAY, weight: 100, reps: 5, sets: 4, mode: 'sets' });
+  setPrefill({
+    exerciseId: ex.id,
+    date: TODAY,
+    weight: 100,
+    reps: 5,
+    sets: 4,
+    mode: "sets",
+  });
 
-  const c = ctx({ route: 'log' });
+  const c = ctx({ route: "log" });
   const view = renderLog(c);
-  const trace = view.querySelector('.chart-trace');
-  ok('the trace replaces the pill row', !!trace && view.querySelectorAll('.set-pills').length === 0);
+  const trace = view.querySelector(".chart-trace");
+  ok(
+    "the trace replaces the pill row",
+    !!trace && view.querySelectorAll(".set-pills").length === 0,
+  );
 
-  const done = trace.querySelectorAll('.trace-bar').filter((n) => !n.classList.contains('is-next'));
-  ok('one bar per set already done', done.length === 2, String(done.length));
-  ok('a set that came up short of the plan is marked',
-    done.filter((n) => n.classList.contains('is-short')).length === 1,
-    'the 4-rep set against a 5-rep plan should read as short');
-  ok('the set you are about to do is an outline',
-    trace.querySelectorAll('.trace-bar.is-next').length === 1);
-  ok('the sets still planned after it are placeholders',
-    trace.querySelectorAll('.trace-slot').length === 1, String(trace.querySelectorAll('.trace-slot').length));
+  const done = trace
+    .querySelectorAll(".trace-bar")
+    .filter((n) => !n.classList.contains("is-next"));
+  ok("one bar per set already done", done.length === 2, String(done.length));
+  ok(
+    "a set that came up short of the plan is marked",
+    done.filter((n) => n.classList.contains("is-short")).length === 1,
+    "the 4-rep set against a 5-rep plan should read as short",
+  );
+  ok(
+    "the set you are about to do is an outline",
+    trace.querySelectorAll(".trace-bar.is-next").length === 1,
+  );
+  ok(
+    "the sets still planned after it are placeholders",
+    trace.querySelectorAll(".trace-slot").length === 1,
+    String(trace.querySelectorAll(".trace-slot").length),
+  );
 
-  ok('each set shows its RIR', trace.textContent.includes('RIR 3') && trace.textContent.includes('RIR 1'));
-  ok('the rest between sets is shown', /\ds|\d:\d\d/.test(trace.textContent), trace.textContent);
-  ok('the chart describes itself for a screen reader',
-    /\d sets? of \d planned/.test(trace.querySelector('.trace-svg').getAttribute('aria-label') || ''),
-    trace.querySelector('.trace-svg').getAttribute('aria-label'));
+  ok(
+    "each set shows its RIR",
+    trace.textContent.includes("RIR 3") && trace.textContent.includes("RIR 1"),
+  );
+  ok(
+    "the rest between sets is shown",
+    /\ds|\d:\d\d/.test(trace.textContent),
+    trace.textContent,
+  );
+  ok(
+    "the chart describes itself for a screen reader",
+    /\d sets? of \d planned/.test(
+      trace.querySelector(".trace-svg").getAttribute("aria-label") || "",
+    ),
+    trace.querySelector(".trace-svg").getAttribute("aria-label"),
+  );
 
   // The pending bar follows the stepper without a re-render, same as the
   // preview and the button label.
-  const nextBar = trace.querySelector('.trace-bar.is-next');
-  const before = nextBar.getAttribute('d');
-  const plus = view.querySelectorAll('.stepper-btn').find((n) => /Increase Reps/.test(n.getAttribute('aria-label') || ''));
+  const nextBar = trace.querySelector(".trace-bar.is-next");
+  const before = nextBar.getAttribute("d");
+  const plus = view
+    .querySelectorAll(".stepper-btn")
+    .find((n) => /Increase Reps/.test(n.getAttribute("aria-label") || ""));
   const refreshesBefore = refreshes;
   plus.click();
   await settle();
-  ok('nudging the reps moves the pending bar', nextBar.getAttribute('d') !== before);
-  ok('without re-rendering the view', refreshes === refreshesBefore);
-  ok('and it is still the same node', view.querySelector('.trace-bar.is-next') === nextBar);
+  ok(
+    "nudging the reps moves the pending bar",
+    nextBar.getAttribute("d") !== before,
+  );
+  ok("without re-rendering the view", refreshes === refreshesBefore);
+  ok(
+    "and it is still the same node",
+    view.querySelector(".trace-bar.is-next") === nextBar,
+  );
 }
 
 // Notes have been stored since the first version and never shown.
 {
   reset();
   const ex = store.getExercises()[0];
-  store.logSet({ exerciseId: ex.id, date: TODAY, weight: 80, reps: 5, notes: 'belt on, felt fast' });
+  store.logSet({
+    exerciseId: ex.id,
+    date: TODAY,
+    weight: 80,
+    reps: 5,
+    notes: "belt on, felt fast",
+  });
   select.invalidate();
   setPrefill({ exerciseId: ex.id, date: TODAY });
-  const view = renderLog(ctx({ route: 'log' }));
-  ok('a note written at the rack is readable afterwards',
-    view.querySelectorAll('.row-note').length === 1
-    && view.querySelector('.row-note').textContent === 'belt on, felt fast');
+  const view = renderLog(ctx({ route: "log" }));
+  ok(
+    "a note written at the rack is readable afterwards",
+    view.querySelectorAll(".row-note").length === 1 &&
+      view.querySelector(".row-note").textContent === "belt on, felt fast",
+  );
 }
 
 /* --------------------------------------------------- 3b. the warm-up ramp */
@@ -573,60 +930,84 @@ for (const open of [false, true]) {
   store.logSet({ exerciseId: ex.id, date: TODAY, weight: 100, reps: 5 });
   select.invalidate();
   setPrefill({ exerciseId: ex.id, date: TODAY });
-  const view = renderLog(ctx({ route: 'log' }));
+  const view = renderLog(ctx({ route: "log" }));
 
-  const steps = view.querySelectorAll('.warmup-step');
-  ok('a heavy lift shows a warm-up ramp', steps.length > 0, String(steps.length));
+  const steps = view.querySelectorAll(".warmup-step");
+  ok(
+    "a heavy lift shows a warm-up ramp",
+    steps.length > 0,
+    String(steps.length),
+  );
 
-  const before = view.querySelector('#log-weight').value;
-  steps[0].querySelector('.link-btn').click();
-  const after = view.querySelector('#log-weight').value;
-  ok('using the first warm-up step fills in its weight',
-    after !== before && Number(after) < 100, `${before} -> ${after}`);
+  const before = view.querySelector("#log-weight").value;
+  steps[0].querySelector(".link-btn").click();
+  const after = view.querySelector("#log-weight").value;
+  ok(
+    "using the first warm-up step fills in its weight",
+    after !== before && Number(after) < 100,
+    `${before} -> ${after}`,
+  );
 }
 
 {
   reset();
-  const light = store.addExercise({ name: 'Fresh Lift', base: 20, step: 2.5 });
+  const light = store.addExercise({ name: "Fresh Lift", base: 20, step: 2.5 });
   store.logSet({ exerciseId: light.id, date: TODAY, weight: 22.5, reps: 5 });
   select.invalidate();
   setPrefill({ exerciseId: light.id, date: TODAY });
-  const view = renderLog(ctx({ route: 'log' }));
-  ok('barely above the bar, there is nothing to ramp through',
-    view.querySelectorAll('.warmup-step').length === 0);
+  const view = renderLog(ctx({ route: "log" }));
+  ok(
+    "barely above the bar, there is nothing to ramp through",
+    view.querySelectorAll(".warmup-step").length === 0,
+  );
 }
 
 {
   reset();
-  const bw = store.addExercise({ name: 'Press-ups', kind: 'bodyweight' });
+  const bw = store.addExercise({ name: "Press-ups", kind: "bodyweight" });
   store.logSet({ exerciseId: bw.id, date: TODAY, weight: 0, reps: 12 });
   select.invalidate();
   setPrefill({ exerciseId: bw.id, date: TODAY });
-  const view = renderLog(ctx({ route: 'log' }));
-  ok('a lift with nothing to load gets no warm-up ramp',
-    view.querySelectorAll('.warmup-step').length === 0);
+  const view = renderLog(ctx({ route: "log" }));
+  ok(
+    "a lift with nothing to load gets no warm-up ramp",
+    view.querySelectorAll(".warmup-step").length === 0,
+  );
 }
 
 /* -------------------------------------------- 6e. paths to progression */
 
-const metrics = await import('../js/metrics.js');
+const metrics = await import("../js/metrics.js");
 
 /** Replace one lift's history with a steady climb, so the fit is worth using. */
-function giveHistory(exerciseId, { weeks = 14, from = 72.5, perWeek = 1.15 } = {}) {
+function giveHistory(
+  exerciseId,
+  { weeks = 14, from = 72.5, perWeek = 1.15 } = {},
+) {
   const entries = store.getEntries().filter((e) => e.exerciseId !== exerciseId);
   let seq = 9000;
   for (let w = weeks - 1; w >= 0; w--) {
     for (const offset of [0, 3]) {
       entries.push({
-        id: `h-${seq}`, date: metrics.isoAddDays(TODAY, -(w * 7 + offset)),
-        exerciseId, weight: Math.round((from + (weeks - 1 - w) * perWeek) / 2.5) * 2.5,
-        reps: 5, sets: 3, rir: offset ? 2 : 1, notes: '', seq: seq++,
+        id: `h-${seq}`,
+        date: metrics.isoAddDays(TODAY, -(w * 7 + offset)),
+        exerciseId,
+        weight: Math.round((from + (weeks - 1 - w) * perWeek) / 2.5) * 2.5,
+        reps: 5,
+        sets: 3,
+        rir: offset ? 2 : 1,
+        notes: "",
+        seq: seq++,
       });
     }
   }
-  store.importJSON(JSON.stringify({
-    exercises: store.getExercises(), entries, settings: store.getSettings(),
-  }));
+  store.importJSON(
+    JSON.stringify({
+      exercises: store.getExercises(),
+      entries,
+      settings: store.getSettings(),
+    }),
+  );
   select.invalidate();
 }
 
@@ -636,21 +1017,30 @@ function giveHistory(exerciseId, { weeks = 14, from = 72.5, perWeek = 1.15 } = {
   const c = ctx();
   const st = c.stats.find((s) => s.entryCount > 0);
   openExercise(st.exercise.id);
-  const view = renderProgress(ctx({ route: 'progress' }));
+  const view = renderProgress(ctx({ route: "progress" }));
 
-  const track = view.querySelector('.milestone');
-  ok('the next milestone is always named', !!track);
-  ok('it is a round number on the bar', /\d+\s*kg/.test(track.querySelector('.milestone-value').textContent));
-  ok('a thin fit says why it cannot be dated',
-    /Needs a few more sessions/.test(track.querySelector('.milestone-eta').textContent),
-    track.querySelector('.milestone-eta').textContent);
-  ok('and the seed really is a thin fit', st.trendReliable === false);
+  const track = view.querySelector(".milestone");
+  ok("the next milestone is always named", !!track);
+  ok(
+    "it is a round number on the bar",
+    /\d+\s*kg/.test(track.querySelector(".milestone-value").textContent),
+  );
+  ok(
+    "a thin fit says why it cannot be dated",
+    /Needs a few more sessions/.test(
+      track.querySelector(".milestone-eta").textContent,
+    ),
+    track.querySelector(".milestone-eta").textContent,
+  );
+  ok("and the seed really is a thin fit", st.trendReliable === false);
   clearSelection();
 
   // The planner stays quiet rather than repeating "cannot say yet" per card.
   const plan = renderPlan(ctx());
-  ok('no runway on the cards while nothing can be dated',
-    plan.querySelectorAll('.milestone').length === 0);
+  ok(
+    "no runway on the cards while nothing can be dated",
+    plan.querySelectorAll(".milestone").length === 0,
+  );
 }
 
 // --- a real fit turns the projection into a destination and a date ---
@@ -660,29 +1050,43 @@ function giveHistory(exerciseId, { weeks = 14, from = 72.5, perWeek = 1.15 } = {
   giveHistory(ex.id);
   const c = ctx();
   const st = c.stats.find((s) => s.exercise.id === ex.id);
-  ok('fourteen weeks of training is a fit worth extrapolating', st.trendReliable === true);
+  ok(
+    "fourteen weeks of training is a fit worth extrapolating",
+    st.trendReliable === true,
+  );
 
   openExercise(ex.id);
-  const detail = renderProgress(ctx({ route: 'progress' }));
-  const eta = detail.querySelector('.milestone-eta').textContent;
-  ok('the milestone is now dated', /at this rate/.test(eta), eta);
-  ok('and counted in sessions, not just days', /session/.test(eta), eta);
-  const bar = detail.querySelector('.milestone-fill');
-  ok('the track shows how far along the climb you are', /width:\d/.test(bar.getAttribute('style') || ''));
+  const detail = renderProgress(ctx({ route: "progress" }));
+  const eta = detail.querySelector(".milestone-eta").textContent;
+  ok("the milestone is now dated", /at this rate/.test(eta), eta);
+  ok("and counted in sessions, not just days", /session/.test(eta), eta);
+  const bar = detail.querySelector(".milestone-fill");
+  ok(
+    "the track shows how far along the climb you are",
+    /width:\d/.test(bar.getAttribute("style") || ""),
+  );
   clearSelection();
 
   openCard(ex.id);
   const plan = renderPlan(ctx());
-  const compact = plan.querySelectorAll('.milestone.is-compact');
-  ok('the planner card now carries a runway', compact.length === 1, String(compact.length));
-  ok('and it names the same target',
-    compact[0].querySelector('.milestone-value').textContent
-      === detail.querySelector('.milestone-value').textContent);
+  const compact = plan.querySelectorAll(".milestone.is-compact");
+  ok(
+    "the planner card now carries a runway",
+    compact.length === 1,
+    String(compact.length),
+  );
+  ok(
+    "and it names the same target",
+    compact[0].querySelector(".milestone-value").textContent ===
+      detail.querySelector(".milestone-value").textContent,
+  );
 
   // Both screens must date it from the app's `today`, not the wall clock.
-  ok('the planner and the lift detail agree on the date',
-    compact[0].querySelector('.milestone-eta').textContent === eta,
-    `plan: ${compact[0].querySelector('.milestone-eta').textContent}\n     detail: ${eta}`);
+  ok(
+    "the planner and the lift detail agree on the date",
+    compact[0].querySelector(".milestone-eta").textContent === eta,
+    `plan: ${compact[0].querySelector(".milestone-eta").textContent}\n     detail: ${eta}`,
+  );
 }
 
 // --- what a lift is worth today, once a layoff has taken something off it ---
@@ -691,24 +1095,51 @@ function giveHistory(exerciseId, { weeks = 14, from = 72.5, perWeek = 1.15 } = {
   const ex = store.getExercises()[0];
   // Train hard for months, then stop for three of them.
   giveHistory(ex.id, { weeks: 14 });
-  const shifted = store.getEntries().map((e) => (e.exerciseId === ex.id
-    ? { ...e, date: metrics.isoAddDays(e.date, -90) } : e));
-  store.importJSON(JSON.stringify({
-    exercises: store.getExercises(), entries: shifted, settings: store.getSettings(),
-  }));
+  const shifted = store
+    .getEntries()
+    .map((e) =>
+      e.exerciseId === ex.id
+        ? { ...e, date: metrics.isoAddDays(e.date, -90) }
+        : e,
+    );
+  store.importJSON(
+    JSON.stringify({
+      exercises: store.getExercises(),
+      entries: shifted,
+      settings: store.getSettings(),
+    }),
+  );
   select.invalidate();
 
   const st = ctx().stats.find((s) => s.exercise.id === ex.id);
-  ok('the lift reads as detraining', st.readiness.phase.key === 'detrained', st.readiness.phase.key);
+  ok(
+    "the lift reads as detraining",
+    st.readiness.phase.key === "detrained",
+    st.readiness.phase.key,
+  );
 
   openExercise(ex.id);
-  const view = renderProgress(ctx({ route: 'progress' }));
-  const note = view.querySelector('.baseline-note');
-  ok('a detrained lift says what it is worth today', !!note, 'readiness.baseline is still invisible');
-  ok('and that is less than what was last lifted',
-    st.readiness.baseline < st.lastAdj - 1e-9);
-  ok('the note gives the number', /\d+\.\d\s*kg/.test(note.textContent), note.textContent);
-  ok('and says how much time off cost', /% off it/.test(note.textContent), note.textContent);
+  const view = renderProgress(ctx({ route: "progress" }));
+  const note = view.querySelector(".baseline-note");
+  ok(
+    "a detrained lift says what it is worth today",
+    !!note,
+    "readiness.baseline is still invisible",
+  );
+  ok(
+    "and that is less than what was last lifted",
+    st.readiness.baseline < st.lastAdj - 1e-9,
+  );
+  ok(
+    "the note gives the number",
+    /\d+\.\d\s*kg/.test(note.textContent),
+    note.textContent,
+  );
+  ok(
+    "and says how much time off cost",
+    /% off it/.test(note.textContent),
+    note.textContent,
+  );
   clearSelection();
 }
 
@@ -718,16 +1149,18 @@ function giveHistory(exerciseId, { weeks = 14, from = 72.5, perWeek = 1.15 } = {
   const ex = store.getExercises()[0];
   giveHistory(ex.id);
   openExercise(ex.id);
-  const view = renderProgress(ctx({ route: 'progress' }));
-  ok('a lift in regular training gets no layoff note',
-    view.querySelectorAll('.baseline-note').length === 0);
+  const view = renderProgress(ctx({ route: "progress" }));
+  ok(
+    "a lift in regular training gets no layoff note",
+    view.querySelectorAll(".baseline-note").length === 0,
+  );
   clearSelection();
 }
 
 /* --------------------------------------------- 6f. the trajectory chart */
 
-const charts = await import('../js/charts.js');
-const insights = await import('../js/insights.js');
+const charts = await import("../js/charts.js");
+const insights = await import("../js/insights.js");
 
 // --- the spread cone: only where there is a fit worth drawing one around ---
 {
@@ -738,24 +1171,47 @@ const insights = await import('../js/insights.js');
   const st = ctx().stats.find((s) => s.exercise.id === ex.id);
 
   const band = insights.projectionBand(st, cfg, { todayIso: TODAY });
-  ok('a real fit has a measurable spread', band && band.sd > 0, String(band && band.sd));
-  ok('the band widens with distance', band.halfWidth(56) > band.halfWidth(0));
-  ok('but sublinearly — it is a spread, not a fan',
-    band.halfWidth(56) < band.halfWidth(0) * 3, `${band.halfWidth(0)} -> ${band.halfWidth(56)}`);
+  ok(
+    "a real fit has a measurable spread",
+    band && band.sd > 0,
+    String(band && band.sd),
+  );
+  ok("the band widens with distance", band.halfWidth(56) > band.halfWidth(0));
+  ok(
+    "but sublinearly — it is a spread, not a fan",
+    band.halfWidth(56) < band.halfWidth(0) * 3,
+    `${band.halfWidth(0)} -> ${band.halfWidth(56)}`,
+  );
 
   const fig = charts.progressionChart(st, cfg, { width: 340, todayIso: TODAY });
-  ok('the chart draws the cone', fig.querySelectorAll('.proj-cone').length === 1);
-  ok('and keeps the fitted line inside it', fig.querySelectorAll('.trend-proj').length === 1);
-  ok('the key says what the cone is',
-    /Spread your sessions sit in/.test(fig.textContent), fig.textContent);
+  ok(
+    "the chart draws the cone",
+    fig.querySelectorAll(".proj-cone").length === 1,
+  );
+  ok(
+    "and keeps the fitted line inside it",
+    fig.querySelectorAll(".trend-proj").length === 1,
+  );
+  ok(
+    "the key says what the cone is",
+    /Spread your sessions sit in/.test(fig.textContent),
+    fig.textContent,
+  );
 
   // A thin fit must not get one.
   reset();
   const thin = ctx().stats.find((s) => s.entryCount > 0);
-  ok('a thin fit has no band', insights.projectionBand(thin, store.getSettings(), { todayIso: TODAY }) === null);
-  ok('and no cone is drawn',
-    charts.progressionChart(thin, store.getSettings(), { todayIso: TODAY })
-      .querySelectorAll('.proj-cone').length === 0);
+  ok(
+    "a thin fit has no band",
+    insights.projectionBand(thin, store.getSettings(), { todayIso: TODAY }) ===
+      null,
+  );
+  ok(
+    "and no cone is drawn",
+    charts
+      .progressionChart(thin, store.getSettings(), { todayIso: TODAY })
+      .querySelectorAll(".proj-cone").length === 0,
+  );
 }
 
 // --- the running best, and the milestone the chart is climbing toward ---
@@ -767,16 +1223,29 @@ const insights = await import('../js/insights.js');
   const st = ctx().stats.find((s) => s.exercise.id === ex.id);
   const fig = charts.progressionChart(st, cfg, { width: 340, todayIso: TODAY });
 
-  ok('a climbing lift draws a running-best step', fig.querySelectorAll('.pr-step').length === 1);
-  ok('the milestone is drawn on the chart', fig.querySelectorAll('.ref-milestone').length === 1);
-  const label = fig.querySelector('.label-milestone').textContent;
+  ok(
+    "a climbing lift draws a running-best step",
+    fig.querySelectorAll(".pr-step").length === 1,
+  );
+  ok(
+    "the milestone is drawn on the chart",
+    fig.querySelectorAll(".ref-milestone").length === 1,
+  );
+  const label = fig.querySelector(".label-milestone").textContent;
   const run = insights.runway(st, cfg, { todayIso: TODAY });
-  ok('and labelled in kilos on the bar, not in score', new RegExp(`kg × ${run.reps}$`).test(label), label);
+  ok(
+    "and labelled in kilos on the bar, not in score",
+    new RegExp(`kg × ${run.reps}$`).test(label),
+    label,
+  );
 
   // The chart and the milestone track must not disagree about the target.
-  ok('the chart line and the milestone track name the same target',
-    label === `${run.milestone.value} ${metrics.milestoneUnitLabel(run.milestone, run.reps)}`,
-    `${label} vs ${run.milestone.value} ${metrics.milestoneUnitLabel(run.milestone, run.reps)}`);
+  ok(
+    "the chart line and the milestone track name the same target",
+    label ===
+      `${run.milestone.value} ${metrics.milestoneUnitLabel(run.milestone, run.reps)}`,
+    `${label} vs ${run.milestone.value} ${metrics.milestoneUnitLabel(run.milestone, run.reps)}`,
+  );
 }
 
 // --- range clips the view without touching the fit ---
@@ -788,25 +1257,41 @@ const insights = await import('../js/insights.js');
   const st = ctx().stats.find((s) => s.exercise.id === ex.id);
 
   const all = charts.progressionChart(st, cfg, { width: 340, todayIso: TODAY });
-  const eight = charts.progressionChart(st, cfg, { width: 340, todayIso: TODAY, range: 56 });
-  const dots = (f) => f.querySelectorAll('.dot').length;
-  ok('a shorter range draws fewer sessions', dots(eight) < dots(all), `${dots(eight)} vs ${dots(all)}`);
-  ok('but quotes the same trend',
-    /Trend [-\d.]+ kg\/wk/.exec(all.textContent)[0] === /Trend [-\d.]+ kg\/wk/.exec(eight.textContent)[0],
-    'clipping the axis changed the number the rest of the screen quotes');
+  const eight = charts.progressionChart(st, cfg, {
+    width: 340,
+    todayIso: TODAY,
+    range: 56,
+  });
+  const dots = (f) => f.querySelectorAll(".dot").length;
+  ok(
+    "a shorter range draws fewer sessions",
+    dots(eight) < dots(all),
+    `${dots(eight)} vs ${dots(all)}`,
+  );
+  ok(
+    "but quotes the same trend",
+    /Trend [-\d.]+ kg\/wk/.exec(all.textContent)[0] ===
+      /Trend [-\d.]+ kg\/wk/.exec(eight.textContent)[0],
+    "clipping the axis changed the number the rest of the screen quotes",
+  );
 
   openExercise(ex.id);
-  const view = renderProgress(ctx({ route: 'progress' }));
+  const view = renderProgress(ctx({ route: "progress" }));
   await settle();
-  ok('the range selector is offered once there is history to fill it',
-    view.querySelectorAll('.chart-range').length === 1);
+  ok(
+    "the range selector is offered once there is history to fill it",
+    view.querySelectorAll(".chart-range").length === 1,
+  );
 
   // And withheld when there is not.
   reset();
   openExercise(store.getExercises()[0].id);
-  const thin = renderProgress(ctx({ route: 'progress' }));
+  const thin = renderProgress(ctx({ route: "progress" }));
   await settle();
-  ok('and withheld on a short history', thin.querySelectorAll('.chart-range').length === 0);
+  ok(
+    "and withheld on a short history",
+    thin.querySelectorAll(".chart-range").length === 0,
+  );
   clearSelection();
 }
 
@@ -819,23 +1304,44 @@ const insights = await import('../js/insights.js');
   const st = ctx().stats.find((s) => s.exercise.id === ex.id);
 
   const lane = charts.readinessLane(st, cfg, { width: 340, todayIso: TODAY });
-  ok('the readiness curve is drawn', !!lane);
-  ok('it marks where you are on it today', /today/.test(lane.textContent), lane.textContent);
-  ok('and where the lift is fit to be trained again',
-    lane.querySelectorAll('.ready-mark').length === 1);
-  ok('it is measured against your last session',
-    /last session/.test(lane.textContent));
-  ok('the curve describes itself for a screen reader',
-    /readiness against your last session/.test(lane.querySelector('.chart-svg').getAttribute('aria-label') || ''),
-    lane.querySelector('.chart-svg').getAttribute('aria-label'));
+  ok("the readiness curve is drawn", !!lane);
+  ok(
+    "it marks where you are on it today",
+    /today/.test(lane.textContent),
+    lane.textContent,
+  );
+  ok(
+    "and where the lift is fit to be trained again",
+    lane.querySelectorAll(".ready-mark").length === 1,
+  );
+  ok(
+    "it is measured against your last session",
+    /last session/.test(lane.textContent),
+  );
+  ok(
+    "the curve describes itself for a screen reader",
+    /readiness against your last session/.test(
+      lane.querySelector(".chart-svg").getAttribute("aria-label") || "",
+    ),
+    lane.querySelector(".chart-svg").getAttribute("aria-label"),
+  );
 
-  ok('with the model switched off there is no curve to draw',
-    charts.readinessLane(st, { ...cfg, readiness: 'off' }, { todayIso: TODAY }) === null);
+  ok(
+    "with the model switched off there is no curve to draw",
+    charts.readinessLane(
+      st,
+      { ...cfg, readiness: "off" },
+      { todayIso: TODAY },
+    ) === null,
+  );
 
   openExercise(ex.id);
-  const view = renderProgress(ctx({ route: 'progress' }));
+  const view = renderProgress(ctx({ route: "progress" }));
   await settle();
-  ok('the lift detail shows it', view.querySelectorAll('.chart-readiness').length === 1);
+  ok(
+    "the lift detail shows it",
+    view.querySelectorAll(".chart-readiness").length === 1,
+  );
   clearSelection();
 }
 
@@ -844,10 +1350,20 @@ const insights = await import('../js/insights.js');
   reset();
   const st = ctx().stats.find((s) => s.entryCount > 0);
   const cfg = store.getSettings();
-  const first = charts.progressionChart(st, cfg, { width: 340, todayIso: TODAY });
-  const again = charts.progressionChart(st, cfg, { width: 500, todayIso: TODAY, animate: false });
-  ok('the first draw animates in', !first.classList.contains('no-anim'));
-  ok('a resize repaint does not replay it', again.classList.contains('no-anim'));
+  const first = charts.progressionChart(st, cfg, {
+    width: 340,
+    todayIso: TODAY,
+  });
+  const again = charts.progressionChart(st, cfg, {
+    width: 500,
+    todayIso: TODAY,
+    animate: false,
+  });
+  ok("the first draw animates in", !first.classList.contains("no-anim"));
+  ok(
+    "a resize repaint does not replay it",
+    again.classList.contains("no-anim"),
+  );
 }
 
 /* ------------------------------------------- 6g. the whole-body screen */
@@ -861,58 +1377,105 @@ const insights = await import('../js/insights.js');
 
   // --- the analytics behind it ---
   const tons = insights.tonnageSeries(all, { weeks: 12, todayIso: TODAY });
-  ok('tonnage is one bucket per week', tons.length === 12);
-  ok('and the recent weeks carry work', tons.slice(-4).every((b) => b.volume > 0));
+  ok("tonnage is one bucket per week", tons.length === 12);
+  ok(
+    "and the recent weeks carry work",
+    tons.slice(-4).every((b) => b.volume > 0),
+  );
 
   const days = insights.consistency(all, { days: 112, todayIso: TODAY });
-  ok('consistency covers every day, trained or not', days.length === 112);
-  ok('a rest day is a zero rather than a gap', days.some((d) => d.sets === 0));
-  ok('and it ends today', days[days.length - 1].date === TODAY);
+  ok("consistency covers every day, trained or not", days.length === 112);
+  ok(
+    "a rest day is a zero rather than a gap",
+    days.some((d) => d.sets === 0),
+  );
+  ok("and it ends today", days[days.length - 1].date === TODAY);
 
   const bal = insights.balance(all, { weeks: 4, todayIso: TODAY });
-  ok('balance covers every lift', bal.length === all.length);
+  ok("balance covers every lift", bal.length === all.length);
 
   // --- the screen ---
   clearSelection();
-  uistate.set('progress.view', 'body');
-  const view = renderProgress(ctx({ route: 'progress' }));
+  uistate.set("progress.view", "body");
+  const view = renderProgress(ctx({ route: "progress" }));
   await settle();
 
-  ok('the whole-body screen renders', view.classList.contains('view-body'));
-  ok('the tonnage chart is drawn', view.querySelectorAll('.chart-svg').length >= 1);
-  ok('the consistency grid is drawn', view.querySelectorAll('.heat-cells').length === 1);
-  ok('one cell per day', view.querySelectorAll('.heat-cell').length >= 112);
-  ok('the balance bars are drawn', view.querySelectorAll('.balance-row').length > 0);
-  ok('the PR timeline is drawn', view.querySelectorAll('.pr-event').length > 0);
+  ok("the whole-body screen renders", view.classList.contains("view-body"));
+  ok(
+    "the tonnage chart is drawn",
+    view.querySelectorAll(".chart-svg").length >= 1,
+  );
+  ok(
+    "the consistency grid is drawn",
+    view.querySelectorAll(".heat-cells").length === 1,
+  );
+  ok("one cell per day", view.querySelectorAll(".heat-cell").length >= 112);
+  ok(
+    "the balance bars are drawn",
+    view.querySelectorAll(".balance-row").length > 0,
+  );
+  ok("the PR timeline is drawn", view.querySelectorAll(".pr-event").length > 0);
 
   // Shade is a magnitude, and never the only thing saying what a day was.
-  const cells = view.querySelectorAll('.heat-cell').filter((n) => !n.classList.contains('is-blank'));
-  ok('every day says in words what it was',
-    cells.filter((n) => n.hasAttribute('title')).length >= 112,
-    'a day identified by shade alone is unreadable');
-  ok('a rest day says rest', cells.some((n) => /rest/.test(n.getAttribute('title') || '')));
-  ok('a trained day says how many sets',
-    cells.some((n) => /\d+ sets? across \d+ lift/.test(n.getAttribute('title') || '')));
-  ok('the grid describes itself for a screen reader',
-    /training days out of the last 112/.test(view.querySelector('.heat').getAttribute('aria-label') || ''),
-    view.querySelector('.heat').getAttribute('aria-label'));
+  const cells = view
+    .querySelectorAll(".heat-cell")
+    .filter((n) => !n.classList.contains("is-blank"));
+  ok(
+    "every day says in words what it was",
+    cells.filter((n) => n.hasAttribute("title")).length >= 112,
+    "a day identified by shade alone is unreadable",
+  );
+  ok(
+    "a rest day says rest",
+    cells.some((n) => /rest/.test(n.getAttribute("title") || "")),
+  );
+  ok(
+    "a trained day says how many sets",
+    cells.some((n) =>
+      /\d+ sets? across \d+ lift/.test(n.getAttribute("title") || ""),
+    ),
+  );
+  ok(
+    "the grid describes itself for a screen reader",
+    /training days out of the last 112/.test(
+      view.querySelector(".heat").getAttribute("aria-label") || "",
+    ),
+    view.querySelector(".heat").getAttribute("aria-label"),
+  );
 
   // Balance carries a glyph and a word, not just a bar length.
-  ok('each lift gets a verdict in words',
-    view.querySelectorAll('.balance-row .status-chip').length === view.querySelectorAll('.balance-row').length);
-  ok('and the screen says the balance is per lift, not per muscle',
-    /not per muscle/.test(view.textContent), 'the missing taxonomy has to be stated');
+  ok(
+    "each lift gets a verdict in words",
+    view.querySelectorAll(".balance-row .status-chip").length ===
+      view.querySelectorAll(".balance-row").length,
+  );
+  ok(
+    "and the screen says the balance is per lift, not per muscle",
+    /not per muscle/.test(view.textContent),
+    "the missing taxonomy has to be stated",
+  );
 
   // The switch, and that it is remembered.
-  const seg = view.querySelector('.view-switch');
-  ok('the Lifts / Everything switch is on the screen', !!seg);
-  ok('the whole-body mode is the one selected',
-    seg.querySelectorAll('.seg').find((n) => n.getAttribute('aria-selected') === 'true').textContent === 'Everything');
+  const seg = view.querySelector(".view-switch");
+  ok("the Lifts / Everything switch is on the screen", !!seg);
+  ok(
+    "the whole-body mode is the one selected",
+    seg
+      .querySelectorAll(".seg")
+      .find((n) => n.getAttribute("aria-selected") === "true").textContent ===
+      "Everything",
+  );
 
-  uistate.set('progress.view', 'lifts');
-  const back = renderProgress(ctx({ route: 'progress' }));
-  ok('switching back returns to the lift list', back.classList.contains('view-progress'));
-  ok('and the switch is still offered there', back.querySelectorAll('.view-switch').length === 1);
+  uistate.set("progress.view", "lifts");
+  const back = renderProgress(ctx({ route: "progress" }));
+  ok(
+    "switching back returns to the lift list",
+    back.classList.contains("view-progress"),
+  );
+  ok(
+    "and the switch is still offered there",
+    back.querySelectorAll(".view-switch").length === 1,
+  );
 }
 
 {
@@ -920,64 +1483,94 @@ const insights = await import('../js/insights.js');
   reset();
   store.clearAll();
   select.invalidate();
-  uistate.set('progress.view', 'body');
-  const view = renderProgress(ctx({ route: 'progress' }));
+  uistate.set("progress.view", "body");
+  const view = renderProgress(ctx({ route: "progress" }));
   await settle();
-  ok('an empty log gets an invitation, not four blank charts',
-    view.textContent.includes('Nothing to show yet')
-    && view.querySelectorAll('.heat-cells').length === 0);
-  uistate.set('progress.view', 'lifts');
+  ok(
+    "an empty log gets an invitation, not four blank charts",
+    view.textContent.includes("Nothing to show yet") &&
+      view.querySelectorAll(".heat-cells").length === 0,
+  );
+  uistate.set("progress.view", "lifts");
 }
 
 /* ------------------------------------------- 6h. the kinetic pass */
 
-const uiKit = await import('../js/ui.js');
-const motion2 = await import('../js/core/motion.js');
+const uiKit = await import("../js/ui.js");
+const motion2 = await import("../js/core/motion.js");
 
 // --- an actionable toast has to outlast the reach for it ---
 {
   reset();
   const doc = globalThis.document;
-  for (const t of doc.body.querySelectorAll('.toast')) t.remove();
+  for (const t of doc.body.querySelectorAll(".toast")) t.remove();
 
-  uiKit.toast('Saved');
-  const plain = doc.body.querySelector('.toast');
-  ok('a plain message toasts', !!plain);
-  ok('and carries no action', plain.querySelectorAll('.toast-action').length === 0);
+  uiKit.toast("Saved");
+  const plain = doc.body.querySelector(".toast");
+  ok("a plain message toasts", !!plain);
+  ok(
+    "and carries no action",
+    plain.querySelectorAll(".toast-action").length === 0,
+  );
   plain.remove();
 
   let undone = false;
-  uiKit.toast('Entry deleted', { action: () => { undone = true; }, actionLabel: 'Undo' });
-  const actionable = doc.body.querySelector('.toast.has-action');
-  ok('an actionable toast is marked as one', !!actionable);
-  const btn = actionable.querySelector('.toast-action');
-  ok('its button says what it undoes, not just "Undo"',
-    /Undo — Entry deleted/.test(btn.getAttribute('aria-label') || ''), btn.getAttribute('aria-label'));
+  uiKit.toast("Entry deleted", {
+    action: () => {
+      undone = true;
+    },
+    actionLabel: "Undo",
+  });
+  const actionable = doc.body.querySelector(".toast.has-action");
+  ok("an actionable toast is marked as one", !!actionable);
+  const btn = actionable.querySelector(".toast-action");
+  ok(
+    'its button says what it undoes, not just "Undo"',
+    /Undo — Entry deleted/.test(btn.getAttribute("aria-label") || ""),
+    btn.getAttribute("aria-label"),
+  );
 
   // It must still be there well past the 4.2s a plain toast gets.
-  actionable.dispatchEvent({ type: 'focusin' });
+  actionable.dispatchEvent({ type: "focusin" });
   await new Promise((r) => setTimeout(r, 60));
-  ok('holding focus stops the countdown', actionable.isConnected !== false);
+  ok("holding focus stops the countdown", actionable.isConnected !== false);
   btn.click();
-  ok('and the action still runs', undone === true);
+  ok("and the action still runs", undone === true);
 }
 
 // --- a swipe is a shortcut; the row has to say what else it does ---
 {
   reset();
   const ex = store.getExercises()[0];
-  store.logSet({ exerciseId: ex.id, date: TODAY, weight: 90, reps: 5, rir: 2, notes: 'tough' });
+  store.logSet({
+    exerciseId: ex.id,
+    date: TODAY,
+    weight: 90,
+    reps: 5,
+    rir: 2,
+    notes: "tough",
+  });
   select.invalidate();
   setPrefill({ exerciseId: ex.id, date: TODAY });
-  const view = renderLog(ctx({ route: 'log' }));
-  const row = view.querySelector('.row-btn');
-  const label = row.getAttribute('aria-label') || '';
-  ok('a history row announces its lift and set', /5 at 90 kilos/.test(label), label);
-  ok('it announces the RIR', /RIR 2/.test(label), label);
-  ok('it reads the note out', /noted: tough/.test(label), label);
-  ok('and says the route that is not a swipe', /Edit or delete/.test(label), label);
-  ok('the swipe affordance itself stays decorative',
-    view.querySelector('.swipe-action').getAttribute('aria-hidden') === 'true');
+  const view = renderLog(ctx({ route: "log" }));
+  const row = view.querySelector(".row-btn");
+  const label = row.getAttribute("aria-label") || "";
+  ok(
+    "a history row announces its lift and set",
+    /5 at 90 kilos/.test(label),
+    label,
+  );
+  ok("it announces the RIR", /RIR 2/.test(label), label);
+  ok("it reads the note out", /noted: tough/.test(label), label);
+  ok(
+    "and says the route that is not a swipe",
+    /Edit or delete/.test(label),
+    label,
+  );
+  ok(
+    "the swipe affordance itself stays decorative",
+    view.querySelector(".swipe-action").getAttribute("aria-hidden") === "true",
+  );
 }
 
 // --- numbers arrive rather than appearing ---
@@ -985,13 +1578,23 @@ const motion2 = await import('../js/core/motion.js');
   reset();
   const st = ctx().stats.find((s) => s.entryCount > 0);
   openExercise(st.exercise.id);
-  const view = renderProgress(ctx({ route: 'progress' }));
-  const num = view.querySelector('.hero-num');
-  ok('the hero number paints its start value synchronously', num.textContent === '0.0', num.textContent);
+  const view = renderProgress(ctx({ route: "progress" }));
+  const num = view.querySelector(".hero-num");
+  ok(
+    "the hero number paints its start value synchronously",
+    num.textContent === "0.0",
+    num.textContent,
+  );
   await new Promise((r) => setTimeout(r, 700));
-  ok('and lands exactly on the real figure', num.textContent === fmtOf(st.lastAdj), num.textContent);
-  ok('the unit is not eaten by the animation',
-    view.querySelector('.hero-value').textContent.endsWith(' kg'));
+  ok(
+    "and lands exactly on the real figure",
+    num.textContent === fmtOf(st.lastAdj),
+    num.textContent,
+  );
+  ok(
+    "the unit is not eaten by the animation",
+    view.querySelector(".hero-value").textContent.endsWith(" kg"),
+  );
   clearSelection();
 }
 
@@ -999,98 +1602,78 @@ const motion2 = await import('../js/core/motion.js');
 {
   reset();
   const ex = store.getExercises()[0];
-  setPrefill({ exerciseId: ex.id, date: TODAY, weight: 100, reps: 5, sets: 3, mode: 'sets' });
-  renderLog(ctx({ route: 'log' }));
+  setPrefill({
+    exerciseId: ex.id,
+    date: TODAY,
+    weight: 100,
+    reps: 5,
+    sets: 3,
+    mode: "sets",
+  });
+  renderLog(ctx({ route: "log" }));
 
   // No set logged yet: nothing to climb from.
-  ok('no climb is queued before anything is logged',
-    uistate.get('log.scoreFrom', null) === null);
+  ok(
+    "no climb is queued before anything is logged",
+    uistate.get("log.scoreFrom", null) === null,
+  );
 
-  const c = ctx({ route: 'log' });
+  const c = ctx({ route: "log" });
   const first = renderLog(c);
-  first.querySelector('.btn-save').click();
-  ok('logging a set records where the score was', uistate.get('log.scoreFrom', null) !== null);
+  first.querySelector(".btn-save").click();
+  ok(
+    "logging a set records where the score was",
+    uistate.get("log.scoreFrom", null) !== null,
+  );
 
   select.invalidate();
-  const after = renderLog(ctx({ route: 'log' }));
-  const scoreNum = after.querySelector('.preview-num');
-  ok('the score node exists to be animated', !!scoreNum);
+  const after = renderLog(ctx({ route: "log" }));
+  const scoreNum = after.querySelector(".preview-num");
+  ok("the score node exists to be animated", !!scoreNum);
   await new Promise((r) => setTimeout(r, 700));
-  ok('and settles on the session score', /\d/.test(scoreNum.textContent), scoreNum.textContent);
-  ok('the climb is consumed, not repeated', uistate.get('log.scoreFrom', null) === null);
+  ok(
+    "and settles on the session score",
+    /\d/.test(scoreNum.textContent),
+    scoreNum.textContent,
+  );
+  ok(
+    "the climb is consumed, not repeated",
+    uistate.get("log.scoreFrom", null) === null,
+  );
 }
 
 // --- what the lift just did, once YOU say it is done ---
 {
   reset();
   const ex = store.getExercises()[0];
-  for (let i = 0; i < 3; i++) store.logSet({ exerciseId: ex.id, date: TODAY, weight: 100, reps: 5, rir: 2 });
+  for (let i = 0; i < 3; i++)
+    store.logSet({
+      exerciseId: ex.id,
+      date: TODAY,
+      weight: 100,
+      reps: 5,
+      rir: 2,
+    });
   select.invalidate();
-  setPrefill({ exerciseId: ex.id, date: TODAY, weight: 100, reps: 5, sets: 3, mode: 'sets' });
+  setPrefill({
+    exerciseId: ex.id,
+    date: TODAY,
+    weight: 100,
+    reps: 5,
+    sets: 3,
+    mode: "sets",
+  });
+  const view = renderLog(ctx({ route: "log" }));
 
-  const planned = renderLog(ctx({ route: 'log' }));
-  ok('hitting the planned count does not call the lift done by itself',
-    planned.querySelector('.session-summary') === null);
-  const btn = planned.querySelector('.done-btn');
-  ok('it offers the decision instead', !!btn && /Done with this lift/.test(btn.textContent));
-
-  btn.click();
-  select.invalidate();
-  const view = renderLog(ctx({ route: 'log' }));
-
-  ok('the store now holds the marker', store.isDone(ex.id, TODAY) === true);
-  const sum = view.querySelector('.session-summary');
-  ok('saying so puts a summary on the screen', !!sum);
-  ok('it counts the sets', /3 sets/.test(sum.textContent), sum.textContent);
-  ok('it says what was moved', /kg moved/.test(sum.textContent), sum.textContent);
-  ok('and it names the lift', sum.textContent.includes(ex.name));
-  ok('the tracker reads as complete', !!view.querySelector('.set-track.is-complete'));
-  ok('and the button offers the way back',
-    /Not done after all/.test(view.querySelector('.done-btn').textContent));
-
-  view.querySelector('.done-btn').click();
-  select.invalidate();
-  const reopened = renderLog(ctx({ route: 'log' }));
-  ok('taking it back reopens the lift', store.isDone(ex.id, TODAY) === false);
-  ok('and the summary goes with it', reopened.querySelector('.session-summary') === null);
-}
-
-// --- stopping short of the plan is still a finished lift ---
-{
-  reset();
-  const ex = store.getExercises()[0];
-  store.logSet({ exerciseId: ex.id, date: TODAY, weight: 100, reps: 5, rir: 2 });
-  select.invalidate();
-  setPrefill({ exerciseId: ex.id, date: TODAY, weight: 100, reps: 5, sets: 5, mode: 'sets' });
-
-  const view = renderLog(ctx({ route: 'log' }));
-  ok('one set of a planned five can still be called done', !!view.querySelector('.done-btn'));
-  view.querySelector('.done-btn').click();
-  select.invalidate();
-
-  const after = renderLog(ctx({ route: 'log' }));
-  ok('and it is', after.querySelector('.session-summary') !== null);
-  ok('the count says what happened, not what was planned',
-    /1 set — done/.test(after.querySelector('.set-track-label').textContent),
-    after.querySelector('.set-track-label').textContent);
-}
-
-// --- a day written up afterwards can be called done too ---
-{
-  reset();
-  const ex = store.getExercises()[0];
-  const earlier = '2026-08-16';
-  store.addEntry({ exerciseId: ex.id, date: earlier, weight: 100, reps: 5, sets: 3 });
-  select.invalidate();
-  setPrefill({ exerciseId: ex.id, date: earlier, weight: 100, reps: 5, sets: 3, mode: 'bulk' });
-
-  const view = renderLog(ctx({ route: 'log' }));
-  const btn = view.querySelector('.done-btn');
-  ok('bulk mode offers the marker as well', !!btn);
-  btn.click();
-  select.invalidate();
-  ok('and it takes', store.isDone(ex.id, earlier) === true);
-  ok('the summary follows', renderLog(ctx({ route: 'log' })).querySelector('.session-summary') !== null);
+  const sum = view.querySelector(".session-summary");
+  ok("finishing the plan puts a summary on the screen", !!sum);
+  ok("it counts the sets", /3 sets/.test(sum.textContent), sum.textContent);
+  ok(
+    "it says what was moved",
+    /kg moved/.test(sum.textContent),
+    sum.textContent,
+  );
+  ok("and it names the lift", sum.textContent.includes(ex.name));
 }
 
 // --- everything decorative stands down when asked ---
@@ -1098,29 +1681,42 @@ const motion2 = await import('../js/core/motion.js');
   reset();
   const realMatch = globalThis.window.matchMedia;
   globalThis.window.matchMedia = (q) => ({
-    matches: /prefers-reduced-motion/.test(q), media: q,
-    addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
+    matches: /prefers-reduced-motion/.test(q),
+    media: q,
+    addEventListener() {},
+    removeEventListener() {},
+    addListener() {},
+    removeListener() {},
   });
   globalThis.matchMedia = globalThis.window.matchMedia;
 
-  ok('reduced motion is reported', motion2.prefersReducedMotion() === true);
+  ok("reduced motion is reported", motion2.prefersReducedMotion() === true);
 
-  const node = globalThis.document.createElement('span');
+  const node = globalThis.document.createElement("span");
   motion2.countUp(node, 118.3, { from: 0, format: (v) => v.toFixed(1) });
-  ok('a count-up writes the answer straight out instead of running',
-    node.textContent === '118.3', node.textContent);
+  ok(
+    "a count-up writes the answer straight out instead of running",
+    node.textContent === "118.3",
+    node.textContent,
+  );
 
-  const before = globalThis.document.body.querySelectorAll('.confetti-host').length;
+  const before =
+    globalThis.document.body.querySelectorAll(".confetti-host").length;
   uiKit.celebrate();
-  ok('and there is no confetti',
-    globalThis.document.body.querySelectorAll('.confetti-host').length === before);
+  ok(
+    "and there is no confetti",
+    globalThis.document.body.querySelectorAll(".confetti-host").length ===
+      before,
+  );
 
   const st = ctx().stats.find((s) => s.entryCount > 0);
   openExercise(st.exercise.id);
-  const view = renderProgress(ctx({ route: 'progress' }));
-  ok('the hero number is simply correct on arrival',
-    view.querySelector('.hero-num').textContent === fmtOf(st.lastAdj),
-    view.querySelector('.hero-num').textContent);
+  const view = renderProgress(ctx({ route: "progress" }));
+  ok(
+    "the hero number is simply correct on arrival",
+    view.querySelector(".hero-num").textContent === fmtOf(st.lastAdj),
+    view.querySelector(".hero-num").textContent,
+  );
   clearSelection();
 
   globalThis.window.matchMedia = realMatch;
@@ -1131,9 +1727,22 @@ const motion2 = await import('../js/core/motion.js');
 
 /** A reps lift with enough history to plan from. */
 function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
-  const ex = store.addExercise({ name: 'Press-ups', kind: 'bodyweight', setsPerSession: 3, gainPerWeek: 0.015, setsPerWeek: 12 });
+  const ex = store.addExercise({
+    name: "Press-ups",
+    kind: "bodyweight",
+    setsPerSession: 3,
+    gainPerWeek: 0.015,
+    setsPerWeek: 12,
+  });
   for (const [i, r] of reps.entries()) {
-    store.addEntry({ exerciseId: ex.id, date: metrics.isoAddDays(TODAY, from + i * step), weight: 0, reps: r, sets: 3, rir: 2 });
+    store.addEntry({
+      exerciseId: ex.id,
+      date: metrics.isoAddDays(TODAY, from + i * step),
+      weight: 0,
+      reps: r,
+      sets: 3,
+      rir: 2,
+    });
   }
   select.invalidate();
   return ex;
@@ -1147,59 +1756,107 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
   // --- the planner ---
   openCard(ex.id);
   const plan = renderPlan(ctx());
-  const presc = plan.querySelector('.presc');
-  ok('the prescription is a rep count, not a weight', !/\bkg\b/.test(presc.textContent), presc.textContent);
-  ok('and it is said once, properly, for anything reading it',
-    /^\d+ sets of \d+ reps$/.test(presc.querySelector('.visually-hidden').textContent),
-    presc.querySelector('.visually-hidden').textContent);
-  ok('the pieces it is drawn from are hidden from screen readers',
-    presc.querySelectorAll('.presc-weight').every((n) => n.getAttribute('aria-hidden') === 'true'));
+  const presc = plan.querySelector(".presc");
+  ok(
+    "the prescription is a rep count, not a weight",
+    !/\bkg\b/.test(presc.textContent),
+    presc.textContent,
+  );
+  ok(
+    "and it is said once, properly, for anything reading it",
+    /^\d+ sets of \d+ reps$/.test(
+      presc.querySelector(".visually-hidden").textContent,
+    ),
+    presc.querySelector(".visually-hidden").textContent,
+  );
+  ok(
+    "the pieces it is drawn from are hidden from screen readers",
+    presc
+      .querySelectorAll(".presc-weight")
+      .every((n) => n.getAttribute("aria-hidden") === "true"),
+  );
 
-  ok('there is no rep lever — reps are the answer', plan.querySelectorAll('#reps-' + ex.id).length === 0);
-  ok('but there is still a sets lever', plan.querySelectorAll('#sets-' + ex.id).length === 1);
-  const cells = plan.querySelectorAll('.cell-btn');
-  ok('the trade-off is one row of set counts, not a grid', cells.length === 6, String(cells.length));
-  ok('and it is labelled in reps',
-    /\d+ sets of \d+ reps/.test(cells[0].getAttribute('aria-label') || ''), cells[0].getAttribute('aria-label'));
+  ok(
+    "there is no rep lever — reps are the answer",
+    plan.querySelectorAll("#reps-" + ex.id).length === 0,
+  );
+  ok(
+    "but there is still a sets lever",
+    plan.querySelectorAll("#sets-" + ex.id).length === 1,
+  );
+  const cells = plan.querySelectorAll(".cell-btn");
+  ok(
+    "the trade-off is one row of set counts, not a grid",
+    cells.length === 6,
+    String(cells.length),
+  );
+  ok(
+    "and it is labelled in reps",
+    /\d+ sets of \d+ reps/.test(cells[0].getAttribute("aria-label") || ""),
+    cells[0].getAttribute("aria-label"),
+  );
   const was = refreshes;
   cells[4].click();
-  ok('picking a column changes the set count', refreshes > was);
+  ok("picking a column changes the set count", refreshes > was);
 
   // --- logging ---
-  setPrefill({ exerciseId: ex.id, date: TODAY, mode: 'sets' });
-  const log = renderLog(ctx({ route: 'log' }));
-  ok('the log asks for no weight', !/Weight \(/.test(log.textContent));
-  ok('the save button counts reps', /\d+ reps$/.test(log.querySelector('.btn-save').textContent),
-    log.querySelector('.btn-save').textContent);
-  ok('history reads without a load', log.querySelector('.row-set').textContent === '3 × 12 reps',
-    log.querySelector('.row-set').textContent);
-  ok('and says so out loud too',
-    /3 sets of 12 reps/.test(log.querySelector('.row-btn').getAttribute('aria-label') || ''),
-    log.querySelector('.row-btn').getAttribute('aria-label'));
+  setPrefill({ exerciseId: ex.id, date: TODAY, mode: "sets" });
+  const log = renderLog(ctx({ route: "log" }));
+  ok("the log asks for no weight", !/Weight \(/.test(log.textContent));
+  ok(
+    "the save button counts reps",
+    /\d+ reps$/.test(log.querySelector(".btn-save").textContent),
+    log.querySelector(".btn-save").textContent,
+  );
+  ok(
+    "history reads without a load",
+    log.querySelector(".row-set").textContent === "3 × 12 reps",
+    log.querySelector(".row-set").textContent,
+  );
+  ok(
+    "and says so out loud too",
+    /3 sets of 12 reps/.test(
+      log.querySelector(".row-btn").getAttribute("aria-label") || "",
+    ),
+    log.querySelector(".row-btn").getAttribute("aria-label"),
+  );
 
   // --- progress ---
   openExercise(ex.id);
-  const prog = renderProgress(ctx({ route: 'progress' }));
+  const prog = renderProgress(ctx({ route: "progress" }));
   await settle();
-  ok('the hero is a score, not kilos', prog.querySelector('.hero-value').textContent.endsWith(' score'),
-    prog.querySelector('.hero-value').textContent);
-  ok('the milestone is counted in reps',
-    /reps$/.test(prog.querySelector('.milestone-value').textContent.trim()),
-    prog.querySelector('.milestone-value').textContent);
-  ok('the session table reads without a load',
-    prog.querySelectorAll('.data-table td')[0].textContent === '3 × 12 reps');
+  ok(
+    "the hero is a score, not kilos",
+    prog.querySelector(".hero-value").textContent.endsWith(" score"),
+    prog.querySelector(".hero-value").textContent,
+  );
+  ok(
+    "the milestone is counted in reps",
+    /reps$/.test(prog.querySelector(".milestone-value").textContent.trim()),
+    prog.querySelector(".milestone-value").textContent,
+  );
+  ok(
+    "the session table reads without a load",
+    prog.querySelectorAll(".data-table td")[0].textContent === "3 × 12 reps",
+  );
   clearSelection();
 
   // --- the whole-body screen must not add reps to a kilo total ---
-  uistate.set('progress.view', 'body');
-  const body = renderProgress(ctx({ route: 'progress' }));
+  uistate.set("progress.view", "body");
+  const body = renderProgress(ctx({ route: "progress" }));
   await settle();
-  ok('a bodyweight lift contributes no tonnage',
-    insights.tonnageSeries(ctx().stats, { weeks: 4, todayIso: TODAY }).every((b) => b.volume === 0),
-    'reps were counted as kilos');
-  ok('but it still shows up in where the work went',
-    body.textContent.includes('Press-ups'));
-  uistate.set('progress.view', 'lifts');
+  ok(
+    "a bodyweight lift contributes no tonnage",
+    insights
+      .tonnageSeries(ctx().stats, { weeks: 4, todayIso: TODAY })
+      .every((b) => b.volume === 0),
+    "reps were counted as kilos",
+  );
+  ok(
+    "but it still shows up in where the work went",
+    body.textContent.includes("Press-ups"),
+  );
+  uistate.set("progress.view", "lifts");
 }
 
 /* ------------------- 6i-b. a bodyweight lift never mentions a weight */
@@ -1216,36 +1873,51 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
   /** Every per-lift value on a screen. Deliberately not the whole textContent:
    *  the shared explainers talk about barbell training and always will. */
   const VALUE_PARTS = [
-    '.presc', '.plan-strip-value', '.card-meta', '.row-set', '.day-meta',
-    '.hero-value', '.hero-delta', '.row-adj-big', '.row-trend', '.milestone-value',
-    '.milestone-from', '.set-track', '.summary-facts', '.stat-value', '.data-table td',
+    ".presc",
+    ".plan-strip-value",
+    ".card-meta",
+    ".row-set",
+    ".day-meta",
+    ".hero-value",
+    ".hero-delta",
+    ".row-adj-big",
+    ".row-trend",
+    ".milestone-value",
+    ".milestone-from",
+    ".set-track",
+    ".summary-facts",
+    ".stat-value",
+    ".data-table td",
   ];
   const sweep = (label, node) => {
     for (const sel of VALUE_PARTS) {
       for (const n of node.querySelectorAll(sel)) {
-        ok(`${label} ${sel} says nothing about kilos`,
-          !/\bkg\b|kilos/.test(n.textContent), `${sel}: ${n.textContent.trim().slice(0, 70)}`);
+        ok(
+          `${label} ${sel} says nothing about kilos`,
+          !/\bkg\b|kilos/.test(n.textContent),
+          `${sel}: ${n.textContent.trim().slice(0, 70)}`,
+        );
       }
     }
   };
 
   openCard(ex.id);
-  sweep('[plan]', renderPlan(ctx()));
+  sweep("[plan]", renderPlan(ctx()));
 
-  setPrefill({ exerciseId: ex.id, date: TODAY, mode: 'sets' });
-  sweep('[log]', renderLog(ctx({ route: 'log' })));
+  setPrefill({ exerciseId: ex.id, date: TODAY, mode: "sets" });
+  sweep("[log]", renderLog(ctx({ route: "log" })));
 
   openExercise(ex.id);
-  const detail = renderProgress(ctx({ route: 'progress' }));
+  const detail = renderProgress(ctx({ route: "progress" }));
   await settle();
-  sweep('[lift]', detail);
+  sweep("[lift]", detail);
   clearSelection();
-  sweep('[list]', renderProgress(ctx({ route: 'progress' })));
+  sweep("[list]", renderProgress(ctx({ route: "progress" })));
 
   // And with the numbers disclosed, which is where the score and target live.
   store.updateSettings({ numbersOpen: true });
   openCard(ex.id);
-  sweep('[plan, numbers open]', renderPlan(ctx()));
+  sweep("[plan, numbers open]", renderPlan(ctx()));
   store.updateSettings({ numbersOpen: false });
 }
 
@@ -1257,49 +1929,82 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
   // for a session, of which there were nine.
   reset();
   store.clearAll();
-  const ex = store.addExercise({ name: 'Press-ups' });
+  const ex = store.addExercise({ name: "Press-ups" });
   for (const [i, r] of [10, 11, 12].entries()) {
-    store.addEntry({ exerciseId: ex.id, date: metrics.isoAddDays(TODAY, -9 + i * 4), weight: 0, reps: r, sets: 3, rir: 2 });
+    store.addEntry({
+      exerciseId: ex.id,
+      date: metrics.isoAddDays(TODAY, -9 + i * 4),
+      weight: 0,
+      reps: r,
+      sets: 3,
+      rir: 2,
+    });
   }
   select.invalidate();
 
   const st = ctx().stats.find((s) => s.exercise.id === ex.id);
-  ok('a lift logged with no weight scores nothing', !(st.lastAdj > 0));
-  ok('and is recognised as one that should not have been weighted',
-    insights.looksBodyweight(st) === true);
-  ok('a lift already marked is not flagged again',
-    insights.looksBodyweight({ ...st, exercise: { ...st.exercise, kind: 'bodyweight' } }) === false);
-  ok('and a properly loaded lift is never flagged',
-    insights.looksBodyweight(ctx().stats.find((s) => s.exercise.id !== ex.id) || { entries: [] }) === false);
+  ok("a lift logged with no weight scores nothing", !(st.lastAdj > 0));
+  ok(
+    "and is recognised as one that should not have been weighted",
+    insights.looksBodyweight(st) === true,
+  );
+  ok(
+    "a lift already marked is not flagged again",
+    insights.looksBodyweight({
+      ...st,
+      exercise: { ...st.exercise, kind: "bodyweight" },
+    }) === false,
+  );
+  ok(
+    "and a properly loaded lift is never flagged",
+    insights.looksBodyweight(
+      ctx().stats.find((s) => s.exercise.id !== ex.id) || { entries: [] },
+    ) === false,
+  );
 
   openCard(ex.id);
-  const card = renderPlan(ctx()).querySelector('.card');
-  ok('the card explains what is actually wrong',
-    /has no weight on it/.test(card.textContent), card.textContent.slice(0, 90));
-  ok('rather than asking for a session it already has',
-    !card.textContent.includes('Log a session for this lift'));
+  const card = renderPlan(ctx()).querySelector(".card");
+  ok(
+    "the card explains what is actually wrong",
+    /has no weight on it/.test(card.textContent),
+    card.textContent.slice(0, 90),
+  );
+  ok(
+    "rather than asking for a session it already has",
+    !card.textContent.includes("Log a session for this lift"),
+  );
 
-  const fix = card.querySelectorAll('.btn-primary').find((n) => /Mark as bodyweight/.test(n.textContent));
-  ok('and offers the one-tap fix', !!fix);
+  const fix = card
+    .querySelectorAll(".btn-primary")
+    .find((n) => /Mark as bodyweight/.test(n.textContent));
+  ok("and offers the one-tap fix", !!fix);
   fix.click();
-  ok('which marks the lift', store.getExercise(ex.id).kind === 'bodyweight');
+  ok("which marks the lift", store.getExercise(ex.id).kind === "bodyweight");
   select.invalidate();
   const planned = renderPlan(ctx());
-  ok('and it now gets a real prescription',
-    /\d+ sets of \d+ reps/.test((planned.querySelector('.presc .visually-hidden') || {}).textContent || ''),
-    'still no plan after marking it');
+  ok(
+    "and it now gets a real prescription",
+    /\d+ sets of \d+ reps/.test(
+      (planned.querySelector(".presc .visually-hidden") || {}).textContent ||
+        "",
+    ),
+    "still no plan after marking it",
+  );
   store.undo();
-  ok('the fix is undoable', store.getExercise(ex.id).kind === 'weight');
+  ok("the fix is undoable", store.getExercise(ex.id).kind === "weight");
 }
 
 {
   // The flag was called 'reps' for one release; documents saved then still read.
   reset();
   const doc = JSON.parse(store.exportJSON());
-  doc.exercises[0].kind = 'reps';
+  doc.exercises[0].kind = "reps";
   const back = store.importJSON(JSON.stringify(doc));
-  ok('a lift saved as "reps" loads as a bodyweight lift', back.exercises[0].kind === 'bodyweight');
-  ok('and is treated as one', metrics.isBodyweight(back.exercises[0]) === true);
+  ok(
+    'a lift saved as "reps" loads as a bodyweight lift',
+    back.exercises[0].kind === "bodyweight",
+  );
+  ok("and is treated as one", metrics.isBodyweight(back.exercises[0]) === true);
 }
 
 /* ------------------------------------------- 6j. how fast a lift moves */
@@ -1307,36 +2012,72 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
 {
   reset();
   const ex = store.getExercises()[0];
-  uistate.set('setup.openExerciseId', ex.id);
-  const view = renderSetup(ctx({ route: 'setup' }));
+  uistate.set("setup.openExerciseId", ex.id);
+  const view = renderSetup(ctx({ route: "setup" }));
 
-  ok('the lift card offers a level', view.textContent.includes('How fast this lift should move'));
-  ok('and a kind switch', view.textContent.includes('What changes between sessions'));
+  ok(
+    "the lift card offers a level",
+    view.textContent.includes("How fast this lift should move"),
+  );
+  ok(
+    "and a kind switch",
+    view.textContent.includes("What changes between sessions"),
+  );
 
   // There are two level pickers on this screen: the global one that new lifts
   // inherit, and this lift's own. Scope to the open card.
-  const chips = view.querySelectorAll('.card.is-open .chips .chip');
+  const chips = view.querySelectorAll(".card.is-open .chips .chip");
   const labels = chips.map((n) => n.textContent);
-  ok('the global picker is a separate control', view.textContent.includes('Training level'));
-  ok('all three levels are offered',
-    ['Beginner', 'Intermediate', 'Advanced'].every((l) => labels.includes(l)), labels.join(','));
-  ok('the shipped default reads as Custom, not as a preset',
-    labels.includes('Custom'), labels.join(','));
+  ok(
+    "the global picker is a separate control",
+    view.textContent.includes("Training level"),
+  );
+  ok(
+    "all three levels are offered",
+    ["Beginner", "Intermediate", "Advanced"].every((l) => labels.includes(l)),
+    labels.join(","),
+  );
+  ok(
+    "the shipped default reads as Custom, not as a preset",
+    labels.includes("Custom"),
+    labels.join(","),
+  );
 
-  const beginner = chips.find((n) => n.textContent === 'Beginner');
+  const beginner = chips.find((n) => n.textContent === "Beginner");
   beginner.click();
   const after = store.getExercise(ex.id);
-  ok('picking a level sets the gain rate', Math.abs(after.gainPerWeek - 0.015) < 1e-9, String(after.gainPerWeek));
-  ok('and the set targets that come with it', after.setsPerSession === 3 && after.setsPerWeek === 10);
+  ok(
+    "picking a level sets the gain rate",
+    Math.abs(after.gainPerWeek - 0.015) < 1e-9,
+    String(after.gainPerWeek),
+  );
+  ok(
+    "and the set targets that come with it",
+    after.setsPerSession === 3 && after.setsPerWeek === 10,
+  );
 
-  const again = renderSetup(ctx({ route: 'setup' }));
-  const selected = again.querySelectorAll('.card.is-open .chips .chip.is-selected').map((n) => n.textContent);
-  ok('the chosen level shows as chosen', selected.includes('Beginner'), selected.join(','));
-  ok('and Custom is gone from that lift',
-    !again.querySelectorAll('.card.is-open .chips .chip').map((n) => n.textContent).includes('Custom'));
+  const again = renderSetup(ctx({ route: "setup" }));
+  const selected = again
+    .querySelectorAll(".card.is-open .chips .chip.is-selected")
+    .map((n) => n.textContent);
+  ok(
+    "the chosen level shows as chosen",
+    selected.includes("Beginner"),
+    selected.join(","),
+  );
+  ok(
+    "and Custom is gone from that lift",
+    !again
+      .querySelectorAll(".card.is-open .chips .chip")
+      .map((n) => n.textContent)
+      .includes("Custom"),
+  );
 
   store.undo();
-  ok('undo puts the old numbers back', store.getExercise(ex.id).gainPerWeek !== 0.015);
+  ok(
+    "undo puts the old numbers back",
+    store.getExercise(ex.id).gainPerWeek !== 0.015,
+  );
 }
 
 /* ------------------------------------------- 6k. a hand-set milestone */
@@ -1344,25 +2085,45 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
 {
   reset();
   const ex = store.getExercises()[0];
-  uistate.set('setup.openExerciseId', ex.id);
-  const view = renderSetup(ctx({ route: 'setup' }));
+  uistate.set("setup.openExerciseId", ex.id);
+  const view = renderSetup(ctx({ route: "setup" }));
 
-  ok('the lift card offers a milestone target', view.textContent.includes('Milestone to chase'));
-  ok('with no override, there is nothing to clear',
-    view.querySelectorAll('.card.is-open button').filter((n) => /Clear/.test(n.textContent)).length === 0);
+  ok(
+    "the lift card offers a milestone target",
+    view.textContent.includes("Milestone to chase"),
+  );
+  ok(
+    "with no override, there is nothing to clear",
+    view
+      .querySelectorAll(".card.is-open button")
+      .filter((n) => /Clear/.test(n.textContent)).length === 0,
+  );
 
   const valField = view.querySelector(`#ms-val-${ex.id}`);
-  valField.value = '140';
-  valField.dispatchEvent('change');
-  ok('typing a target weight saves it', store.getExercise(ex.id).milestone.value === 140,
-    JSON.stringify(store.getExercise(ex.id).milestone));
+  valField.value = "140";
+  valField.dispatchEvent("change");
+  ok(
+    "typing a target weight saves it",
+    store.getExercise(ex.id).milestone.value === 140,
+    JSON.stringify(store.getExercise(ex.id).milestone),
+  );
 
-  const again = renderSetup(ctx({ route: 'setup' }));
-  ok('once set, a clear button appears',
-    again.querySelectorAll('.card.is-open button').some((n) => /Clear/.test(n.textContent)));
-  again.querySelectorAll('.card.is-open button').find((n) => /Clear/.test(n.textContent)).click();
-  ok('clearing goes back to automatic', store.getExercise(ex.id).milestone === null);
-  uistate.set('setup.openExerciseId', null);
+  const again = renderSetup(ctx({ route: "setup" }));
+  ok(
+    "once set, a clear button appears",
+    again
+      .querySelectorAll(".card.is-open button")
+      .some((n) => /Clear/.test(n.textContent)),
+  );
+  again
+    .querySelectorAll(".card.is-open button")
+    .find((n) => /Clear/.test(n.textContent))
+    .click();
+  ok(
+    "clearing goes back to automatic",
+    store.getExercise(ex.id).milestone === null,
+  );
+  uistate.set("setup.openExerciseId", null);
 }
 
 /* ------------------------------------------------------------ 6l. tags */
@@ -1370,28 +2131,49 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
 {
   reset();
   const ex = store.getExercises()[0];
-  uistate.set('setup.openExerciseId', ex.id);
-  const view = renderSetup(ctx({ route: 'setup' }));
+  uistate.set("setup.openExerciseId", ex.id);
+  const view = renderSetup(ctx({ route: "setup" }));
 
-  ok('the lift card offers tags', view.textContent.includes('Tags'));
-  const suggested = view.querySelectorAll('.card.is-open .chips .chip').map((n) => n.textContent);
-  ok('common tags are offered as quick-add chips', suggested.includes('Legs') && suggested.includes('Push'));
+  ok("the lift card offers tags", view.textContent.includes("Tags"));
+  const suggested = view
+    .querySelectorAll(".card.is-open .chips .chip")
+    .map((n) => n.textContent);
+  ok(
+    "common tags are offered as quick-add chips",
+    suggested.includes("Legs") && suggested.includes("Push"),
+  );
 
-  view.querySelectorAll('.card.is-open .chips .chip').find((n) => n.textContent === 'Legs').click();
-  ok('tapping a suggested tag adds it', store.getExercise(ex.id).tags.includes('Legs'));
+  view
+    .querySelectorAll(".card.is-open .chips .chip")
+    .find((n) => n.textContent === "Legs")
+    .click();
+  ok(
+    "tapping a suggested tag adds it",
+    store.getExercise(ex.id).tags.includes("Legs"),
+  );
 
-  const again = renderSetup(ctx({ route: 'setup' }));
-  const legsChip = again.querySelectorAll('.card.is-open .chips .chip').find((n) => n.textContent === 'Legs');
-  ok('it now shows selected', legsChip.classList.contains('is-selected'));
+  const again = renderSetup(ctx({ route: "setup" }));
+  const legsChip = again
+    .querySelectorAll(".card.is-open .chips .chip")
+    .find((n) => n.textContent === "Legs");
+  ok("it now shows selected", legsChip.classList.contains("is-selected"));
   legsChip.click();
-  ok('tapping it again removes it', !store.getExercise(ex.id).tags.includes('Legs'));
+  ok(
+    "tapping it again removes it",
+    !store.getExercise(ex.id).tags.includes("Legs"),
+  );
 
-  const input = again.querySelectorAll('.card.is-open input').find((n) => n.getAttribute('aria-label') === 'Add a tag');
-  input.value = 'Warm-up focus';
-  input.dispatchEvent({ type: 'keydown', key: 'Enter', preventDefault() {} });
-  ok('a custom tag typed and entered is saved', store.getExercise(ex.id).tags.includes('Warm-up focus'),
-    JSON.stringify(store.getExercise(ex.id).tags));
-  uistate.set('setup.openExerciseId', null);
+  const input = again
+    .querySelectorAll(".card.is-open input")
+    .find((n) => n.getAttribute("aria-label") === "Add a tag");
+  input.value = "Warm-up focus";
+  input.dispatchEvent({ type: "keydown", key: "Enter", preventDefault() {} });
+  ok(
+    "a custom tag typed and entered is saved",
+    store.getExercise(ex.id).tags.includes("Warm-up focus"),
+    JSON.stringify(store.getExercise(ex.id).tags),
+  );
+  uistate.set("setup.openExerciseId", null);
 }
 
 {
@@ -1399,22 +2181,39 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
   reset();
   const ex = store.getExercises()[0];
   giveHistory(ex.id, { weeks: 14, from: 72.5, perWeek: 1.15 });
-  store.updateExercise(ex.id, { gainPerWeek: 0.0015, setsPerSession: 4, setsPerWeek: 20 });
+  store.updateExercise(ex.id, {
+    gainPerWeek: 0.0015,
+    setsPerSession: 4,
+    setsPerWeek: 20,
+  });
   select.invalidate();
-  uistate.set('setup.openExerciseId', ex.id);
+  uistate.set("setup.openExerciseId", ex.id);
 
   const st = ctx().stats.find((s) => s.exercise.id === ex.id);
-  ok('the lift really is outrunning its setting', !!insights.suggestLevel(st));
+  ok("the lift really is outrunning its setting", !!insights.suggestLevel(st));
 
-  const view = renderSetup(ctx({ route: 'setup' }));
-  ok('the card says so', view.textContent.includes('has been moving faster'));
-  ok('and shows the measured rate', /%\/wk over the last \d+ weeks/.test(view.textContent), view.textContent.slice(0, 60));
-  ok('it offers rather than applies',
-    Math.abs(store.getExercise(ex.id).gainPerWeek - 0.0015) < 1e-9, 'the suggestion changed the lift on its own');
+  const view = renderSetup(ctx({ route: "setup" }));
+  ok("the card says so", view.textContent.includes("has been moving faster"));
+  ok(
+    "and shows the measured rate",
+    /%\/wk over the last \d+ weeks/.test(view.textContent),
+    view.textContent.slice(0, 60),
+  );
+  ok(
+    "it offers rather than applies",
+    Math.abs(store.getExercise(ex.id).gainPerWeek - 0.0015) < 1e-9,
+    "the suggestion changed the lift on its own",
+  );
 
-  view.querySelectorAll('.hint-btn').find((n) => /moving faster/.test(n.textContent)).click();
-  ok('taking the suggestion applies it',
-    store.getExercise(ex.id).gainPerWeek > 0.0015, String(store.getExercise(ex.id).gainPerWeek));
+  view
+    .querySelectorAll(".hint-btn")
+    .find((n) => /moving faster/.test(n.textContent))
+    .click();
+  ok(
+    "taking the suggestion applies it",
+    store.getExercise(ex.id).gainPerWeek > 0.0015,
+    String(store.getExercise(ex.id).gainPerWeek),
+  );
 
   // And a lift that agrees with its setting stays quiet.
   reset();
@@ -1425,10 +2224,14 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
   const near = insights.nearestLevel(st2.trendPerWeek / st2.lastAdj);
   store.updateExercise(q.id, { gainPerWeek: near.gainPerWeek });
   select.invalidate();
-  uistate.set('setup.openExerciseId', q.id);
-  ok('a lift matching its level is left alone',
-    !renderSetup(ctx({ route: 'setup' })).textContent.includes('has been moving faster'));
-  uistate.set('setup.openExerciseId', null);
+  uistate.set("setup.openExerciseId", q.id);
+  ok(
+    "a lift matching its level is left alone",
+    !renderSetup(ctx({ route: "setup" })).textContent.includes(
+      "has been moving faster",
+    ),
+  );
+  uistate.set("setup.openExerciseId", null);
 }
 
 /* ------------------------------------- 7. view state survives a reload */
@@ -1438,21 +2241,30 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
   const ex = store.getExercises()[1];
 
   // Half-fill the form, the way someone standing at the rack would.
-  setPrefill({ exerciseId: ex.id, date: TODAY, weight: 82.5, reps: 6, sets: 4 });
-  renderLog(ctx({ route: 'log' }));
+  setPrefill({
+    exerciseId: ex.id,
+    date: TODAY,
+    weight: 82.5,
+    reps: 6,
+    sets: 4,
+  });
+  renderLog(ctx({ route: "log" }));
 
-  const saved = uistate.get('log.form', null);
-  ok('the log form is written to view state as it is filled in', !!saved);
-  ok('the saved form keeps the lift', saved && saved.exerciseId === ex.id);
-  ok('the saved form keeps the weight', saved && saved.weight === 82.5, String(saved && saved.weight));
-  ok('the saved form keeps the reps', saved && saved.reps === 6);
+  const saved = uistate.get("log.form", null);
+  ok("the log form is written to view state as it is filled in", !!saved);
+  ok("the saved form keeps the lift", saved && saved.exerciseId === ex.id);
+  ok(
+    "the saved form keeps the weight",
+    saved && saved.weight === 82.5,
+    String(saved && saved.weight),
+  );
+  ok("the saved form keeps the reps", saved && saved.reps === 6);
 
   // uistate debounces its writes; a reload reads the bytes, so check the bytes.
   await new Promise((r) => setTimeout(r, 200));
-  const raw = globalThis.sessionStorage.getItem('liftingTracker.ui');
-  ok('view state reaches sessionStorage', !!raw && raw.includes('log.form'));
-  ok('and it is the form that was typed', !!raw && raw.includes('82.5'));
-
+  const raw = globalThis.sessionStorage.getItem("liftingTracker.ui");
+  ok("view state reaches sessionStorage", !!raw && raw.includes("log.form"));
+  ok("and it is the form that was typed", !!raw && raw.includes("82.5"));
 }
 
 {
@@ -1460,25 +2272,41 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
   // than out of its own module scope. The store is reloaded and the module's
   // cached form is dropped, but sessionStorage is deliberately left alone.
   const ex = store.getExercises()[2];
-  setPrefill({ exerciseId: ex.id, date: TODAY, weight: 47.5, reps: 9, sets: 2 });
+  setPrefill({
+    exerciseId: ex.id,
+    date: TODAY,
+    weight: 47.5,
+    reps: 9,
+    sets: 2,
+  });
   // Writes are debounced; flush before reading the bytes a reload would see.
   uistate.flush();
-  const stashed = globalThis.sessionStorage.getItem('liftingTracker.ui');
-  ok('flush writes straight through the debounce', stashed.includes('47.5'));
+  const stashed = globalThis.sessionStorage.getItem("liftingTracker.ui");
+  ok("flush writes straight through the debounce", stashed.includes("47.5"));
 
   // A page load: the modules forget everything, sessionStorage does not.
   store.reload();
   select.invalidate();
   clearForm();
-  globalThis.sessionStorage.setItem('liftingTracker.ui', stashed);
+  globalThis.sessionStorage.setItem("liftingTracker.ui", stashed);
   uistate.rehydrate();
 
-  const back = renderLog(ctx({ route: 'log' }));
-  const fields = back.querySelectorAll('.stepper-input').map((n) => n.value);
-  ok('a reload puts the half-typed weight back', fields.includes('47.5'), fields.join(', '));
-  ok('a reload puts the half-typed reps back', fields.includes('9'), fields.join(', '));
-  ok('and it remembers which lift it was for',
-    back.querySelectorAll('.chip-lift.is-selected').length === 1);
+  const back = renderLog(ctx({ route: "log" }));
+  const fields = back.querySelectorAll(".stepper-input").map((n) => n.value);
+  ok(
+    "a reload puts the half-typed weight back",
+    fields.includes("47.5"),
+    fields.join(", "),
+  );
+  ok(
+    "a reload puts the half-typed reps back",
+    fields.includes("9"),
+    fields.join(", "),
+  );
+  ok(
+    "and it remembers which lift it was for",
+    back.querySelectorAll(".chip-lift.is-selected").length === 1,
+  );
 }
 
 {
@@ -1486,12 +2314,16 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
   reset();
   const ex = store.getExercises()[0];
   setPrefill({ exerciseId: ex.id, date: TODAY });
-  renderLog(ctx({ route: 'log' }));
+  renderLog(ctx({ route: "log" }));
   store.deleteExercise(ex.id);
   select.invalidate();
-  const after = render('Log after its lift was deleted', () => renderLog(ctx({ route: 'log' })));
-  ok('a deleted lift drops back to the picker',
-    after && after.textContent.includes('Pick a lift to log'));
+  const after = render("Log after its lift was deleted", () =>
+    renderLog(ctx({ route: "log" })),
+  );
+  ok(
+    "a deleted lift drops back to the picker",
+    after && after.textContent.includes("Pick a lift to log"),
+  );
 }
 
 {
@@ -1500,12 +2332,21 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
   const c = ctx();
   const trained = c.stats.find((s) => s.entryCount > 0);
   openCard(trained.exercise.id);
-  ok('the open card is remembered', uistate.get('plan.openId', undefined) === trained.exercise.id);
+  ok(
+    "the open card is remembered",
+    uistate.get("plan.openId", undefined) === trained.exercise.id,
+  );
 
   openExercise(trained.exercise.id);
-  ok('the drilled-in lift is remembered', uistate.get('progress.selectedId', null) === trained.exercise.id);
+  ok(
+    "the drilled-in lift is remembered",
+    uistate.get("progress.selectedId", null) === trained.exercise.id,
+  );
   clearSelection();
-  ok('and clearing it is remembered', uistate.get('progress.selectedId', null) === null);
+  ok(
+    "and clearing it is remembered",
+    uistate.get("progress.selectedId", null) === null,
+  );
 }
 
 /* --------------------------------------------- 8. the app actually boots */
@@ -1516,42 +2357,67 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
 {
   reset();
   const doc = globalThis.document;
-  const main = doc.createElement('main');
-  main.setAttribute('id', 'main');
-  const tabbar = doc.createElement('nav');
-  tabbar.setAttribute('id', 'tabbar');
+  const main = doc.createElement("main");
+  main.setAttribute("id", "main");
+  const tabbar = doc.createElement("nav");
+  tabbar.setAttribute("id", "tabbar");
   doc.body.append(main, tabbar);
 
   let booted = true;
   try {
-    await import('../js/app.js');
+    await import("../js/app.js");
   } catch (err) {
     booted = false;
-    ok('the app boots', false, `threw ${err && err.message}`);
+    ok("the app boots", false, `threw ${err && err.message}`);
   }
 
   if (booted) {
-    ok('the app boots', true);
+    ok("the app boots", true);
     await settle();
-    ok('it lands on the Next screen', main.querySelectorAll('.view-plan').length === 1);
-    ok('it paints the tab bar', tabbar.querySelectorAll('.tab').length === 4);
-    ok('one tab is current',
-      tabbar.querySelectorAll('.tab').filter((t) => t.getAttribute('aria-current') === 'page').length === 1);
-    ok('the action button is offered', doc.body.querySelectorAll('.fab').length === 1);
+    ok(
+      "it lands on the Next screen",
+      main.querySelectorAll(".view-plan").length === 1,
+    );
+    ok("it paints the tab bar", tabbar.querySelectorAll(".tab").length === 4);
+    ok(
+      "one tab is current",
+      tabbar
+        .querySelectorAll(".tab")
+        .filter((t) => t.getAttribute("aria-current") === "page").length === 1,
+    );
+    ok(
+      "the action button is offered",
+      doc.body.querySelectorAll(".fab").length === 1,
+    );
 
     // Switching tabs must actually swap the view.
-    const progressTab = tabbar.querySelectorAll('.tab').find((t) => t.textContent.includes('Progress'));
+    const progressTab = tabbar
+      .querySelectorAll(".tab")
+      .find((t) => t.textContent.includes("Progress"));
     progressTab.click();
     await settle();
-    ok('tapping a tab switches the view', main.querySelectorAll('.view-progress').length === 1);
-    ok('and the action button follows you there', doc.body.querySelectorAll('.fab').length === 1);
+    ok(
+      "tapping a tab switches the view",
+      main.querySelectorAll(".view-progress").length === 1,
+    );
+    ok(
+      "and the action button follows you there",
+      doc.body.querySelectorAll(".fab").length === 1,
+    );
 
-    const logTab = tabbar.querySelectorAll('.tab').find((t) => t.textContent.trim().startsWith('Log'));
+    const logTab = tabbar
+      .querySelectorAll(".tab")
+      .find((t) => t.textContent.trim().startsWith("Log"));
     logTab.click();
     await settle();
-    ok('the Log tab renders through the loop', main.querySelectorAll('.view-log').length === 1);
-    ok('the action button hides on the screen it points at',
-      doc.body.querySelectorAll('.fab').length === 0);
+    ok(
+      "the Log tab renders through the loop",
+      main.querySelectorAll(".view-log").length === 1,
+    );
+    ok(
+      "the action button hides on the screen it points at",
+      doc.body.querySelectorAll(".fab").length === 0,
+    );
   }
 }
 
@@ -1561,21 +2427,27 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
 // stylesheet and the planner now agree through data-band. If they drift, every
 // cell in the trade-off grid silently reads grey — which looks deliberate.
 {
-  const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-  const css = readFileSync(join(root, 'css', 'app.css'), 'utf8');
-  const M = await import('../js/metrics.js');
+  const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+  const css = readFileSync(join(root, "css", "app.css"), "utf8");
+  const M = await import("../js/metrics.js");
 
-  const styled = new Set([...css.matchAll(/\[data-band="([a-z]+)"\]/g)].map((m) => m[1]));
+  const styled = new Set(
+    [...css.matchAll(/\[data-band="([a-z]+)"\]/g)].map((m) => m[1]),
+  );
   for (const key of Object.keys(M.BANDS)) {
     ok(`the stylesheet colours the "${key}" verdict`, styled.has(key));
   }
   for (const key of styled) {
-    ok(`the stylesheet does not colour a verdict that no longer exists: ${key}`,
-      Object.keys(M.BANDS).includes(key));
+    ok(
+      `the stylesheet does not colour a verdict that no longer exists: ${key}`,
+      Object.keys(M.BANDS).includes(key),
+    );
   }
-  ok('the tint is defined once, not per consumer',
+  ok(
+    "the tint is defined once, not per consumer",
     !/\.is-(ideal|stretch|toobig|beaten|return)/.test(css),
-    'a per-band class rule survived the refactor');
+    "a per-band class rule survived the refactor",
+  );
 
   reset();
   select.invalidate();
@@ -1584,17 +2456,31 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
   openCard(trained.exercise.id);
   const plan = renderPlan(ctx());
 
-  const cells = plan.querySelectorAll('.cell');
-  ok('every grid cell declares its verdict',
-    cells.length === 42 && cells.every((n) => !!n.dataset.band), `${cells.length} cells`);
-  ok('and every verdict it declares is a real one',
-    cells.every((n) => Object.keys(M.BANDS).includes(n.dataset.band)));
-  ok('the legend declares its verdicts too',
-    plan.querySelectorAll('.legend-item').every((n) => styled.has(n.dataset.band)));
-  const chips = plan.querySelectorAll('.band-chip');
-  ok('the verdict chips declare theirs', chips.length > 0 && chips.every((n) => !!n.dataset.band));
-  ok('the pick marker still rides alongside the verdict',
-    cells.filter((n) => n.classList.contains('is-pick')).length === 1);
+  const cells = plan.querySelectorAll(".cell");
+  ok(
+    "every grid cell declares its verdict",
+    cells.length === GRID_CELLS && cells.every((n) => !!n.dataset.band),
+    `${cells.length} cells`,
+  );
+  ok(
+    "and every verdict it declares is a real one",
+    cells.every((n) => Object.keys(M.BANDS).includes(n.dataset.band)),
+  );
+  ok(
+    "the legend declares its verdicts too",
+    plan
+      .querySelectorAll(".legend-item")
+      .every((n) => styled.has(n.dataset.band)),
+  );
+  const chips = plan.querySelectorAll(".band-chip");
+  ok(
+    "the verdict chips declare theirs",
+    chips.length > 0 && chips.every((n) => !!n.dataset.band),
+  );
+  ok(
+    "the pick marker still rides alongside the verdict",
+    cells.filter((n) => n.classList.contains("is-pick")).length === 1,
+  );
 }
 
 /* ------------------------------------------- 9. the offline shell is complete */
@@ -1604,13 +2490,13 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
 // working offline, quietly, for the people who installed it. So the list is
 // checked against the disk rather than against anyone's memory.
 {
-  const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-  const sw = readFileSync(join(root, 'sw.js'), 'utf8');
+  const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+  const sw = readFileSync(join(root, "sw.js"), "utf8");
   const shell = [...sw.matchAll(/'(\.\/[^']*)'/g)].map((m) => m[1]);
 
-  ok('sw.js declares a shell', shell.length > 5);
+  ok("sw.js declares a shell", shell.length > 5);
   for (const rel of shell) {
-    if (rel === './') continue;
+    if (rel === "./") continue;
     ok(`shell file exists: ${rel}`, existsSync(join(root, rel.slice(2))));
   }
 
@@ -1620,15 +2506,20 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
     for (const name of readdirSync(join(root, dir), { withFileTypes: true })) {
       const rel = `${dir}/${name.name}`;
       if (name.isDirectory()) sweep(rel);
-      else if (name.name.endsWith('.js')) jsFiles.push(`./${relative('.', rel)}`);
+      else if (name.name.endsWith(".js"))
+        jsFiles.push(`./${relative(".", rel)}`);
     }
   };
-  sweep('js');
+  sweep("js");
   for (const f of jsFiles) {
-    ok(`precached: ${f}`, listed.has(f), 'add it to SHELL in sw.js and bump CACHE');
+    ok(
+      `precached: ${f}`,
+      listed.has(f),
+      "add it to SHELL in sw.js and bump CACHE",
+    );
   }
-  ok('the stylesheet is precached', listed.has('./css/app.css'));
-  ok('the shell is versioned', /const CACHE = 'lifting-tracker-v\d+'/.test(sw));
+  ok("the stylesheet is precached", listed.has("./css/app.css"));
+  ok("the shell is versioned", /const CACHE = 'lifting-tracker-v\d+'/.test(sw));
 }
 
 /* ------------------------------------- 6n. a lift you have called done */
@@ -1640,28 +2531,38 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
   store.logSet({ exerciseId: ex.id, date: TODAY, weight: 100, reps: 5 });
   select.invalidate();
 
-  const before = renderPlan(ctx({ route: 'plan' }));
-  ok('before it is finished, the screen has no such group',
-    !/Done today/.test(before.textContent));
+  const before = renderPlan(ctx({ route: "plan" }));
+  ok(
+    "before it is finished, the screen has no such group",
+    !/Done today/.test(before.textContent),
+  );
 
   store.markDone(ex.id, TODAY);
   select.invalidate();
-  const view = renderPlan(ctx({ route: 'plan' }));
+  const view = renderPlan(ctx({ route: "plan" }));
 
-  ok('a finished lift gets its own group', /Done today/.test(view.textContent));
-  const chip = view.querySelectorAll('.stale-chip').find((n) => /done today/.test(n.textContent));
-  ok('and a chip saying so', !!chip);
-  ok('the card is marked finished', !!view.querySelector('.card.is-finished'));
-  ok('it leads with what the lift did, not what to do',
-    !!view.querySelector('.done-line') && /set/.test(view.querySelector('.done-line').textContent),
-    view.querySelector('.done-line')?.textContent);
-  ok('the day strip counts it', /1 done today/.test(view.textContent));
+  ok("a finished lift gets its own group", /Done today/.test(view.textContent));
+  const chip = view
+    .querySelectorAll(".stale-chip")
+    .find((n) => /done today/.test(n.textContent));
+  ok("and a chip saying so", !!chip);
+  ok("the card is marked finished", !!view.querySelector(".card.is-finished"));
+  ok(
+    "it leads with what the lift did, not what to do",
+    !!view.querySelector(".done-line") &&
+      /set/.test(view.querySelector(".done-line").textContent),
+    view.querySelector(".done-line")?.textContent,
+  );
+  ok("the day strip counts it", /1 done today/.test(view.textContent));
 
   store.clearDone(ex.id, TODAY);
   select.invalidate();
-  const reopened = renderPlan(ctx({ route: 'plan' }));
-  ok('reopening puts it back in the order', !/Done today/.test(reopened.textContent));
-  ok('and the prescription comes back', !!reopened.querySelector('.presc'));
+  const reopened = renderPlan(ctx({ route: "plan" }));
+  ok(
+    "reopening puts it back in the order",
+    !/Done today/.test(reopened.textContent),
+  );
+  ok("and the prescription comes back", !!reopened.querySelector(".presc"));
 }
 
 // --- a lift with nothing logged at all can still be called done ---
@@ -1669,15 +2570,17 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
 // exactly how it used to fall through every filter and leave the screen.
 {
   reset();
-  const blank = store.addExercise({ name: 'Calf Raise' });
+  const blank = store.addExercise({ name: "Calf Raise" });
   store.markDone(blank.id, TODAY);
   select.invalidate();
-  const view = renderPlan(ctx({ route: 'plan' }));
+  const view = renderPlan(ctx({ route: "plan" }));
 
-  ok('it is still on the screen', view.textContent.includes('Calf Raise'));
-  ok('in the finished group', /Done today/.test(view.textContent));
-  ok('and says so plainly, with no session to report',
-    /Called done for today/.test(view.textContent));
+  ok("it is still on the screen", view.textContent.includes("Calf Raise"));
+  ok("in the finished group", /Done today/.test(view.textContent));
+  ok(
+    "and says so plainly, with no session to report",
+    /Called done for today/.test(view.textContent),
+  );
 }
 
 // --- a lift trained today but not finished stays in the order ---
@@ -1686,9 +2589,12 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
   const ex = store.getExercises()[0];
   store.logSet({ exerciseId: ex.id, date: TODAY, weight: 100, reps: 5 });
   select.invalidate();
-  const view = renderPlan(ctx({ route: 'plan' }));
-  ok('logging alone never calls a lift done', !/Done today/.test(view.textContent));
-  ok('and it still carries a prescription', !!view.querySelector('.presc'));
+  const view = renderPlan(ctx({ route: "plan" }));
+  ok(
+    "logging alone never calls a lift done",
+    !/Done today/.test(view.textContent),
+  );
+  ok("and it still carries a prescription", !!view.querySelector(".presc"));
 }
 
 /* ----------------------------------- 6o. strength and size, side by side */
@@ -1697,96 +2603,164 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
 {
   reset();
   const ex = store.getExercises()[0];
-  uistate.set('plan.openId', ex.id);
+  uistate.set("plan.openId", ex.id);
   select.invalidate();
-  const card = renderPlan(ctx({ route: 'plan' })).querySelector('.card.is-open');
+  const card = renderPlan(ctx({ route: "plan" })).querySelector(
+    ".card.is-open",
+  );
 
-  const picks = card.querySelector('.picks');
-  ok('the card names both ways of doing it', !!picks);
-  ok('it labels them', /Strength/.test(picks.textContent) && /Size/.test(picks.textContent));
-  const rows = card.querySelectorAll('.pick');
-  ok('one row each', rows.length === 2, String(rows.length));
-  ok('exactly one is marked as today', rows.filter((r) => /is-current/.test(r.className)).length === 1);
-  ok('and the other is a button you can take', rows.some((r) => r.localName === 'button'));
-  ok('the size row is priced in work', /of work/.test(picks.textContent), picks.textContent);
+  const picks = card.querySelector(".picks");
+  ok("the card names both ways of doing it", !!picks);
+  ok(
+    "it labels them",
+    /Strength/.test(picks.textContent) && /Size/.test(picks.textContent),
+  );
+  const rows = card.querySelectorAll(".pick");
+  ok("one row each", rows.length === 2, String(rows.length));
+  ok(
+    "exactly one is marked as today",
+    rows.filter((r) => /is-current/.test(r.className)).length === 1,
+  );
+  ok(
+    "and the other is a button you can take",
+    rows.some((r) => r.localName === "button"),
+  );
+  ok(
+    "the size row is priced in hard sets",
+    /hard sets/.test(picks.textContent),
+    picks.textContent,
+  );
 }
 
-// --- taking the size pick moves the whole card onto the work scale ---
+// --- taking the size pick moves the card onto it ---
 {
   reset();
   const ex = store.getExercises()[0];
-  uistate.set('plan.openId', ex.id);
+  uistate.set("plan.openId", ex.id);
   select.invalidate();
 
-  const before = renderPlan(ctx({ route: 'plan' })).querySelector('.card.is-open');
-  const sizeRow = before.querySelectorAll('.pick').find((r) => r.dataset.zone === 'hypertrophy');
-  ok('the size row starts out as the one on offer', sizeRow.localName === 'button');
-  const offered = sizeRow.querySelector('.pick-value').textContent;
+  const before = renderPlan(ctx({ route: "plan" })).querySelector(
+    ".card.is-open",
+  );
+  const sizeRow = before
+    .querySelectorAll(".pick")
+    .find((r) => r.dataset.zone === "hypertrophy");
+  ok(
+    "the size row starts out as the one on offer",
+    sizeRow.localName === "button",
+  );
+  const offered = sizeRow.querySelector(".pick-value").textContent;
 
   sizeRow.click();
   select.invalidate();
-  const after = renderPlan(ctx({ route: 'plan' })).querySelector('.card.is-open');
+  const after = renderPlan(ctx({ route: "plan" })).querySelector(
+    ".card.is-open",
+  );
 
-  const o = uistate.forExercise('plan.overrides', ex.id, {});
-  ok('it writes the zone through to the override', o.zone === 'hypertrophy', JSON.stringify(o));
-  const nowCurrent = after.querySelectorAll('.pick').find((r) => /is-current/.test(r.className));
-  ok('the size row is now the current one', nowCurrent.dataset.zone === 'hypertrophy');
-  ok('and it advertises what it delivered',
-    nowCurrent.querySelector('.pick-value').textContent === offered,
-    `${nowCurrent.querySelector('.pick-value').textContent} vs ${offered}`);
+  const o = uistate.forExercise("plan.overrides", ex.id, {});
+  ok(
+    "it writes the zone through to the override",
+    o.zone === "hypertrophy",
+    JSON.stringify(o),
+  );
+  const nowCurrent = after
+    .querySelectorAll(".pick")
+    .find((r) => /is-current/.test(r.className));
+  ok(
+    "the size row is now the current one",
+    nowCurrent.dataset.zone === "hypertrophy",
+  );
+  ok(
+    "and it advertises what it delivered",
+    nowCurrent.querySelector(".pick-value").textContent === offered,
+    `${nowCurrent.querySelector(".pick-value").textContent} vs ${offered}`,
+  );
 
   // The hero is built from pieces, so compare on the spoken form, which the
   // card writes out in full for exactly this reason.
-  const spoken = after.querySelector('.presc .visually-hidden').textContent;
+  const spoken = after.querySelector(".presc .visually-hidden").textContent;
   const m = /(\d+) sets of (\d+) reps at ([\d.]+)/.exec(spoken);
-  ok('the hero is now the size prescription', !!m, spoken);
-  ok('with the reps the size pick offered', `${m[1]} × ${m[2]}` === offered.split(' @')[0], `${m[1]} × ${m[2]} vs ${offered}`);
-  ok('and the weight it offered', offered.includes(m[3]), `${m[3]} not in ${offered}`);
+  ok("the hero is now the size prescription", !!m, spoken);
+  ok(
+    "with the reps the size pick offered",
+    `${m[1]} × ${m[2]}` === offered.split(" @")[0],
+    `${m[1]} × ${m[2]} vs ${offered}`,
+  );
+  ok(
+    "and the weight it offered",
+    offered.includes(m[3]),
+    `${m[3]} not in ${offered}`,
+  );
 }
 
-// --- the grid can be solved either way, and says which ---
+// --- the grid is one grid, marked by what each rep count is for ---
 {
   reset();
   const ex = store.getExercises()[0];
-  uistate.set('plan.openId', ex.id);
+  uistate.set("plan.openId", ex.id);
   select.invalidate();
-  const view = renderPlan(ctx({ route: 'plan' })).querySelector('.card.is-open');
+  const view = renderPlan(ctx({ route: "plan" })).querySelector(
+    ".card.is-open",
+  );
 
-  const zoneSeg = view.querySelectorAll('.segmented').find((n) => /Strength/.test(n.textContent) && /Size/.test(n.textContent));
-  ok('the grid offers both scales', !!zoneSeg);
+  ok(
+    "there is no scale to choose between any more",
+    !view
+      .querySelectorAll(".segmented")
+      .some(
+        (n) => /Size/.test(n.textContent) && /Strength/.test(n.textContent),
+      ),
+  );
 
-  const strengthWeights = view.querySelectorAll('.cell-value').map((n) => n.textContent).join();
-  const rows = view.querySelectorAll('.grid tbody tr');
-  ok('every rep row declares its zone', rows.every((r) => !!r.dataset.zone), rows.map((r) => r.dataset.zone).join());
-  ok('three reps is strength', rows[0].dataset.zone === 'strength');
-  ok('six reps is both', rows[3].dataset.zone === 'both', rows[3].dataset.zone);
-  ok('ten reps is size', rows[5].dataset.zone === 'hypertrophy', rows[5].dataset.zone);
-
-  zoneSeg.querySelectorAll('.seg').find((b) => /Size/.test(b.textContent)).click();
-  select.invalidate();
-  const sized = renderPlan(ctx({ route: 'plan' })).querySelector('.card.is-open');
-  const sizeWeights = sized.querySelectorAll('.cell-value').map((n) => n.textContent).join();
-  ok('solving for size gives different weights', sizeWeights !== strengthWeights);
-  ok('and the note says what it is solving for',
-    /of work/.test(sized.querySelector('.grid-zone-row').textContent),
-    sized.querySelector('.grid-zone-row').textContent);
+  const rows = view.querySelectorAll(".grid tbody tr");
+  ok(
+    "every rep row declares its zone",
+    rows.every((r) => !!r.dataset.zone),
+    rows.map((r) => r.dataset.zone).join(),
+  );
+  ok(
+    "the axis reaches the size range",
+    rows.length === 10,
+    String(rows.length),
+  );
+  ok("three reps is strength", rows[0].dataset.zone === "strength");
+  ok("six reps is both", rows[3].dataset.zone === "both", rows[3].dataset.zone);
+  ok(
+    "twenty reps is size",
+    rows[9].dataset.zone === "hypertrophy",
+    rows[9].dataset.zone,
+  );
+  ok(
+    "and the note says what the marks mean",
+    /strength/.test(view.querySelector(".grid-zone-note").textContent),
+  );
 }
 
-// --- resetting to automatic puts the strength scale back ---
+// --- resetting to automatic clears the zone with everything else ---
 {
   reset();
   const ex = store.getExercises()[0];
-  uistate.set('plan.openId', ex.id);
-  uistate.setForExercise('plan.overrides', ex.id, { reps: 10, sets: 3, zone: 'hypertrophy' });
+  uistate.set("plan.openId", ex.id);
+  uistate.setForExercise("plan.overrides", ex.id, {
+    reps: 12,
+    sets: 3,
+    zone: "hypertrophy",
+  });
   select.invalidate();
 
-  const view = renderPlan(ctx({ route: 'plan' })).querySelector('.card.is-open');
-  const reset1 = view.querySelectorAll('button').find((b) => /Reset to automatic/.test(b.textContent));
-  ok('a zone override is enough to offer the way back', !!reset1);
+  const view = renderPlan(ctx({ route: "plan" })).querySelector(
+    ".card.is-open",
+  );
+  const reset1 = view
+    .querySelectorAll("button")
+    .find((b) => /Reset to automatic/.test(b.textContent));
+  ok("a zone override is enough to offer the way back", !!reset1);
   reset1.click();
-  ok('and it clears the zone with everything else',
-    uistate.forExercise('plan.overrides', ex.id, {}).zone === undefined,
-    JSON.stringify(uistate.forExercise('plan.overrides', ex.id, {})));
+  ok(
+    "and it clears the zone with everything else",
+    uistate.forExercise("plan.overrides", ex.id, {}).zone === undefined,
+    JSON.stringify(uistate.forExercise("plan.overrides", ex.id, {})),
+  );
 }
 
 /* ------------------------------------------------------------------ report */
@@ -1796,7 +2770,9 @@ stopRest({ quiet: true });
 console.log(`\n${pass} view checks passed`);
 if (failures.length) {
   console.error(`${failures.length} FAILED:`);
-  for (const f of failures) console.error('  x ' + f);
+  for (const f of failures) console.error("  x " + f);
   process.exit(1);
 }
-console.log('Every screen renders, and the bindings update without rebuilding.\n');
+console.log(
+  "Every screen renders, and the bindings update without rebuilding.\n",
+);

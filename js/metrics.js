@@ -10,8 +10,12 @@
 //   Volume         = w x reps x sets
 //   Trend          = least-squares slope of session adj e1RM vs day, x7 for kg/week
 
-export const ANCHOR = '2020-01-01';          // Settings!B3 — zero point for day numbers
-export const REP_SCHEMES = [3, 4, 5, 6, 8, 10, 12];
+export const ANCHOR = "2020-01-01"; // Settings!B3 — zero point for day numbers
+// The first seven are the spreadsheet's, in its order, so the fixture still
+// checks them where it always did. The rest are the app's: the sheet never went
+// above twelve, and a hypertrophy range that stops there is not one.
+export const REP_SCHEMES = [3, 4, 5, 6, 8, 10, 12, 14, 16, 20];
+export const SHEET_REP_SCHEMES = 7; // how many of those the sheet had
 export const SET_COLUMNS = [1, 2, 3, 4, 5, 6];
 
 /**
@@ -20,19 +24,109 @@ export const SET_COLUMNS = [1, 2, 3, 4, 5, 6];
  * They overlap at six on purpose. Six reps is genuinely both, and drawing a
  * clean line between them would be inventing a precision that does not exist —
  * heavy triples build some size, and a hard set of ten builds some strength.
- * What differs is which one they are efficient at, and that is what the two
- * scales measure: e1RM is what you can lift, work is how much you did.
+ * What differs is which one they are efficient at.
+ *
+ * The size range runs to twenty because that is roughly where the evidence
+ * sits: taken close enough to failure, sets from about six reps to twenty-odd
+ * grow muscle about as well as each other. What does not do it is a heavy
+ * single, however much tonnage it happens to represent.
  */
 export const ZONES = {
   strength: {
-    key: 'strength', label: 'Strength', minReps: 3, maxReps: 6, pickReps: 5,
-    hint: 'Heavy, few reps — trains you to express force.',
+    key: "strength",
+    label: "Strength",
+    minReps: 3,
+    maxReps: 6,
+    pickReps: 5,
+    hint: "Heavy, few reps — trains you to express force.",
   },
   hypertrophy: {
-    key: 'hypertrophy', label: 'Size', minReps: 6, maxReps: 12, pickReps: 10,
-    hint: 'Moderate load, more reps and more sets — trains the muscle to grow.',
+    key: "hypertrophy",
+    label: "Size",
+    minReps: 6,
+    maxReps: 20,
+    pickReps: 12,
+    hint: "Moderate load taken close to failure, and enough sets of it.",
   },
 };
+
+/* --------------------------------------------------------- the hard set */
+
+// Below the range a set still does something; above it the falloff is slower
+// than the climb, because a set of twenty-five is most of a hard set and a
+// heavy triple is not. Both tapers are linear, and both are heuristics — the
+// honest position is that the edges are fuzzy, not that they sit exactly here.
+const STIM_RAMP_BELOW = 3; // reps below minReps over which credit reaches 0
+const STIM_TAPER_ABOVE = 10; // reps above maxReps over which it reaches 0
+
+/**
+ * How much of a hard set a given rep count is worth.
+ *
+ * This is the thing tonnage could never say. One rep at 300 kg and thirty at
+ * 10 kg move the same weight and are not remotely the same stimulus, so the rep
+ * count has to be part of the measure rather than something it multiplies away.
+ */
+export function repCredit(reps, zone = ZONES.hypertrophy) {
+  const r = Math.round(Number(reps));
+  if (!(r > 0)) return 0;
+  if (r >= zone.minReps && r <= zone.maxReps) return 1;
+  if (r < zone.minReps)
+    return clamp(
+      (r - (zone.minReps - STIM_RAMP_BELOW)) / STIM_RAMP_BELOW,
+      0,
+      1,
+    );
+  return clamp(1 - (r - zone.maxReps) / STIM_TAPER_ABOVE, 0, 1);
+}
+
+/**
+ * How much of a hard set a given proximity to failure is worth.
+ *
+ * Nought to two reps in reserve is the productive zone and counts whole; past
+ * that a set is increasingly just work. A set with no RIR recorded is assumed
+ * to have been a normal hard one — the same assumption sessionSeverity makes,
+ * and what keeps a log written without RIR from reading as nothing at all.
+ */
+export function failureCredit(rir) {
+  if (rir === null || rir === undefined || rir === "") return 1;
+  const v = Number(rir);
+  if (!Number.isFinite(v)) return 1;
+  if (v <= 2) return 1;
+  return clamp(1 - 0.2 * (v - 2), 0.15, 1);
+}
+
+/** One set's contribution to the hypertrophy dose. */
+export function setStimulus(reps, rir, zone = ZONES.hypertrophy) {
+  return repCredit(reps, zone) * failureCredit(rir);
+}
+
+/**
+ * Hard sets across a list of entries — the dose hypertrophy actually responds
+ * to, and the thing the weekly budget in Setup has always been counting badly.
+ *
+ * Per-set RIR is used where the log has it. Falling back to the entry's own
+ * would overcredit: a merged block keeps the LOWEST reps-in-reserve of the sets
+ * counted onto it — the one closest to failure — so five sets that finished
+ * hard would all be scored as though they had started that way.
+ */
+export function hardSets(entries, zone = ZONES.hypertrophy) {
+  let total = 0;
+  for (const e of entries || []) {
+    const n = Number(e.sets) > 0 ? Math.round(Number(e.sets)) : 1;
+    const log = Array.isArray(e.log) ? e.log : null;
+    const measured =
+      log &&
+      log.length === n &&
+      log.some((r) => r && r.rir !== null && r.rir !== undefined);
+    if (measured) {
+      for (const rec of log)
+        total += setStimulus(e.reps, rec ? rec.rir : null, zone);
+    } else {
+      total += n * setStimulus(e.reps, e.rir, zone);
+    }
+  }
+  return total;
+}
 
 /** Every zone a rep count belongs to — none below three, both at six. */
 export function zonesFor(reps) {
@@ -49,7 +143,10 @@ export function inZone(reps, zone) {
 
 /** Days between the anchor and an ISO date string — the sheet's "Day #". */
 export function dayNumber(iso, anchor = ANCHOR) {
-  return Math.round((Date.parse(iso + 'T00:00:00Z') - Date.parse(anchor + 'T00:00:00Z')) / 86400000);
+  return Math.round(
+    (Date.parse(iso + "T00:00:00Z") - Date.parse(anchor + "T00:00:00Z")) /
+      86400000,
+  );
 }
 
 export function isoToday(now = new Date()) {
@@ -58,30 +155,37 @@ export function isoToday(now = new Date()) {
 }
 
 export function isoAddDays(iso, days) {
-  const t = Date.parse(iso + 'T00:00:00Z') + days * 86400000;
+  const t = Date.parse(iso + "T00:00:00Z") + days * 86400000;
   return new Date(t).toISOString().slice(0, 10);
 }
 
 /** "Sat 15 Aug" — short, unambiguous, no year unless it differs from now. */
 export function formatDate(iso, now = new Date()) {
-  const d = new Date(iso + 'T00:00:00Z');
-  const opts = { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' };
-  if (d.getUTCFullYear() !== now.getFullYear()) opts.year = 'numeric';
+  const d = new Date(iso + "T00:00:00Z");
+  const opts = {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC",
+  };
+  if (d.getUTCFullYear() !== now.getFullYear()) opts.year = "numeric";
   return d.toLocaleDateString(undefined, opts);
 }
 
 /** "15 Aug" — day and month only, for axis ticks where space is tight. */
 export function formatDateShort(iso, now = new Date()) {
-  const d = new Date(iso + 'T00:00:00Z');
-  const opts = { day: 'numeric', month: 'short', timeZone: 'UTC' };
-  if (d.getUTCFullYear() !== now.getFullYear()) opts.year = '2-digit';
+  const d = new Date(iso + "T00:00:00Z");
+  const opts = { day: "numeric", month: "short", timeZone: "UTC" };
+  if (d.getUTCFullYear() !== now.getFullYear()) opts.year = "2-digit";
   return d.toLocaleDateString(undefined, opts);
 }
 
 /** "Tuesday" — the weekday on its own, for the session header. */
 export function weekdayName(iso) {
-  return new Date(iso + 'T00:00:00Z')
-    .toLocaleDateString(undefined, { weekday: 'long', timeZone: 'UTC' });
+  return new Date(iso + "T00:00:00Z").toLocaleDateString(undefined, {
+    weekday: "long",
+    timeZone: "UTC",
+  });
 }
 
 /** Whole days from `iso` to today. Negative for future dates. */
@@ -93,24 +197,24 @@ export function daysSince(iso, todayIso = isoToday()) {
 /** "Today", "Yesterday", "3 days ago", else the short date. */
 export function relativeDate(iso, todayIso = isoToday()) {
   const diff = dayNumber(todayIso) - dayNumber(iso);
-  if (diff === 0) return 'Today';
-  if (diff === 1) return 'Yesterday';
+  if (diff === 0) return "Today";
+  if (diff === 1) return "Yesterday";
   if (diff > 1 && diff < 7) return `${diff} days ago`;
-  if (diff === -1) return 'Tomorrow';
+  if (diff === -1) return "Tomorrow";
   return formatDate(iso);
 }
 
 /* ------------------------------------------------------------- core maths */
 
 /** The rep multiplier: e1RM = weight x repFactor(reps). */
-export function repFactor(reps, formula = 'epley') {
+export function repFactor(reps, formula = "epley") {
   const r = Number(reps);
   if (!(r > 0)) return NaN;
-  if (formula === 'brzycki') return r >= 36 ? NaN : 36 / (37 - r);
+  if (formula === "brzycki") return r >= 36 ? NaN : 36 / (37 - r);
   return 1 + r / 30;
 }
 
-export function e1rm(weight, reps, formula = 'epley') {
+export function e1rm(weight, reps, formula = "epley") {
   const f = repFactor(reps, formula);
   return Number.isFinite(f) ? Number(weight) * f : NaN;
 }
@@ -135,7 +239,7 @@ export function setBonus(sets, k = 0.05) {
 export function isBodyweight(exercise) {
   if (!exercise) return false;
   // 'reps' is what this was called for one release; both mean the same lift.
-  return exercise.kind === 'bodyweight' || exercise.kind === 'reps';
+  return exercise.kind === "bodyweight" || exercise.kind === "reps";
 }
 
 /** What one set is worth, on whichever scale its lift is measured in. */
@@ -148,7 +252,9 @@ export function setScore(weight, reps, settings, kind) {
 }
 
 export function adjE1rm(weight, reps, sets, settings, kind) {
-  return setScore(weight, reps, settings, kind) * setBonus(sets, settings.setBonusK);
+  return (
+    setScore(weight, reps, settings, kind) * setBonus(sets, settings.setBonusK)
+  );
 }
 
 export function volume(weight, reps, sets) {
@@ -205,14 +311,22 @@ export function setKey(e) {
  */
 export function sessionAdjWith(entries, extra, settings, kind) {
   const list = entries.map((e) => ({
-    weight: Number(e.weight), reps: Number(e.reps),
-    sets: Number(e.sets) > 0 ? Number(e.sets) : 1, key: setKey(e),
+    weight: Number(e.weight),
+    reps: Number(e.reps),
+    sets: Number(e.sets) > 0 ? Number(e.sets) : 1,
+    key: setKey(e),
   }));
   if (extra) {
     const key = setKey(extra);
     const hit = list.find((e) => e.key === key);
     if (hit) hit.sets += 1;
-    else list.push({ weight: Number(extra.weight), reps: Number(extra.reps), sets: 1, key });
+    else
+      list.push({
+        weight: Number(extra.weight),
+        reps: Number(extra.reps),
+        sets: 1,
+        key,
+      });
   }
   let bestRaw = NaN;
   let totalSets = 0;
@@ -221,7 +335,9 @@ export function sessionAdjWith(entries, extra, settings, kind) {
     totalSets += e.sets;
     if (Number.isFinite(raw) && !(raw <= bestRaw)) bestRaw = raw;
   }
-  return Number.isFinite(bestRaw) ? bestRaw * setBonus(totalSets, settings.setBonusK) : NaN;
+  return Number.isFinite(bestRaw)
+    ? bestRaw * setBonus(totalSets, settings.setBonusK)
+    : NaN;
 }
 
 /** What one logged entry is worth on each scale. */
@@ -232,7 +348,9 @@ export function scoreEntry(entry, settings, kind) {
     adj: one * setBonus(entry.sets, settings.setBonusK),
     // A reps lift moves no external load, so it contributes no tonnage. Adding
     // reps to a kilo total would be adding two different things together.
-    volume: isBodyweight({ kind }) ? 0 : volume(entry.weight, entry.reps, entry.sets),
+    volume: isBodyweight({ kind })
+      ? 0
+      : volume(entry.weight, entry.reps, entry.sets),
     day: dayNumber(entry.date),
   };
 }
@@ -245,7 +363,8 @@ export function scoreEntry(entry, settings, kind) {
  */
 export function ceilToStep(value, step, base = 0) {
   const s = Number(step) > 0 ? Number(step) : 2.5;
-  const b = Number.isFinite(Number(base)) && Number(base) > 0 ? Number(base) : 0;
+  const b =
+    Number.isFinite(Number(base)) && Number(base) > 0 ? Number(base) : 0;
   if (!Number.isFinite(value)) return NaN;
   if (value <= b) return b;
   // Guard against binary float error: 82.49999999 must not become 85.
@@ -255,7 +374,8 @@ export function ceilToStep(value, step, base = 0) {
 
 /** The lightest loadable weight whose adj e1RM meets `target` at reps x sets. */
 export function weightForTarget(target, reps, sets, settings, step, base = 0) {
-  const denom = repFactor(reps, settings.formula) * setBonus(sets, settings.setBonusK);
+  const denom =
+    repFactor(reps, settings.formula) * setBonus(sets, settings.setBonusK);
   if (!Number.isFinite(denom) || denom <= 0 || !(target > 0)) return NaN;
   return ceilToStep(target / denom, step, base);
 }
@@ -268,7 +388,9 @@ export function weightForTarget(target, reps, sets, settings, step, base = 0) {
  * anything. Kilos times reps times sets is simply how much you moved.
  */
 export function weightForWork(target, reps, sets, step, base = 0) {
-  const denom = Math.round(Number(reps)) * (Number(sets) > 0 ? Math.round(Number(sets)) : 1);
+  const denom =
+    Math.round(Number(reps)) *
+    (Number(sets) > 0 ? Math.round(Number(sets)) : 1);
   if (!(denom > 0) || !(target > 0)) return NaN;
   return ceilToStep(target / denom, step, base);
 }
@@ -287,10 +409,18 @@ export function repsForTarget(target, sets, settings) {
 export function slope(points) {
   const n = points.length;
   if (n < 2) return null;
-  let sx = 0, sy = 0, sxy = 0, sxx = 0;
-  for (const [x, y] of points) { sx += x; sy += y; sxy += x * y; sxx += x * x; }
+  let sx = 0,
+    sy = 0,
+    sxy = 0,
+    sxx = 0;
+  for (const [x, y] of points) {
+    sx += x;
+    sy += y;
+    sxy += x * y;
+    sxx += x * x;
+  }
   const denom = n * sxx - sx * sx;
-  if (Math.abs(denom) < 1e-12) return null;      // every point on the same day
+  if (Math.abs(denom) < 1e-12) return null; // every point on the same day
   return (n * sxy - sx * sy) / denom;
 }
 
@@ -304,7 +434,12 @@ export function slope(points) {
  * rather than read, because this file knows nothing about storage — see
  * core/select.js, which is where the two are put together.
  */
-export function exerciseStats(exercise, entries, settings, todayIso = isoToday(), doneDates = null) {
+export function exerciseStats(
+  exercise,
+  entries,
+  settings,
+  todayIso = isoToday(),
+) {
   const todayDay = dayNumber(todayIso);
   const mine = entries
     .filter((e) => e.exerciseId === exercise.id)
@@ -316,18 +451,37 @@ export function exerciseStats(exercise, entries, settings, todayIso = isoToday()
     entries: mine,
     entryCount: mine.length,
     sessionCount: new Set(mine.map((e) => e.date)).size,
-    lastDate: null, lastAdj: null, lastReps: null, lastSets: null,
-    daysSince: null, prCount: 0,
-    bestAdj: null, bestEntry: null,
-    trendPerWeek: null, trendPerDay: null, trendReliable: false,
-    trendWindowCount: 0, trendWindowDays: 0, proj4: null, proj12: null,
-    baseTarget: null, nextTarget: null, readiness: null,
-    volume7: 0, sets7: 0, sessions: [], doneToday: false,
-    // The work scale, alongside the strength one rather than instead of it.
-    lastWork: null, bestWork: null, workTarget: null, work7: 0,
-    workTrendPerDay: null, workTrendPerWeek: null, workTrendReliable: false,
-    workGainPerWeek: 0,
-    setsPerWeekTarget: exercise.setsPerWeek || null, setStatus: null,
+    lastDate: null,
+    lastAdj: null,
+    lastReps: null,
+    lastSets: null,
+    daysSince: null,
+    prCount: 0,
+    bestAdj: null,
+    bestEntry: null,
+    trendPerWeek: null,
+    trendPerDay: null,
+    trendReliable: false,
+    trendWindowCount: 0,
+    trendWindowDays: 0,
+    proj4: null,
+    proj12: null,
+    baseTarget: null,
+    nextTarget: null,
+    readiness: null,
+    volume7: 0,
+    sets7: 0,
+    sessions: [],
+    doneToday: false,
+    // Tonnage, kept as a readout and nothing more — it cannot tell a heavy
+    // single from a set of thirty. The dose is hardSets7, below.
+    work7: 0,
+    // The hypertrophy dose: sets in a productive rep range, near enough to
+    // failure to count, against the weekly budget this lift is set.
+    hardSets7: 0,
+    hardSetStatus: null,
+    setsPerWeekTarget: exercise.setsPerWeek || null,
+    setStatus: null,
     gainPerWeek: exercise.gainPerWeek ?? settings.defaultGainPerWeek,
     step: exercise.step || settings.defaultStep,
     base: Number(exercise.base) > 0 ? Number(exercise.base) : 0,
@@ -342,7 +496,8 @@ export function exerciseStats(exercise, entries, settings, todayIso = isoToday()
   const byDate = new Map();
   for (const e of mine) {
     const cur = byDate.get(e.date);
-    if (!cur || e.e1rm > cur.best.e1rm) byDate.set(e.date, { ...(cur || {}), date: e.date, day: e.day, best: e });
+    if (!cur || e.e1rm > cur.best.e1rm)
+      byDate.set(e.date, { ...(cur || {}), date: e.date, day: e.day, best: e });
     const s = byDate.get(e.date);
     s.sets = (s.sets || 0) + (Number(e.sets) > 0 ? Number(e.sets) : 1);
     s.volume = (s.volume || 0) + e.volume;
@@ -350,7 +505,10 @@ export function exerciseStats(exercise, entries, settings, todayIso = isoToday()
     s.rows = (s.rows || 0) + 1;
   }
   stats.sessions = [...byDate.values()].sort((a, b) => a.day - b.day);
-  for (const s of stats.sessions) s.done = doneDates ? doneDates.has(s.date) : false;
+  for (const s of stats.sessions) {
+    s.done = doneDates ? doneDates.has(s.date) : false;
+    s.hardSets = hardSets(mine.filter((e) => e.date === s.date));
+  }
 
   // A session is worth its best set, credited for every set logged that
   // session — not just exact repeats of that one block. This overwrites the
@@ -368,7 +526,8 @@ export function exerciseStats(exercise, entries, settings, todayIso = isoToday()
   // weaker entry ahead of it in the log.
   let running = -Infinity;
   for (const [i, s] of stats.sessions.entries()) {
-    s.best.isPR = i > 0 && Number.isFinite(s.best.adj) && s.best.adj > running + 1e-9;
+    s.best.isPR =
+      i > 0 && Number.isFinite(s.best.adj) && s.best.adj > running + 1e-9;
     if (s.best.isPR) stats.prCount++;
     if (Number.isFinite(s.best.adj)) running = Math.max(running, s.best.adj);
   }
@@ -380,7 +539,10 @@ export function exerciseStats(exercise, entries, settings, todayIso = isoToday()
   stats.lastReps = last.best.reps;
   stats.lastSets = last.best.sets;
   stats.lastWork = last.work;
-  stats.bestWork = stats.sessions.reduce((m, x) => (x.work > m ? x.work : m), 0);
+  stats.bestWork = stats.sessions.reduce(
+    (m, x) => (x.work > m ? x.work : m),
+    0,
+  );
 
   stats.bestEntry = mine.reduce((a, b) => (b.adj > a.adj ? b : a));
   stats.bestAdj = stats.bestEntry.adj;
@@ -392,7 +554,9 @@ export function exerciseStats(exercise, entries, settings, todayIso = isoToday()
   // logged as a single clean top set, which can pull the line down even while
   // every session's best is a new PR.
   const from = todayDay - settings.lookbackDays;
-  const win = stats.sessions.filter((s) => s.day >= from && Number.isFinite(s.best.adj));
+  const win = stats.sessions.filter(
+    (s) => s.day >= from && Number.isFinite(s.best.adj),
+  );
   const perDay = slope(win.map((s) => [s.day, s.best.adj]));
   stats.trendWindowCount = win.length;
   stats.trendWindowDays = win.length ? win[win.length - 1].day - win[0].day : 0;
@@ -416,30 +580,9 @@ export function exerciseStats(exercise, entries, settings, todayIso = isoToday()
   // What that becomes once the gap is taken seriously — see readinessFor().
   // With the model switched off the two are identical by construction.
   stats.readiness = readinessFor(stats, settings);
-  stats.nextTarget = Number.isFinite(stats.readiness.target) ? stats.readiness.target : stats.baseTarget;
-
-  // The same model at a faster rate. Volume climbs quicker than a one-rep max
-  // does — a few percent a week against a fraction of one — so rather than a
-  // second per-lift dial to keep in step with the first, this is a multiple of
-  // whatever gain the lift is already set to earn. Fatigue and detraining
-  // discount it exactly as they discount strength: they take capacity off, and
-  // capacity is what both scales are measuring.
-  const multiple = Number(settings.workGainMultiple) > 0 ? Number(settings.workGainMultiple) : 3;
-  stats.workGainPerWeek = stats.gainPerWeek * multiple;
-  if (stats.lastWork > 0) {
-    stats.workTarget = stats.lastWork * factorFor(stats.readiness, stats.workGainPerWeek);
-  }
-
-  // The work trend, fitted exactly as the strength one is: one point per
-  // session inside the same window, held to the same standard before it is
-  // called reliable.
-  const workWin = win.filter((x) => Number.isFinite(x.work) && x.work > 0);
-  const workPerDay = slope(workWin.map((x) => [x.day, x.work]));
-  stats.workTrendReliable = workWin.length >= 3 && stats.trendWindowDays >= 14;
-  if (workPerDay !== null) {
-    stats.workTrendPerDay = Math.abs(workPerDay) < 1e-6 ? 0 : workPerDay;
-    stats.workTrendPerWeek = stats.workTrendPerDay * 7;
-  }
+  stats.nextTarget = Number.isFinite(stats.readiness.target)
+    ? stats.readiness.target
+    : stats.baseTarget;
 
   // Last 7 days — the sheet's window is day >= today-7.
   for (const e of mine) {
@@ -449,15 +592,44 @@ export function exerciseStats(exercise, entries, settings, todayIso = isoToday()
       stats.sets7 += Number(e.sets) > 0 ? Number(e.sets) : 1;
     }
   }
+  stats.hardSets7 = hardSets(mine.filter((e) => e.day >= todayDay - 7));
   const tgt = stats.setsPerWeekTarget;
   if (tgt) {
-    stats.setStatus = stats.sets7 < tgt * 0.8 ? 'under' : stats.sets7 > tgt * 1.2 ? 'over' : 'on target';
+    stats.setStatus =
+      stats.sets7 < tgt * 0.8
+        ? "under"
+        : stats.sets7 > tgt * 1.2
+          ? "over"
+          : "on target";
+    // The same budget, counted properly. A week of heavy triples is on target
+    // by the plain count and nowhere near it by this one, which is exactly the
+    // difference between doing sets and doing sets that grow something.
+    stats.hardSetStatus =
+      stats.hardSets7 < tgt * 0.8
+        ? "under"
+        : stats.hardSets7 > tgt * 1.2
+          ? "over"
+          : "on target";
   }
   return stats;
 }
 
-export function allStats(exercises, entries, settings, todayIso = isoToday(), doneFor = null) {
-  return exercises.map((ex) => exerciseStats(ex, entries, settings, todayIso, doneFor ? doneFor(ex.id) : null));
+export function allStats(
+  exercises,
+  entries,
+  settings,
+  todayIso = isoToday(),
+  doneFor = null,
+) {
+  return exercises.map((ex) =>
+    exerciseStats(
+      ex,
+      entries,
+      settings,
+      todayIso,
+      doneFor ? doneFor(ex.id) : null,
+    ),
+  );
 }
 
 /* ------------------------------------------- fatigue, recovery, detraining */
@@ -491,23 +663,23 @@ export function allStats(exercises, entries, settings, todayIso = isoToday(), do
  * settings, because the honest position is that these vary by person and lift.
  */
 export const READINESS_DEFAULTS = {
-  fatiguePeak: 0.06,        // deficit on the day of a normal hard session
-  fatigueTau: 1.5,          // days for that deficit to fall to ~37% of peak
-  productiveDays: 10,       // rest past this adds no more fitness
-  graceDays: 14,            // nothing is lost before this
-  detrainHalfLife: 42,      // days for the losable part to halve
-  retainedFloor: 0.75,      // the share of your best a long layoff leaves
+  fatiguePeak: 0.06, // deficit on the day of a normal hard session
+  fatigueTau: 1.5, // days for that deficit to fall to ~37% of peak
+  productiveDays: 10, // rest past this adds no more fitness
+  graceDays: 14, // nothing is lost before this
+  detrainHalfLife: 42, // days for the losable part to halve
+  retainedFloor: 0.75, // the share of your best a long layoff leaves
 };
 
 export const READINESS_PHASES = {
-  recovering: { key: 'recovering', label: 'Recovering', glyph: '◔' },
-  ready:      { key: 'ready',      label: 'Ready',      glyph: '●' },
-  holding:    { key: 'holding',    label: 'Holding',    glyph: '○' },
-  detrained:  { key: 'detrained',  label: 'Detraining', glyph: '↓' },
+  recovering: { key: "recovering", label: "Recovering", glyph: "◔" },
+  ready: { key: "ready", label: "Ready", glyph: "●" },
+  holding: { key: "holding", label: "Holding", glyph: "○" },
+  detrained: { key: "detrained", label: "Detraining", glyph: "↓" },
 };
 
-const FATIGUE_FLOOR = 0.005;   // below half a percent, call it spent
-const FATIGUE_CAP = 0.15;      // no session leaves you 15% weaker than yourself
+const FATIGUE_FLOOR = 0.005; // below half a percent, call it spent
+const FATIGUE_CAP = 0.15; // no session leaves you 15% weaker than yourself
 
 /**
  * The deficit at which a lift is fit to be trained hard again. Above it the
@@ -518,7 +690,9 @@ const FATIGUE_CAP = 0.15;      // no session leaves you 15% weaker than yourself
  */
 export const READY_AT = 0.03;
 
-function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+function clamp(v, lo, hi) {
+  return v < lo ? lo : v > hi ? hi : v;
+}
 
 /**
  * The readiness dials, defaults filled in for any the settings do not carry,
@@ -531,7 +705,7 @@ export function readinessSettings(settings = {}) {
     const v = Number(settings[k]);
     if (Number.isFinite(v) && v >= 0) out[k] = v;
   }
-  out.enabled = settings.readiness !== 'off';
+  out.enabled = settings.readiness !== "off";
   return out;
 }
 
@@ -542,14 +716,16 @@ export function readinessSettings(settings = {}) {
  * the session is assumed to have been a normal hard one rather than an easy or
  * a brutal one.
  */
-export function sessionSeverity(session, exercise, sessions = null) {
-  const usual = usualSets(sessions, exercise);
+export function sessionSeverity(session, exercise) {
+  const usual =
+    Number(exercise?.setsPerSession) > 0 ? Number(exercise.setsPerSession) : 3;
   const sets = Number(session?.sets) > 0 ? Number(session.sets) : usual;
   const setPart = clamp(sets / usual, 0.5, 1.6);
   const rir = session?.best?.rir;
-  const rirPart = rir === null || rir === undefined || !Number.isFinite(Number(rir))
-    ? 1
-    : clamp(1.25 - 0.12 * Number(rir), 0.7, 1.25);
+  const rirPart =
+    rir === null || rir === undefined || !Number.isFinite(Number(rir))
+      ? 1
+      : clamp(1.25 - 0.12 * Number(rir), 0.7, 1.25);
   return clamp(setPart * rirPart, 0.4, 1.8);
 }
 
@@ -570,39 +746,17 @@ export function accrualAt(days, gainPerWeek, productiveWindow) {
 export function retentionAt(days, grace, rs = READINESS_DEFAULTS) {
   if (!(days > grace) || !(rs.detrainHalfLife > 0)) return 1;
   const floor = clamp(rs.retainedFloor, 0, 1);
-  return floor + (1 - floor) * Math.pow(0.5, (days - grace) / rs.detrainHalfLife);
-}
-
-/**
- * How many sets this lift's finished sessions actually run to.
- *
- * `setsPerSession` is a plan, and a plan is a guess. Measuring a five-set
- * session against a guess of three pins setPart at its cap and calls an
- * ordinary session brutal. Once enough sessions have been CALLED finished,
- * their median is the honest answer — the same move typicalInterval() makes for
- * the grace period, and for the same reason.
- *
- * Sessions that were never called done are left out rather than counted short:
- * one you walked away from half-way through says nothing about how long a
- * session normally is. Below three finished ones there is no median worth
- * trusting, so the setting stands.
- */
-export function usualSets(sessions, exercise) {
-  const fallback = Number(exercise?.setsPerSession) > 0 ? Number(exercise.setsPerSession) : 3;
-  const counts = (sessions || [])
-    .filter((s) => s && s.done && Number(s.sets) > 0)
-    .map((s) => Number(s.sets))
-    .sort((a, b) => a - b);
-  if (counts.length < 3) return fallback;
-  const mid = Math.floor(counts.length / 2);
-  return counts.length % 2 ? counts[mid] : (counts[mid - 1] + counts[mid]) / 2;
+  return (
+    floor + (1 - floor) * Math.pow(0.5, (days - grace) / rs.detrainHalfLife)
+  );
 }
 
 /** Median gap, in days, between this lift's sessions. Null until there are two. */
 export function typicalInterval(sessions) {
   if (!sessions || sessions.length < 3) return null;
   const gaps = [];
-  for (let i = 1; i < sessions.length; i++) gaps.push(sessions[i].day - sessions[i - 1].day);
+  for (let i = 1; i < sessions.length; i++)
+    gaps.push(sessions[i].day - sessions[i - 1].day);
   const usable = gaps.filter((g) => g > 0).sort((a, b) => a - b);
   if (usable.length < 2) return null;
   const mid = Math.floor(usable.length / 2);
@@ -628,25 +782,44 @@ export function typicalInterval(sessions) {
  */
 export function factorFor(r, gainPerWeek) {
   if (!r || !r.enabled) return 1 + (gainPerWeek > 0 ? gainPerWeek : 0);
-  return r.retention * (1 + accrualAt(r.days, gainPerWeek, r.productiveWindow) * r.durable) * (1 - r.fatigue);
+  return (
+    r.retention *
+    (1 + accrualAt(r.days, gainPerWeek, r.productiveWindow) * r.durable) *
+    (1 - r.fatigue)
+  );
 }
 
 export function readinessFor(stats, settings = {}) {
   const rs = readinessSettings(settings);
   const days = stats.daysSince;
   const typical = typicalInterval(stats.sessions);
-  const productiveWindow = Math.max(rs.productiveDays, typical ? typical * 1.5 : 0);
+  const productiveWindow = Math.max(
+    rs.productiveDays,
+    typical ? typical * 1.5 : 0,
+  );
   const grace = Math.max(rs.graceDays, typical ? typical * 2 : 0);
-  const last = stats.sessions.length ? stats.sessions[stats.sessions.length - 1] : null;
-  const severity = sessionSeverity(last, stats.exercise, stats.sessions);
+  const last = stats.sessions.length
+    ? stats.sessions[stats.sessions.length - 1]
+    : null;
+  const severity = sessionSeverity(last, stats.exercise);
 
   const out = {
-    enabled: rs.enabled, days, typicalInterval: typical, severity,
-    productiveWindow, grace,
-    fatigue: 0, accrual: 0, retention: 1, factor: 1, durable: 1,
-    baseline: stats.lastAdj, currentBest: stats.bestAdj,
-    target: stats.baseTarget, phase: READINESS_PHASES.ready,
-    recovered: true, readyIn: 0,
+    enabled: rs.enabled,
+    days,
+    typicalInterval: typical,
+    severity,
+    productiveWindow,
+    grace,
+    fatigue: 0,
+    accrual: 0,
+    retention: 1,
+    factor: 1,
+    baseline: stats.lastAdj,
+    currentBest: stats.bestAdj,
+    target: stats.baseTarget,
+    phase: READINESS_PHASES.ready,
+    recovered: true,
+    readyIn: 0,
   };
   if (days === null || !Number.isFinite(stats.lastAdj)) return out;
 
@@ -664,30 +837,39 @@ export function readinessFor(stats, settings = {}) {
   // What you gained in the gap is the first thing a layoff takes back: the
   // newest adaptations are the least durable, so accrual fades on the same
   // curve retention does rather than sitting there as a credit forever.
-  out.durable = rs.retainedFloor < 1
-    ? clamp((out.retention - rs.retainedFloor) / (1 - rs.retainedFloor), 0, 1) : 1;
-  out.accrual = accrualAt(days, stats.gainPerWeek, productiveWindow) * out.durable;
-  out.factor = factorFor(out, stats.gainPerWeek);
+  const durable =
+    rs.retainedFloor < 1
+      ? clamp((out.retention - rs.retainedFloor) / (1 - rs.retainedFloor), 0, 1)
+      : 1;
+  out.accrual = accrualAt(days, stats.gainPerWeek, productiveWindow) * durable;
+  out.factor = out.retention * (1 + out.accrual) * (1 - out.fatigue);
 
   // Detraining is a real loss of capacity, so it discounts your best too —
   // otherwise a comeback session is scored against a number you no longer own,
   // and every honest re-entry weight reads as "already beaten". Fatigue does
   // not: being tired today never took a kilo off what you can do.
   out.baseline = stats.lastAdj * out.retention;
-  out.currentBest = Number.isFinite(stats.bestAdj) ? stats.bestAdj * out.retention : stats.bestAdj;
+  out.currentBest = Number.isFinite(stats.bestAdj)
+    ? stats.bestAdj * out.retention
+    : stats.bestAdj;
   out.target = stats.lastAdj * out.factor;
-
 
   // Whole days until the lift is fit to be trained hard again.
   if (!out.recovered) {
     const full = rs.fatiguePeak * severity;
-    out.readyIn = Math.max(0, Math.ceil(rs.fatigueTau * Math.log(full / READY_AT) - days));
+    out.readyIn = Math.max(
+      0,
+      Math.ceil(rs.fatigueTau * Math.log(full / READY_AT) - days),
+    );
   }
 
-  out.phase = !out.recovered ? READINESS_PHASES.recovering
-    : out.retention < 1 - 1e-9 ? READINESS_PHASES.detrained
-    : days >= productiveWindow ? READINESS_PHASES.holding
-    : READINESS_PHASES.ready;
+  out.phase = !out.recovered
+    ? READINESS_PHASES.recovering
+    : out.retention < 1 - 1e-9
+      ? READINESS_PHASES.detrained
+      : days >= productiveWindow
+        ? READINESS_PHASES.holding
+        : READINESS_PHASES.ready;
   return out;
 }
 
@@ -697,84 +879,133 @@ export function readinessFor(stats, settings = {}) {
  * mode switch.
  */
 export function readinessNote(r) {
-  if (!r || !r.enabled || r.days === null) return '';
+  if (!r || !r.enabled || r.days === null) return "";
   const d = r.days;
-  const gap = d === 0 ? 'Earlier today' : d === 1 ? '1 day ago' : `${d} days ago`;
+  const gap =
+    d === 0 ? "Earlier today" : d === 1 ? "1 day ago" : `${d} days ago`;
   switch (r.phase.key) {
-    case 'recovering':
-      return `${gap} — you are still carrying that session, so today asks for less than it would rested.`
-        + (r.readyIn > 0 ? ` Fit for a hard one again in about ${plural(r.readyIn, 'day')}.` : '');
-    case 'holding':
-      return `${plural(d, 'day')} of rest — recovered, and nothing lost yet. This is about as strong as this lift gets without training it.`;
-    case 'detrained':
-      return `${plural(d, 'day')} since you last did this. Expect to be roughly ${((1 - r.retention) * 100).toFixed(0)}% off your best — this is a way back in, not a PR attempt.`;
+    case "recovering":
+      return (
+        `${gap} — you are still carrying that session, so today asks for less than it would rested.` +
+        (r.readyIn > 0
+          ? ` Fit for a hard one again in about ${plural(r.readyIn, "day")}.`
+          : "")
+      );
+    case "holding":
+      return `${plural(d, "day")} of rest — recovered, and nothing lost yet. This is about as strong as this lift gets without training it.`;
+    case "detrained":
+      return `${plural(d, "day")} since you last did this. Expect to be roughly ${((1 - r.retention) * 100).toFixed(0)}% off your best — this is a way back in, not a PR attempt.`;
     default:
-      return `${plural(d, 'day')} of rest — recovered and ready.`
-        + (r.fatigue > 0 ? ' Not quite fresh, so the step up is a small one.' : '');
+      return (
+        `${plural(d, "day")} of rest — recovered and ready.` +
+        (r.fatigue > 0
+          ? " Not quite fresh, so the step up is a small one."
+          : "")
+      );
   }
 }
 
 /** The same verdict with the model's workings shown. */
 export function readinessMaths(r) {
-  if (!r || !r.enabled || r.days === null) return '';
+  if (!r || !r.enabled || r.days === null) return "";
   const d = r.days;
-  const gap = d === 0 ? 'Earlier today' : d === 1 ? '1 day ago' : `${d} days ago`;
-  const residue = r.fatigue > 0
-    ? ` Still about ${(r.fatigue * 100).toFixed(1)}% short of fresh, which is taken off the target.`
-    : '';
+  const gap =
+    d === 0 ? "Earlier today" : d === 1 ? "1 day ago" : `${d} days ago`;
+  const residue =
+    r.fatigue > 0
+      ? ` Still about ${(r.fatigue * 100).toFixed(1)}% short of fresh, which is taken off the target.`
+      : "";
   switch (r.phase.key) {
-    case 'recovering':
-      return `${gap}: an estimated ${(r.fatigue * 100).toFixed(1)}% deficit still owed to fatigue, discounted off the target.`
-        + (r.readyIn > 0 ? ` Below the ${(READY_AT * 100).toFixed(0)}% ready line in about ${plural(r.readyIn, 'day')}.` : '');
-    case 'holding':
-      return `${plural(d, 'day')} rest: past the ${Math.round(r.productiveWindow)}-day productive window, inside the ${Math.round(r.grace)}-day grace period. No more fitness gained, none lost yet.`;
-    case 'detrained':
-      return `${plural(d, 'day')} off, ${Math.round(d - r.grace)} past the ${Math.round(r.grace)}-day grace period. Retention ${(r.retention * 100).toFixed(1)}%, applied to the target and to your best alike.`;
+    case "recovering":
+      return (
+        `${gap}: an estimated ${(r.fatigue * 100).toFixed(1)}% deficit still owed to fatigue, discounted off the target.` +
+        (r.readyIn > 0
+          ? ` Below the ${(READY_AT * 100).toFixed(0)}% ready line in about ${plural(r.readyIn, "day")}.`
+          : "")
+      );
+    case "holding":
+      return `${plural(d, "day")} rest: past the ${Math.round(r.productiveWindow)}-day productive window, inside the ${Math.round(r.grace)}-day grace period. No more fitness gained, none lost yet.`;
+    case "detrained":
+      return `${plural(d, "day")} off, ${Math.round(d - r.grace)} past the ${Math.round(r.grace)}-day grace period. Retention ${(r.retention * 100).toFixed(1)}%, applied to the target and to your best alike.`;
     default:
-      return `${plural(d, 'day')} rest, ${(r.accrual * 100).toFixed(2)}% of a week's gain earned in the gap.` + residue;
+      return (
+        `${plural(d, "day")} rest, ${(r.accrual * 100).toFixed(2)}% of a week's gain earned in the gap.` +
+        residue
+      );
   }
 }
 
 function plural(n, word) {
   const v = Math.round(n);
-  return `${v} ${word}${v === 1 ? '' : 's'}`;
+  return `${v} ${word}${v === 1 ? "" : "s"}`;
 }
 
 /* ---------------------------------------------------------- the planner */
 
 export const BANDS = {
-  beaten:  { key: 'beaten',  label: 'Already beaten', glyph: '=', hint: 'At or below your current best — not progression' },
-  return:  { key: 'return',  label: 'Way back in',     glyph: '↩', hint: 'Lighter than you were lifting, on purpose, after time off' },
-  ideal:   { key: 'ideal',   label: 'Ideal step',     glyph: '✓', hint: 'The smallest honest step forward' },
-  stretch: { key: 'stretch', label: 'Stretch',        glyph: '▲', hint: 'Ambitious but usually doable' },
-  toobig:  { key: 'toobig',  label: 'Too big a jump', glyph: '!', hint: 'You will probably miss reps' },
+  beaten: {
+    key: "beaten",
+    label: "Already beaten",
+    glyph: "=",
+    hint: "At or below your current best — not progression",
+  },
+  return: {
+    key: "return",
+    label: "Way back in",
+    glyph: "↩",
+    hint: "Lighter than you were lifting, on purpose, after time off",
+  },
+  ideal: {
+    key: "ideal",
+    label: "Ideal step",
+    glyph: "✓",
+    hint: "The smallest honest step forward",
+  },
+  stretch: {
+    key: "stretch",
+    label: "Stretch",
+    glyph: "▲",
+    hint: "Ambitious but usually doable",
+  },
+  toobig: {
+    key: "toobig",
+    label: "Too big a jump",
+    glyph: "!",
+    hint: "You will probably miss reps",
+  },
 };
 
 /**
  * The same verdict a band carries, said in plain words. This is what the
  * simple view shows in place of "scores 102.3 against a target of 100.1".
  */
-export function plainVerdict(band, delta, unit = 'kg') {
-  if (!band) return '';
-  const move = !Number.isFinite(delta) || Math.abs(delta) < 1e-9
-    ? null
-    : `${fmtSigned(delta, unit === 'reps' ? 0 : 1).replace(/\.0$/, '')} ${unit} on last time`;
+export function plainVerdict(band, delta, unit = "kg") {
+  if (!band) return "";
+  const move =
+    !Number.isFinite(delta) || Math.abs(delta) < 1e-9
+      ? null
+      : `${fmtSigned(delta, unit === "reps" ? 0 : 1).replace(/\.0$/, "")} ${unit} on last time`;
   switch (band.key) {
-    case 'ideal':
-      return move ? `A small step up — ${move}.` : 'A small step up on last time.';
-    case 'stretch':
-      return move ? `A big step up — ${move}. Ambitious, but usually doable.`
-        : 'A big step up — ambitious, but usually doable.';
-    case 'toobig':
-      return move ? `A large jump — ${move}. You will probably miss reps.`
-        : 'A large jump — you will probably miss reps.';
-    case 'return':
-      return move ? `${unit === 'reps' ? 'Fewer' : 'Lighter'} than last time — ${move}. A way back in after time off, not a step backwards.`
-        : `${unit === 'reps' ? 'Fewer reps' : 'Lighter'} than last time, on purpose — a way back in after time off.`;
+    case "ideal":
+      return move
+        ? `A small step up — ${move}.`
+        : "A small step up on last time.";
+    case "stretch":
+      return move
+        ? `A big step up — ${move}. Ambitious, but usually doable.`
+        : "A big step up — ambitious, but usually doable.";
+    case "toobig":
+      return move
+        ? `A large jump — ${move}. You will probably miss reps.`
+        : "A large jump — you will probably miss reps.";
+    case "return":
+      return move
+        ? `${unit === "reps" ? "Fewer" : "Lighter"} than last time — ${move}. A way back in after time off, not a step backwards.`
+        : `${unit === "reps" ? "Fewer reps" : "Lighter"} than last time, on purpose — a way back in after time off.`;
     default:
-      return unit === 'reps'
-        ? 'Not past a session you have already done — not progression yet.'
-        : 'Lighter than a session you have already done — not progression yet.';
+      return unit === "reps"
+        ? "Not past a session you have already done — not progression yet."
+        : "Lighter than a session you have already done — not progression yet.";
   }
 }
 
@@ -793,18 +1024,21 @@ function bandBetween(value, target, best, ideal, stretch) {
 
 /** Which band a candidate score falls in, given the target and current best. */
 export function bandFor(score, target, bestAdj, settings) {
-  return bandBetween(score, target, bestAdj, settings.idealBand, settings.stretchBand);
-}
-
-/** The same verdict on the work scale, against its own much wider bands. */
-export function bandForWork(value, target, bestWork, settings) {
-  return bandBetween(value, target, bestWork,
-    settings.workIdealBand ?? 0.06, settings.workStretchBand ?? 0.15);
+  return bandBetween(
+    score,
+    target,
+    bestAdj,
+    settings.idealBand,
+    settings.stretchBand,
+  );
 }
 
 /** The weight behind the best set of the most recent session. */
 export function lastSessionWeight(stats) {
-  const last = stats.sessions && stats.sessions.length ? stats.sessions[stats.sessions.length - 1] : null;
+  const last =
+    stats.sessions && stats.sessions.length
+      ? stats.sessions[stats.sessions.length - 1]
+      : null;
   return last && Number.isFinite(last.best.weight) ? last.best.weight : null;
 }
 
@@ -814,7 +1048,10 @@ export function lastSessionWeight(stats) {
  * the thing that actually varies.
  */
 export function lastSessionLoad(stats) {
-  const last = stats.sessions && stats.sessions.length ? stats.sessions[stats.sessions.length - 1] : null;
+  const last =
+    stats.sessions && stats.sessions.length
+      ? stats.sessions[stats.sessions.length - 1]
+      : null;
   if (!last) return null;
   const v = isBodyweight(stats.exercise) ? last.best.reps : last.best.weight;
   return Number.isFinite(v) ? v : null;
@@ -843,14 +1080,17 @@ export function planFor(stats, settings, override = {}) {
   const step = stats.step;
   const base = stats.base || 0;
   const autoTarget = stats.nextTarget;
-  const target = Number(override.target) > 0 ? Number(override.target) : autoTarget;
+  const target =
+    Number(override.target) > 0 ? Number(override.target) : autoTarget;
   const readiness = stats.readiness || null;
   // What counts as "already beaten" is your best AS OF TODAY. A layoff really
   // does take strength off, so after one the comparison is against the
   // discounted figure — otherwise every sensible re-entry weight is scolded for
   // not being a PR. Fatigue never moves this: tired is not weaker for good.
-  const bestNow = readiness && Number.isFinite(readiness.currentBest)
-    ? readiness.currentBest : stats.bestAdj;
+  const bestNow =
+    readiness && Number.isFinite(readiness.currentBest)
+      ? readiness.currentBest
+      : stats.bestAdj;
 
   /**
    * Coming back from a layoff, the bands stop describing anything true. The
@@ -863,67 +1103,96 @@ export function planFor(stats, settings, override = {}) {
    * coming back from is called what it is: a way back in. The judgement rests
    * on what you have demonstrably done, not on the model's guess.
    */
-  const comebackUnder = readiness && readiness.phase && readiness.phase.key === 'detrained'
-    ? lastSessionLoad(stats) : null;
-  // Detraining discounts what you have done on the work scale too, and for the
-  // same reason: a comeback session should not be told it failed to beat a
-  // session you are no longer in shape to repeat.
-  const bestWorkNow = Number.isFinite(stats.bestWork) && readiness && Number.isFinite(readiness.retention)
-    ? stats.bestWork * readiness.retention : stats.bestWork;
-  const bandOf = (score, weight) => (
+  const comebackUnder =
+    readiness && readiness.phase && readiness.phase.key === "detrained"
+      ? lastSessionLoad(stats)
+      : null;
+  const bandOf = (score, weight) =>
     comebackUnder !== null && weight < comebackUnder - 1e-9
       ? BANDS.return
-      : bandFor(score, target, bestNow, settings)
-  );
+      : bandFor(score, target, bestNow, settings);
 
-  const reps = Number(override.reps) > 0 ? Math.round(Number(override.reps))
-    : Number(stats.lastReps) > 0 ? Math.round(Number(stats.lastReps)) : 5;
-  const sets = Number(override.sets) > 0 ? Math.round(Number(override.sets))
-    : Number(stats.exercise.setsPerSession) > 0 ? Math.round(Number(stats.exercise.setsPerSession))
-    : Number(stats.lastSets) > 0 ? Math.round(Number(stats.lastSets)) : 3;
+  const reps =
+    Number(override.reps) > 0
+      ? Math.round(Number(override.reps))
+      : Number(stats.lastReps) > 0
+        ? Math.round(Number(stats.lastReps))
+        : 5;
+  const sets =
+    Number(override.sets) > 0
+      ? Math.round(Number(override.sets))
+      : Number(stats.exercise.setsPerSession) > 0
+        ? Math.round(Number(stats.exercise.setsPerSession))
+        : Number(stats.lastSets) > 0
+          ? Math.round(Number(stats.lastSets))
+          : 3;
 
-  const forSize = override.zone === 'hypertrophy' && stats.workTarget > 0;
+  // Which zone the card is reading itself in. It no longer changes the sum —
+  // the weight comes from e1RM whatever you are training for — it only says
+  // which of the two picks is the one currently prescribed.
+  const zone = override.zone === "hypertrophy" ? "hypertrophy" : "strength";
   const plan = {
     ready: Number.isFinite(target) && target > 0,
-    zone: forSize ? 'hypertrophy' : 'strength',
-    autoTarget, target, reps, sets, step, base,
+    zone,
+    autoTarget,
+    target,
+    reps,
+    sets,
+    step,
+    base,
     usingManualTarget: Number(override.target) > 0,
-    readiness, baseTarget: stats.baseTarget, bestNow,
+    readiness,
+    baseTarget: stats.baseTarget,
+    bestNow,
     bestAdj: stats.bestAdj,
     idealCeiling: target * (1 + settings.idealBand),
     stretchCeiling: target * (1 + settings.stretchBand),
-    grid: [], columns: SET_COLUMNS, rows: REP_SCHEMES, workOptions: null,
-    gentlest: null, weight: NaN, score: NaN, work: NaN, overshoot: NaN, band: null,
-    kind: isBodyweight(stats.exercise) ? 'bodyweight' : 'weight', options: null,
-    // The work scale, carried alongside. Everything below is a lazy getter for
-    // the same reason the strength grid is: a collapsed card reads none of it.
-    workTarget: stats.workTarget, lastWork: stats.lastWork, bestWork: stats.bestWork,
-    workGrid: [], picks: null,
+    grid: [],
+    columns: SET_COLUMNS,
+    rows: REP_SCHEMES,
+    gentlest: null,
+    weight: NaN,
+    score: NaN,
+    work: NaN,
+    overshoot: NaN,
+    band: null,
+    kind: isBodyweight(stats.exercise) ? "bodyweight" : "weight",
+    options: null,
+    // What the prescription comes to in hard sets — the hypertrophy dose, as
+    // opposed to the tonnage, which cannot tell a heavy single from a set of
+    // thirty. A lazy getter, like everything else a collapsed card skips.
+    hardSets: 0,
+    picks: null,
   };
   if (!plan.ready) return plan;
 
   if (isBodyweight(stats.exercise)) {
-    plan.kind = 'bodyweight';
+    plan.kind = "bodyweight";
     plan.weight = null;
     plan.atBase = false;
     plan.lastWeight = null;
-    plan.reps = forSize
-      ? Math.max(1, Math.ceil(stats.workTarget / sets - 1e-9))
-      : repsForTarget(target, sets, settings);
+    plan.reps = repsForTarget(target, sets, settings);
+    plan.reps = repsForTarget(target, sets, settings);
     plan.score = plan.reps * setBonus(sets, settings.setBonusK);
     plan.work = plan.reps * sets;
-    plan.overshoot = forSize ? plan.work - stats.workTarget : plan.score - target;
-    plan.band = forSize
-      ? bandForWork(plan.work, stats.workTarget, bestWorkNow, settings)
-      : bandOf(plan.score, plan.reps);
+    plan.hardSets = sets * repCredit(plan.reps);
+    plan.overshoot = plan.score - target;
+    plan.band = bandOf(plan.score, plan.reps);
     // No rep-scheme axis to trade against: the only choice is how many sets,
     // and each answer is the reps that gets you there. One row, not a grid.
     plan.options = SET_COLUMNS.map((sn) => {
       const r = repsForTarget(target, sn, settings);
       const score = r * setBonus(sn, settings.setBonusK);
       return {
-        reps: r, sets: sn, weight: null, score, band: bandOf(score, r),
-        isPick: sn === sets, volume: 0, work: r * sn,
+        reps: r,
+        sets: sn,
+        weight: null,
+        score,
+        band: bandOf(score, r),
+        isPick: sn === sets,
+        volume: 0,
+        work: r * sn,
+        hardSets: sn * repCredit(r),
       };
     });
     // The work scale on a lift with nothing to load is simply total reps, and
@@ -934,17 +1203,29 @@ export function planFor(stats, settings, override = {}) {
         const r = Math.max(1, Math.ceil(plan.workTarget / sn - 1e-9));
         const done = r * sn;
         return {
-          reps: r, sets: sn, weight: null, work: done,
+          reps: r,
+          sets: sn,
+          weight: null,
+          work: done,
           band: bandForWork(done, plan.workTarget, bestWorkNow, settings),
-          isPick: sn === sets, score: r * setBonus(sn, settings.setBonusK),
+          isPick: sn === sets,
+          score: r * setBonus(sn, settings.setBonusK),
         };
       });
-      const minSets = Math.max(1, Math.round(usualSets(stats.sessions, stats.exercise)));
+      const minSets = Math.max(
+        1,
+        Math.round(usualSets(stats.sessions, stats.exercise)),
+      );
       const room = plan.workOptions.filter((o) => o.sets >= minSets);
       plan.picks = {
-        strength: plan.options.reduce((a, b) => (a === null || b.score < a.score ? b : a), null),
-        hypertrophy: (room.length ? room : plan.workOptions)
-          .reduce((a, b) => (a === null || b.work < a.work ? b : a), null),
+        strength: plan.options.reduce(
+          (a, b) => (a === null || b.score < a.score ? b : a),
+          null,
+        ),
+        hypertrophy: (room.length ? room : plan.workOptions).reduce(
+          (a, b) => (a === null || b.work < a.work ? b : a),
+          null,
+        ),
       };
     }
     // On a reps lift the smallest possible step is a whole rep, which low down
@@ -953,36 +1234,44 @@ export function planFor(stats, settings, override = {}) {
     const softest = plan.options
       .filter((o) => Number.isFinite(o.score) && o.score >= target - 1e-9)
       .reduce((a, b) => (a === null || b.score < a.score ? b : a), null);
-    plan.gentlest = softest && softest.score < plan.score - 1e-9 ? softest : null;
+    plan.gentlest =
+      softest && softest.score < plan.score - 1e-9 ? softest : null;
     return plan;
   }
 
-  plan.weight = forSize
-    ? weightForWork(stats.workTarget, reps, sets, step, base)
-    : weightForTarget(target, reps, sets, settings, step, base);
+  plan.weight = weightForTarget(target, reps, sets, settings, step, base);
+  plan.weight = weightForTarget(target, reps, sets, settings, step, base);
   // True when the bar alone is already heavier than the target needs.
   plan.atBase = base > 0 && Math.abs(plan.weight - base) < 1e-9;
-  plan.score = plan.weight * repFactor(reps, settings.formula) * setBonus(sets, settings.setBonusK);
+  plan.score =
+    plan.weight *
+    repFactor(reps, settings.formula) *
+    setBonus(sets, settings.setBonusK);
   plan.work = work(plan.weight, reps, sets, stats.exercise.kind);
-  plan.overshoot = forSize ? plan.work - stats.workTarget : plan.score - target;
-  plan.band = forSize
-    ? (comebackUnder !== null && plan.weight < comebackUnder - 1e-9
-      ? BANDS.return
-      : bandForWork(plan.work, stats.workTarget, bestWorkNow, settings))
-    : bandOf(plan.score, plan.weight);
-  plan.lastWeight = stats.lastAdj != null ? stats.entries[stats.entries.length - 1].weight : null;
+  plan.hardSets = sets * repCredit(reps);
+  plan.overshoot = plan.score - target;
+  plan.band = bandOf(plan.score, plan.weight);
+  plan.lastWeight =
+    stats.lastAdj != null
+      ? stats.entries[stats.entries.length - 1].weight
+      : null;
 
   /** One cell of the trade-off grid: the lightest loadable weight at reps x sets. */
   const cell = (r, s) => {
     const w = weightForTarget(target, r, s, settings, step, base);
-    const score = w * repFactor(r, settings.formula) * setBonus(s, settings.setBonusK);
+    const score =
+      w * repFactor(r, settings.formula) * setBonus(s, settings.setBonusK);
     return {
-      reps: r, sets: s, weight: w, score,
+      reps: r,
+      sets: s,
+      weight: w,
+      score,
       band: bandOf(score, w),
       atBase: base > 0 && Math.abs(w - base) < 1e-9,
       isPick: r === snapReps(reps) && s === sets,
       volume: volume(w, r, s),
       work: work(w, r, s, stats.exercise.kind),
+      hardSets: s * repCredit(r),
     };
   };
 
@@ -992,46 +1281,13 @@ export function planFor(stats, settings, override = {}) {
   // thing that changes is when the work happens.
   let grid = null;
   let gentlest;
-  Object.defineProperty(plan, 'grid', {
+  Object.defineProperty(plan, "grid", {
     enumerable: true,
     configurable: true,
     get() {
-      if (!grid) grid = REP_SCHEMES.map((r) => SET_COLUMNS.map((s) => cell(r, s)));
+      if (!grid)
+        grid = REP_SCHEMES.map((r) => SET_COLUMNS.map((s) => cell(r, s)));
       return grid;
-    },
-  });
-
-  /**
-   * The same trade-off, solved against work instead.
-   *
-   * A separate grid rather than another column on the first one, because the
-   * weight in each cell is the answer to a different question: there, the
-   * lightest load whose e1RM meets the strength target; here, the lightest
-   * load whose tonnage meets the work one. Relabelling the first would just be
-   * strength maths wearing a different name.
-   */
-  const workCell = (r, sn) => {
-    const w = weightForWork(plan.workTarget, r, sn, step, base);
-    const done = work(w, r, sn, stats.exercise.kind);
-    return {
-      reps: r, sets: sn, weight: w, work: done,
-      band: comebackUnder !== null && w < comebackUnder - 1e-9
-        ? BANDS.return
-        : bandForWork(done, plan.workTarget, bestWorkNow, settings),
-      atBase: base > 0 && Math.abs(w - base) < 1e-9,
-      isPick: r === snapReps(reps) && sn === sets,
-      score: w * repFactor(r, settings.formula) * setBonus(sn, settings.setBonusK),
-    };
-  };
-
-  let workGrid = null;
-  Object.defineProperty(plan, 'workGrid', {
-    enumerable: true,
-    configurable: true,
-    get() {
-      if (!(plan.workTarget > 0)) return [];
-      if (!workGrid) workGrid = REP_SCHEMES.map((r) => SET_COLUMNS.map((sn) => workCell(r, sn)));
-      return workGrid;
     },
   });
 
@@ -1049,30 +1305,26 @@ export function planFor(stats, settings, override = {}) {
    * One option per zone: today at the reps that serve strength, and today at
    * the reps that serve size. Both are always computed.
    *
-   * Neither is a search. On the strength scale the weight ladder is coarse, so
-   * which cell you pick genuinely matters and plan.gentlest is there for it. On
-   * the work scale it does not: the weight is solved from the target, so every
-   * rep and set combination in the range meets it by construction, and
-   * "smallest overshoot" only ever picks out whichever one the rounding
-   * happened to favour. Chasing that produced 6 x 6 — six reps being the very
-   * edge of the size range, and the same rep count the strength pick was
-   * already showing.
+   * Both weights come from the same e1RM target, because working out what you
+   * can do for twelve reps is exactly what an e1RM estimate is for. The zones
+   * differ in the rep range they point you at, not in the sum behind them.
    *
-   * So each zone names the scheme it is actually about, and the set count stays
-   * where you have it so the two are comparable. Your own rep count stands when
-   * it is already in the range: somebody doing triples does not need telling
-   * that five is the canonical strength scheme.
+   * Neither is a search. Each zone names the scheme it is about, and the set
+   * count stays where you have it so the two are comparable. Your own rep
+   * count stands when it is already in the range: somebody doing triples does
+   * not need telling that five is the canonical strength scheme.
    */
   let picks;
-  Object.defineProperty(plan, 'picks', {
+  Object.defineProperty(plan, "picks", {
     enumerable: true,
     configurable: true,
     get() {
       if (picks !== undefined) return picks;
-      const repsFor = (zone) => (inZone(reps, zone) ? snapReps(reps) : zone.pickReps);
+      const repsFor = (zone) =>
+        inZone(reps, zone) ? snapReps(reps) : zone.pickReps;
       picks = {
         strength: cell(repsFor(ZONES.strength), sets),
-        hypertrophy: plan.workTarget > 0 ? workCell(repsFor(ZONES.hypertrophy), sets) : null,
+        hypertrophy: cell(repsFor(ZONES.hypertrophy), sets),
       };
       return picks;
     },
@@ -1080,13 +1332,17 @@ export function planFor(stats, settings, override = {}) {
 
   // Gentlest option at the chosen set count: smallest overshoot of the target.
   // One column, so it solves seven cells rather than forcing the whole grid.
-  Object.defineProperty(plan, 'gentlest', {
+  Object.defineProperty(plan, "gentlest", {
     enumerable: true,
     configurable: true,
     get() {
       if (gentlest !== undefined) return gentlest;
-      const col = REP_SCHEMES.map((r) => cell(r, sets)).filter((c) => Number.isFinite(c.score));
-      gentlest = col.length ? col.reduce((a, b) => (b.score < a.score ? b : a)) : null;
+      const col = REP_SCHEMES.map((r) => cell(r, sets)).filter((c) =>
+        Number.isFinite(c.score),
+      );
+      gentlest = col.length
+        ? col.reduce((a, b) => (b.score < a.score ? b : a))
+        : null;
       return gentlest;
     },
   });
@@ -1097,8 +1353,8 @@ export function planFor(stats, settings, override = {}) {
 /* ------------------------------------------------------------- warm-up */
 
 const WARMUP_PCT_TABLE = [
-  { pct: 0.40, reps: 10 },
-  { pct: 0.60, reps: 5 },
+  { pct: 0.4, reps: 10 },
+  { pct: 0.6, reps: 5 },
   { pct: 0.75, reps: 3 },
   { pct: 0.85, reps: 1 },
 ];
@@ -1131,7 +1387,8 @@ const WARMUP_TIERS = [
  * reps-based ramp was considered and rejected rather than merely skipped.
  */
 export function warmupPlan(workWeight, step, base, kind) {
-  if (isBodyweight({ kind }) || !Number.isFinite(workWeight) || workWeight <= 0) return [];
+  if (isBodyweight({ kind }) || !Number.isFinite(workWeight) || workWeight <= 0)
+    return [];
   const s = Number(step) > 0 ? Number(step) : 2.5;
   const b = Number(base) > 0 ? Number(base) : 0;
   const rungs = Math.max(0, (workWeight - b) / s);
@@ -1139,13 +1396,15 @@ export function warmupPlan(workWeight, step, base, kind) {
   if (!tier.count) return [];
 
   const out = [];
-  for (const p of WARMUP_PCT_TABLE.slice(WARMUP_PCT_TABLE.length - tier.count)) {
+  for (const p of WARMUP_PCT_TABLE.slice(
+    WARMUP_PCT_TABLE.length - tier.count,
+  )) {
     // Rounds up, like every other suggestion in this file: a warm-up landing
     // slightly heavier than the nominal percentage costs nothing, landing
     // lighter risks under-priming the set it is meant to prepare.
     const w = ceilToStep(workWeight * p.pct, s, b);
-    if (w >= workWeight) continue;                                       // rounded into the work weight itself
-    if (out.length && out[out.length - 1].weight >= w - 1e-9) continue;   // a coarse step collapsed two rungs onto one
+    if (w >= workWeight) continue; // rounded into the work weight itself
+    if (out.length && out[out.length - 1].weight >= w - 1e-9) continue; // a coarse step collapsed two rungs onto one
     out.push({ weight: w, reps: p.reps, sets: 1 });
   }
   // The empty bar itself, only when there is a real gap between it and the
@@ -1160,20 +1419,25 @@ export function warmupPlan(workWeight, step, base, kind) {
 /* ----------------------------------------------------------- formatting */
 
 export function fmt(n, dp = 1) {
-  if (n == null || !Number.isFinite(Number(n))) return '—';
+  if (n == null || !Number.isFinite(Number(n))) return "—";
   const v = Number(n);
-  return v.toLocaleString(undefined, { minimumFractionDigits: dp, maximumFractionDigits: dp });
+  return v.toLocaleString(undefined, {
+    minimumFractionDigits: dp,
+    maximumFractionDigits: dp,
+  });
 }
 
 /** The unit a lift's score and milestones are counted in. */
 export function loadUnit(exercise) {
-  return isBodyweight(exercise) ? 'reps' : 'kg';
+  return isBodyweight(exercise) ? "reps" : "kg";
 }
 
 /** How a milestone reads: "kg × 5" for a weight target at given reps, "reps" for a reps target. */
 export function milestoneUnitLabel(milestone, reps) {
-  if (!milestone) return '';
-  return milestone.kind === 'reps' ? 'reps' : `kg × ${Math.round(Number(reps))}`;
+  if (!milestone) return "";
+  return milestone.kind === "reps"
+    ? "reps"
+    : `kg × ${Math.round(Number(reps))}`;
 }
 
 /** How one set reads: "3 × 5 @ 100 kg", or "3 × 12 reps" where there is no load. */
@@ -1185,20 +1449,23 @@ export function describeSet(exercise, sets, reps, weight) {
 
 /** Weights print without a pointless .0 — "82.5 kg", "80 kg". */
 export function fmtWeight(n) {
-  if (n == null || !Number.isFinite(Number(n))) return '—';
+  if (n == null || !Number.isFinite(Number(n))) return "—";
   const v = Number(n);
-  return (Math.abs(v - Math.round(v)) < 1e-9 ? String(Math.round(v)) : v.toFixed(1));
+  return Math.abs(v - Math.round(v)) < 1e-9
+    ? String(Math.round(v))
+    : v.toFixed(1);
 }
 
 export function fmtSigned(n, dp = 2) {
-  if (n == null || !Number.isFinite(Number(n))) return '—';
+  if (n == null || !Number.isFinite(Number(n))) return "—";
   const v = Number(n);
-  return (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v).toFixed(dp);
+  return (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v).toFixed(dp);
 }
 
 export function fmtCompact(n) {
-  if (n == null || !Number.isFinite(Number(n))) return '—';
+  if (n == null || !Number.isFinite(Number(n))) return "—";
   const v = Number(n);
-  if (Math.abs(v) >= 10000) return (v / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
+  if (Math.abs(v) >= 10000)
+    return (v / 1000).toFixed(1).replace(/\.0$/, "") + "k";
   return Math.round(v).toLocaleString();
 }

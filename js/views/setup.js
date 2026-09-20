@@ -1,14 +1,42 @@
 // views/setup.js — the Exercises and Settings sheets, plus backup/restore.
 // Everything here is stored on this device only; nothing is ever sent anywhere.
 
-import { el, stepper, chipGroup, multiChipGroup, segmented, toast, sheet, confirmSheet, details, chevron, accentDot } from '../ui.js';
-import * as store from '../store.js';
-import { showWelcome } from './welcome.js';
-import * as ui from '../core/uistate.js';
-import { fmt, setBonus, READY_AT, fatigueAt, retentionAt, readinessSettings, isBodyweight } from '../metrics.js';
-import { LEVELS, levelOf, levelByKey, suggestLevel } from '../insights.js';
+import {
+  el,
+  stepper,
+  chipGroup,
+  multiChipGroup,
+  segmented,
+  toast,
+  sheet,
+  confirmSheet,
+  details,
+  chevron,
+  accentDot,
+} from "../ui.js";
+import * as store from "../store.js";
+import { showWelcome } from "./welcome.js";
+import * as ui from "../core/uistate.js";
+import {
+  fmt,
+  setBonus,
+  READY_AT,
+  fatigueAt,
+  retentionAt,
+  readinessSettings,
+  isBodyweight,
+} from "../metrics.js";
+import { LEVELS, levelOf, levelByKey, suggestLevel } from "../insights.js";
 
-const SUGGESTED_TAGS = ['Legs', 'Push', 'Pull', 'Arms', 'Chest', 'Back', 'Core'];
+const SUGGESTED_TAGS = [
+  "Legs",
+  "Push",
+  "Pull",
+  "Arms",
+  "Chest",
+  "Back",
+  "Core",
+];
 
 /**
  * Free-form categories on a lift — a few common ones offered as quick-add
@@ -17,36 +45,48 @@ const SUGGESTED_TAGS = ['Legs', 'Push', 'Pull', 'Arms', 'Chest', 'Back', 'Core']
  */
 function tagEditor({ tags, onChange }) {
   let current = [...tags];
-  const chipHost = el('div');
+  const chipHost = el("div");
   const paint = () => {
     const options = [...new Set([...SUGGESTED_TAGS, ...current])];
-    chipHost.replaceChildren(multiChipGroup({
-      label: 'Tags', options, values: current,
-      onToggle: (tag, on) => {
-        current = on ? [...new Set([...current, tag])] : current.filter((t) => t !== tag);
-        paint();
-        onChange([...current]);
-      },
-    }));
+    chipHost.replaceChildren(
+      multiChipGroup({
+        label: "Tags",
+        options,
+        values: current,
+        onToggle: (tag, on) => {
+          current = on
+            ? [...new Set([...current, tag])]
+            : current.filter((t) => t !== tag);
+          paint();
+          onChange([...current]);
+        },
+      }),
+    );
   };
   paint();
 
-  const input = el('input', {
-    type: 'text', class: 'text-input', placeholder: 'Add a tag…', 'aria-label': 'Add a tag',
+  const input = el("input", {
+    type: "text",
+    class: "text-input",
+    placeholder: "Add a tag…",
+    "aria-label": "Add a tag",
   });
-  input.addEventListener('keydown', (e) => {
-    if (e.key !== 'Enter') return;
+  input.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
     e.preventDefault();
     const v = input.value.trim();
-    if (!v || current.includes(v)) { input.value = ''; return; }
+    if (!v || current.includes(v)) {
+      input.value = "";
+      return;
+    }
     current = [...current, v];
-    input.value = '';
+    input.value = "";
     paint();
     onChange([...current]);
   });
 
-  return el('div', { class: 'field-block' }, [
-    el('span', { class: 'field-label', text: 'Tags' }),
+  return el("div", { class: "field-block" }, [
+    el("span", { class: "field-label", text: "Tags" }),
     chipHost,
     input,
   ]);
@@ -54,82 +94,221 @@ function tagEditor({ tags, onChange }) {
 
 export function renderSetup(ctx) {
   const { settings } = ctx;
-  const root = el('section', { class: 'view view-setup' });
-  root.append(el('header', { class: 'view-head' }, [
-    el('h1', { text: 'Setup' }),
-    el('p', { class: 'view-sub', text: 'Your lifts, the maths behind the numbers, and your backups. All of it stays on this iPhone.' }),
-  ]));
+  const root = el("section", { class: "view view-setup" });
+  root.append(
+    el("header", { class: "view-head" }, [
+      el("h1", { text: "Setup" }),
+      el("p", {
+        class: "view-sub",
+        text: "Your lifts, the maths behind the numbers, and your backups. All of it stays on this iPhone.",
+      }),
+    ]),
+  );
 
   /* ------------------------------------------------------- how much detail */
-  root.append(el('h2', { class: 'section-title', text: 'How much to show' }));
-  root.append(el('div', { class: 'card card-pad' }, [
-    el('div', { class: 'field-block' }, [
-      el('span', { class: 'field-label', text: 'The numbers behind each verdict' }),
-      segmented({
-        label: 'The numbers behind each verdict', value: settings.numbersOpen ? 'open' : 'closed',
-        options: [{ value: 'closed', label: 'Folded away' }, { value: 'open', label: 'Always open' }],
-        onChange: (v) => { store.updateSettings({ numbersOpen: v === 'open' }); ctx.refresh({ transition: true }); },
+  root.append(el("h2", { class: "section-title", text: "How much to show" }));
+  root.append(
+    el("div", { class: "card card-pad" }, [
+      el("div", { class: "field-block" }, [
+        el("span", {
+          class: "field-label",
+          text: "The numbers behind each verdict",
+        }),
+        segmented({
+          label: "The numbers behind each verdict",
+          value: settings.numbersOpen ? "open" : "closed",
+          options: [
+            { value: "closed", label: "Folded away" },
+            { value: "open", label: "Always open" },
+          ],
+          onChange: (v) => {
+            store.updateSettings({ numbersOpen: v === "open" });
+            ctx.refresh({ transition: true });
+          },
+        }),
+        el("p", {
+          class: "field-hint",
+          text: "Every screen leads with the plain-English verdict and keeps the arithmetic — the e1RM maths, the target each suggestion is measured against, the projections — one tap underneath it. This decides whether that tap has already been made for you. Nothing is hidden either way, and nothing is calculated differently.",
+        }),
+      ]),
+      el("div", { class: "lever-row lever-row-half" }, [
+        stepper({
+          label: "Rest timer (seconds)",
+          value: settings.restSeconds,
+          step: 15,
+          min: 0,
+          max: 900,
+          dp: 0,
+          id: "set-rest",
+          onChange: (v) => {
+            store.updateSettings({ restSeconds: v });
+            ctx.refresh();
+          },
+        }),
+      ]),
+      el("p", {
+        class: "field-hint",
+        text: "Saving a set dated today starts a rest clock above the tab bar; it keeps counting past the target rather than stopping. Set it to 0 to turn the timer off.",
       }),
-      el('p', { class: 'field-hint', text: 'Every screen leads with the plain-English verdict and keeps the arithmetic — the e1RM maths, the target each suggestion is measured against, the projections — one tap underneath it. This decides whether that tap has already been made for you. Nothing is hidden either way, and nothing is calculated differently.' }),
     ]),
-    el('div', { class: 'lever-row lever-row-half' }, [
-      stepper({ label: 'Rest timer (seconds)', value: settings.restSeconds, step: 15, min: 0, max: 900, dp: 0, id: 'set-rest',
-        onChange: (v) => { store.updateSettings({ restSeconds: v }); ctx.refresh(); } }),
-    ]),
-    el('p', { class: 'field-hint', text: 'Saving a set dated today starts a rest clock above the tab bar; it keeps counting past the target rather than stopping. Set it to 0 to turn the timer off.' }),
-  ]));
+  );
 
   /* ---------------------------------------------------------- exercises */
-  root.append(el('h2', { class: 'section-title', text: 'Your lifts' }));
+  root.append(el("h2", { class: "section-title", text: "Your lifts" }));
   root.append(globalLevel(ctx));
-  const list = el('div', { class: 'card-list' });
+  const list = el("div", { class: "card-list" });
   const exercises = store.getExercises();
-  for (const [i, ex] of exercises.entries()) list.append(exerciseCard(ex, i, exercises.length, ctx));
+  for (const [i, ex] of exercises.entries())
+    list.append(exerciseCard(ex, i, exercises.length, ctx));
   root.append(list);
-  root.append(el('p', { class: 'field-hint', text: 'Tap a lift to change its step, weekly gain and set targets.' }));
-  root.append(el('button', {
-    type: 'button', class: 'btn btn-primary btn-block',
-    onclick: () => addSheet(ctx),
-  }, ['Add a lift']));
-  root.append(details('How to set these up', [
-    el('p', { text: 'Starting weight is the lightest this lift can be: the empty bar, or the lowest pin on a stack. Weight step is the smallest increment on top of that. Together they define the loads that exist — a 20 kg bar with 2.5 kg steps means 20, 22.5, 25 and so on, and nothing in between. Leave the starting weight at 0 for dumbbells or anything where the step alone describes it.' }),
-    el('p', { text: 'Weight step is the smallest increment you can actually load — every suggestion is rounded up to the next rung. Gain per week is the one number the whole planner turns on, which is why it comes with three presets: pick the level that fits and tune it after, per lift, if you want to.' }),
-    el('p', { text: 'A bodyweight lift has nothing to load. There is no weight to record and no one-rep max to estimate, so the planner asks for a rep count instead, progress means more reps, and it adds sets but no tonnage to your totals — the app does not know what you weigh, and a press-up is not all of you anyway.' }),
-    el('p', { text: 'Sets per session is the set count the planner assumes when it recommends a weight. Sets per week is your working-set budget for that lift; Progress flags you under, on, or over it. Roughly 10–20 hard sets per muscle per week is the common recommendation, spread across every lift that trains it — so these per-lift numbers should add up to that, not each hit it.' }),
-  ]));
+  root.append(
+    el("p", {
+      class: "field-hint",
+      text: "Tap a lift to change its step, weekly gain and set targets.",
+    }),
+  );
+  root.append(
+    el(
+      "button",
+      {
+        type: "button",
+        class: "btn btn-primary btn-block",
+        onclick: () => addSheet(ctx),
+      },
+      ["Add a lift"],
+    ),
+  );
+  root.append(
+    details("How to set these up", [
+      el("p", {
+        text: "Starting weight is the lightest this lift can be: the empty bar, or the lowest pin on a stack. Weight step is the smallest increment on top of that. Together they define the loads that exist — a 20 kg bar with 2.5 kg steps means 20, 22.5, 25 and so on, and nothing in between. Leave the starting weight at 0 for dumbbells or anything where the step alone describes it.",
+      }),
+      el("p", {
+        text: "Weight step is the smallest increment you can actually load — every suggestion is rounded up to the next rung. Gain per week is the one number the whole planner turns on, which is why it comes with three presets: pick the level that fits and tune it after, per lift, if you want to.",
+      }),
+      el("p", {
+        text: "A bodyweight lift has nothing to load. There is no weight to record and no one-rep max to estimate, so the planner asks for a rep count instead, progress means more reps, and it adds sets but no tonnage to your totals — the app does not know what you weigh, and a press-up is not all of you anyway.",
+      }),
+      el("p", {
+        text: "Sets per session is the set count the planner assumes when it recommends a weight. Sets per week is your working-set budget for that lift; Progress flags you under, on, or over it. Roughly 10–20 hard sets per muscle per week is the common recommendation, spread across every lift that trains it — so these per-lift numbers should add up to that, not each hit it. What counts against it is hard sets: sets in the 6–20 rep range taken within a couple of reps of failure. A set of three counts for nothing here, however heavy.",
+      }),
+    ]),
+  );
 
   /* ----------------------------------------------------------- settings */
-  root.append(el('h2', { class: 'section-title', text: 'The maths' }));
+  root.append(el("h2", { class: "section-title", text: "The maths" }));
   const s = settings;
-  const mathsCard = el('div', { class: 'card card-pad' }, [
-    el('div', { class: 'field-block' }, [
-      el('span', { class: 'field-label', text: 'e1RM formula' }),
+  const mathsCard = el("div", { class: "card card-pad" }, [
+    el("div", { class: "field-block" }, [
+      el("span", { class: "field-label", text: "e1RM formula" }),
       chipGroup({
-        label: 'Formula', value: s.formula,
-        options: [{ value: 'epley', label: 'Epley' }, { value: 'brzycki', label: 'Brzycki' }],
-        onChange: (v) => { store.updateSettings({ formula: v }); ctx.refresh(); },
+        label: "Formula",
+        value: s.formula,
+        options: [
+          { value: "epley", label: "Epley" },
+          { value: "brzycki", label: "Brzycki" },
+        ],
+        onChange: (v) => {
+          store.updateSettings({ formula: v });
+          ctx.refresh();
+        },
       }),
-      el('p', { class: 'field-hint', text: 'Epley: w × (1 + reps/30). Brzycki: w × 36/(37 − reps), which reads lower at high reps. Epley is the common default.' }),
+      el("p", {
+        class: "field-hint",
+        text: "Epley: w × (1 + reps/30). Brzycki: w × 36/(37 − reps), which reads lower at high reps. Epley is the common default.",
+      }),
     ]),
-    el('div', { class: 'lever-row' }, [
-      stepper({ label: 'Set bonus k', value: s.setBonusK, step: 0.01, min: 0, max: 0.3, dp: 2, id: 'set-k',
-        onChange: (v) => { store.updateSettings({ setBonusK: v }); ctx.refresh(); } }),
-      stepper({ label: 'Trend lookback (days)', value: s.lookbackDays, step: 7, min: 14, max: 365, dp: 0, id: 'set-look',
-        onChange: (v) => { store.updateSettings({ lookbackDays: v }); ctx.refresh(); } }),
+    el("div", { class: "lever-row" }, [
+      stepper({
+        label: "Set bonus k",
+        value: s.setBonusK,
+        step: 0.01,
+        min: 0,
+        max: 0.3,
+        dp: 2,
+        id: "set-k",
+        onChange: (v) => {
+          store.updateSettings({ setBonusK: v });
+          ctx.refresh();
+        },
+      }),
+      stepper({
+        label: "Trend lookback (days)",
+        value: s.lookbackDays,
+        step: 7,
+        min: 14,
+        max: 365,
+        dp: 0,
+        id: "set-look",
+        onChange: (v) => {
+          store.updateSettings({ lookbackDays: v });
+          ctx.refresh();
+        },
+      }),
     ]),
-    el('p', { class: 'field-hint', text: `Adj e1RM = e1RM × (1 + k × ln(sets)). At k = ${s.setBonusK}: 2 sets ${pct(setBonus(2, s.setBonusK))}, 3 sets ${pct(setBonus(3, s.setBonusK))}, 5 sets ${pct(setBonus(5, s.setBonusK))}. Set k to 0 to ignore sets entirely.` }),
-    el('div', { class: 'lever-row' }, [
-      stepper({ label: 'Ideal band (%)', value: s.idealBand * 100, step: 0.5, min: 0, max: 20, dp: 1, id: 'set-ideal',
-        onChange: (v) => { store.updateSettings({ idealBand: v / 100 }); ctx.refresh(); } }),
-      stepper({ label: 'Stretch band (%)', value: s.stretchBand * 100, step: 0.5, min: 0, max: 30, dp: 1, id: 'set-stretch',
-        onChange: (v) => { store.updateSettings({ stretchBand: v / 100 }); ctx.refresh(); } }),
+    el("p", {
+      class: "field-hint",
+      text: `Adj e1RM = e1RM × (1 + k × ln(sets)). At k = ${s.setBonusK}: 2 sets ${pct(setBonus(2, s.setBonusK))}, 3 sets ${pct(setBonus(3, s.setBonusK))}, 5 sets ${pct(setBonus(5, s.setBonusK))}. Set k to 0 to ignore sets entirely.`,
+    }),
+    el("div", { class: "lever-row" }, [
+      stepper({
+        label: "Ideal band (%)",
+        value: s.idealBand * 100,
+        step: 0.5,
+        min: 0,
+        max: 20,
+        dp: 1,
+        id: "set-ideal",
+        onChange: (v) => {
+          store.updateSettings({ idealBand: v / 100 });
+          ctx.refresh();
+        },
+      }),
+      stepper({
+        label: "Stretch band (%)",
+        value: s.stretchBand * 100,
+        step: 0.5,
+        min: 0,
+        max: 30,
+        dp: 1,
+        id: "set-stretch",
+        onChange: (v) => {
+          store.updateSettings({ stretchBand: v / 100 });
+          ctx.refresh();
+        },
+      }),
     ]),
-    el('p', { class: 'field-hint', text: 'Where the planner’s colour bands fall, as a percentage over your target. Widen the ideal band if the green options feel too timid; narrow it if you keep missing reps.' }),
-    el('div', { class: 'lever-row' }, [
-      stepper({ label: 'Default weight step', value: s.defaultStep, step: 0.5, min: 0.5, max: 25, dp: 1, id: 'set-step',
-        onChange: (v) => { store.updateSettings({ defaultStep: v }); ctx.refresh(); } }),
-      stepper({ label: 'Default gain (%/week)', value: s.defaultGainPerWeek * 100, step: 0.05, min: 0, max: 5, dp: 2, id: 'set-gain',
-        onChange: (v) => { store.updateSettings({ defaultGainPerWeek: v / 100 }); ctx.refresh(); } }),
+    el("p", {
+      class: "field-hint",
+      text: "Where the planner’s colour bands fall, as a percentage over your target. Widen the ideal band if the green options feel too timid; narrow it if you keep missing reps.",
+    }),
+    el("div", { class: "lever-row" }, [
+      stepper({
+        label: "Default weight step",
+        value: s.defaultStep,
+        step: 0.5,
+        min: 0.5,
+        max: 25,
+        dp: 1,
+        id: "set-step",
+        onChange: (v) => {
+          store.updateSettings({ defaultStep: v });
+          ctx.refresh();
+        },
+      }),
+      stepper({
+        label: "Default gain (%/week)",
+        value: s.defaultGainPerWeek * 100,
+        step: 0.05,
+        min: 0,
+        max: 5,
+        dp: 2,
+        id: "set-gain",
+        onChange: (v) => {
+          store.updateSettings({ defaultGainPerWeek: v / 100 });
+          ctx.refresh();
+        },
+      }),
     ]),
     el('div', { class: 'field-block' }, [
       el('span', { class: 'field-label', text: 'The work scale' }),
@@ -149,111 +328,306 @@ export function renderSetup(ctx) {
   ]);
 
   /* --------------------------------- fatigue, recovery and detraining */
-  const on = s.readiness !== 'off';
-  const readinessCard = el('div', { class: 'card card-pad' }, [
-    el('div', { class: 'field-block' }, [
-      el('span', { class: 'field-label', text: 'Account for the gap between sessions' }),
-      segmented({
-        label: 'Readiness model', value: on ? 'on' : 'off',
-        options: [{ value: 'on', label: 'On' }, { value: 'off', label: 'Off' }],
-        onChange: (v) => { store.updateSettings({ readiness: v }); ctx.refresh({ transition: true }); },
+  const on = s.readiness !== "off";
+  const readinessCard = el("div", { class: "card card-pad" }, [
+    el("div", { class: "field-block" }, [
+      el("span", {
+        class: "field-label",
+        text: "Account for the gap between sessions",
       }),
-      el('p', { class: 'field-hint', text: 'On, your weekly gain is earned by the week: train a lift twice in a week and each session asks for half of it, not all of it. On top of that the planner subtracts fatigue still owed to your last session, and — after a real layoff — the strength you will have lost. Off puts back the flat step of the original spreadsheet: last session plus the full weekly gain, whether that was yesterday or in March.' }),
+      segmented({
+        label: "Readiness model",
+        value: on ? "on" : "off",
+        options: [
+          { value: "on", label: "On" },
+          { value: "off", label: "Off" },
+        ],
+        onChange: (v) => {
+          store.updateSettings({ readiness: v });
+          ctx.refresh({ transition: true });
+        },
+      }),
+      el("p", {
+        class: "field-hint",
+        text: "On, your weekly gain is earned by the week: train a lift twice in a week and each session asks for half of it, not all of it. On top of that the planner subtracts fatigue still owed to your last session, and — after a real layoff — the strength you will have lost. Off puts back the flat step of the original spreadsheet: last session plus the full weekly gain, whether that was yesterday or in March.",
+      }),
     ]),
-    !on ? null : el('div', {}, [
-      el('div', { class: 'lever-row' }, [
-        stepper({ label: 'Fatigue after a session (%)', value: s.fatiguePeak * 100, step: 0.5, min: 0, max: 25, dp: 1, id: 'set-fpeak',
-          onChange: (v) => { store.updateSettings({ fatiguePeak: v / 100 }); ctx.refresh(); } }),
-        stepper({ label: 'Recovery time constant (days)', value: s.fatigueTau, step: 0.5, min: 0.5, max: 10, dp: 1, id: 'set-ftau',
-          onChange: (v) => { store.updateSettings({ fatigueTau: v }); ctx.refresh(); } }),
-      ]),
-      el('p', { class: 'field-hint', text: `A normal hard session costs you ${pct1(s.fatiguePeak)} on the day, decaying by 1/e every ${fmt(s.fatigueTau, 1)} days: ${fatigueLadder(s)}. More sets or a lower RIR scale the peak up, fewer or a higher RIR scale it down. A lift counts as ready once the deficit falls under ${pct1(READY_AT)}.` }),
-      el('div', { class: 'lever-row' }, [
-        stepper({ label: 'Productive rest (days)', value: s.productiveDays, step: 1, min: 1, max: 60, dp: 0, id: 'set-prod',
-          onChange: (v) => { store.updateSettings({ productiveDays: v }); ctx.refresh(); } }),
-        stepper({ label: 'Grace before detraining (days)', value: s.graceDays, step: 1, min: 1, max: 90, dp: 0, id: 'set-grace',
-          onChange: (v) => { store.updateSettings({ graceDays: v }); ctx.refresh(); } }),
-      ]),
-      el('p', { class: 'field-hint', text: 'Rest past the productive window stops adding fitness; time past the grace period starts taking it away. Both stretch to fit how you actually train a lift — if your normal gap is a fortnight, nothing counts as a layoff at fifteen days.' }),
-      el('div', { class: 'lever-row' }, [
-        stepper({ label: 'Detraining half-life (days)', value: s.detrainHalfLife, step: 7, min: 7, max: 180, dp: 0, id: 'set-half',
-          onChange: (v) => { store.updateSettings({ detrainHalfLife: v }); ctx.refresh(); } }),
-        stepper({ label: 'Strength you keep (%)', value: s.retainedFloor * 100, step: 1, min: 0, max: 100, dp: 0, id: 'set-floor',
-          onChange: (v) => { store.updateSettings({ retainedFloor: v / 100 }); ctx.refresh(); } }),
-      ]),
-      el('p', { class: 'field-hint', text: `Past the grace period the losable part of your strength halves every ${fmt(s.detrainHalfLife, 0)} days, toward a floor of ${pct1(s.retainedFloor)} that a layoff never takes: ${detrainLadder(s)}.` }),
-    ]),
+    !on
+      ? null
+      : el("div", {}, [
+          el("div", { class: "lever-row" }, [
+            stepper({
+              label: "Fatigue after a session (%)",
+              value: s.fatiguePeak * 100,
+              step: 0.5,
+              min: 0,
+              max: 25,
+              dp: 1,
+              id: "set-fpeak",
+              onChange: (v) => {
+                store.updateSettings({ fatiguePeak: v / 100 });
+                ctx.refresh();
+              },
+            }),
+            stepper({
+              label: "Recovery time constant (days)",
+              value: s.fatigueTau,
+              step: 0.5,
+              min: 0.5,
+              max: 10,
+              dp: 1,
+              id: "set-ftau",
+              onChange: (v) => {
+                store.updateSettings({ fatigueTau: v });
+                ctx.refresh();
+              },
+            }),
+          ]),
+          el("p", {
+            class: "field-hint",
+            text: `A normal hard session costs you ${pct1(s.fatiguePeak)} on the day, decaying by 1/e every ${fmt(s.fatigueTau, 1)} days: ${fatigueLadder(s)}. More sets or a lower RIR scale the peak up, fewer or a higher RIR scale it down. A lift counts as ready once the deficit falls under ${pct1(READY_AT)}.`,
+          }),
+          el("div", { class: "lever-row" }, [
+            stepper({
+              label: "Productive rest (days)",
+              value: s.productiveDays,
+              step: 1,
+              min: 1,
+              max: 60,
+              dp: 0,
+              id: "set-prod",
+              onChange: (v) => {
+                store.updateSettings({ productiveDays: v });
+                ctx.refresh();
+              },
+            }),
+            stepper({
+              label: "Grace before detraining (days)",
+              value: s.graceDays,
+              step: 1,
+              min: 1,
+              max: 90,
+              dp: 0,
+              id: "set-grace",
+              onChange: (v) => {
+                store.updateSettings({ graceDays: v });
+                ctx.refresh();
+              },
+            }),
+          ]),
+          el("p", {
+            class: "field-hint",
+            text: "Rest past the productive window stops adding fitness; time past the grace period starts taking it away. Both stretch to fit how you actually train a lift — if your normal gap is a fortnight, nothing counts as a layoff at fifteen days.",
+          }),
+          el("div", { class: "lever-row" }, [
+            stepper({
+              label: "Detraining half-life (days)",
+              value: s.detrainHalfLife,
+              step: 7,
+              min: 7,
+              max: 180,
+              dp: 0,
+              id: "set-half",
+              onChange: (v) => {
+                store.updateSettings({ detrainHalfLife: v });
+                ctx.refresh();
+              },
+            }),
+            stepper({
+              label: "Strength you keep (%)",
+              value: s.retainedFloor * 100,
+              step: 1,
+              min: 0,
+              max: 100,
+              dp: 0,
+              id: "set-floor",
+              onChange: (v) => {
+                store.updateSettings({ retainedFloor: v / 100 });
+                ctx.refresh();
+              },
+            }),
+          ]),
+          el("p", {
+            class: "field-hint",
+            text: `Past the grace period the losable part of your strength halves every ${fmt(s.detrainHalfLife, 0)} days, toward a floor of ${pct1(s.retainedFloor)} that a layoff never takes: ${detrainLadder(s)}.`,
+          }),
+        ]),
   ]);
   // Folded by default whichever way the disclosure setting is set: these are
   // coefficients, and a settings screen that opens as a wall of them is worse
   // for everyone. They are one tap away, which is the whole idea.
-  root.append(details('Fatigue, recovery and detraining', [readinessCard]));
-  root.append(details('Tune the formulas', [mathsCard]));
+  root.append(details("Fatigue, recovery and detraining", [readinessCard]));
+  root.append(details("Tune the formulas", [mathsCard]));
 
-  root.append(el('div', { class: 'field-block' }, [
-    el('span', { class: 'field-label', text: 'Appearance' }),
-    segmented({
-      label: 'Theme', value: store.getTheme(),
-      options: [{ value: 'system', label: 'System' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }],
-      onChange: (v) => store.setTheme(v),
-    }),
-  ]));
+  root.append(
+    el("div", { class: "field-block" }, [
+      el("span", { class: "field-label", text: "Appearance" }),
+      segmented({
+        label: "Theme",
+        value: store.getTheme(),
+        options: [
+          { value: "system", label: "System" },
+          { value: "light", label: "Light" },
+          { value: "dark", label: "Dark" },
+        ],
+        onChange: (v) => store.setTheme(v),
+      }),
+    ]),
+  );
 
   /* --------------------------------------------------------- your data */
-  root.append(el('h2', { class: 'section-title', text: 'Your data' }));
-  const counts = { ex: store.getExercises().length, en: store.getEntries().length };
-  root.append(el('div', { class: 'card card-pad' }, [
-    el('p', { class: 'card-note', text: `${counts.en} logged entries across ${counts.ex} lifts, saved in this device’s local storage. Take a backup now and then — clearing Safari’s website data would wipe it.` }),
-    el('div', { class: 'btn-grid' }, [
-      el('button', { type: 'button', class: 'btn btn-ghost', onclick: () => shareFile(`lifting-tracker-${today()}.json`, store.exportJSON(), 'application/json') }, ['Back up (JSON)']),
-      el('button', { type: 'button', class: 'btn btn-ghost', onclick: () => shareFile(`lifting-log-${today()}.csv`, store.exportCSV(), 'text/csv') }, ['Export log (CSV)']),
-      el('button', { type: 'button', class: 'btn btn-ghost', onclick: () => importPicker(ctx) }, ['Restore a backup']),
-      el('button', { type: 'button', class: 'btn btn-ghost', onclick: () => resetSheet(ctx) }, ['Reset options']),
+  root.append(el("h2", { class: "section-title", text: "Your data" }));
+  const counts = {
+    ex: store.getExercises().length,
+    en: store.getEntries().length,
+  };
+  root.append(
+    el("div", { class: "card card-pad" }, [
+      el("p", {
+        class: "card-note",
+        text: `${counts.en} logged entries across ${counts.ex} lifts, saved in this device’s local storage. Take a backup now and then — clearing Safari’s website data would wipe it.`,
+      }),
+      el("div", { class: "btn-grid" }, [
+        el(
+          "button",
+          {
+            type: "button",
+            class: "btn btn-ghost",
+            onclick: () =>
+              shareFile(
+                `lifting-tracker-${today()}.json`,
+                store.exportJSON(),
+                "application/json",
+              ),
+          },
+          ["Back up (JSON)"],
+        ),
+        el(
+          "button",
+          {
+            type: "button",
+            class: "btn btn-ghost",
+            onclick: () =>
+              shareFile(
+                `lifting-log-${today()}.csv`,
+                store.exportCSV(),
+                "text/csv",
+              ),
+          },
+          ["Export log (CSV)"],
+        ),
+        el(
+          "button",
+          {
+            type: "button",
+            class: "btn btn-ghost",
+            onclick: () => importPicker(ctx),
+          },
+          ["Restore a backup"],
+        ),
+        el(
+          "button",
+          {
+            type: "button",
+            class: "btn btn-ghost",
+            onclick: () => resetSheet(ctx),
+          },
+          ["Reset options"],
+        ),
+      ]),
     ]),
-  ]));
+  );
 
   /* ------------------------------------------------------------ how to */
-  root.append(el('h2', { class: 'section-title', text: 'How this works' }));
-  root.append(details('Logging', [
-    el('p', { text: 'Two ways in, and they store the same thing. Set by set logs the set you have just finished and starts the rest clock; all at once writes up a session that is already over. Sets that match on weight and reps are counted onto one row either way, so 3×5 at 100 kg is a single entry however you typed it.' }),
-    el('p', { text: 'Drop the reps before your last set and it is recorded as it happened: four sets of five plus one of four is stored as two rows, and the session is scored on the four honest sets rather than being dragged down to the short one or rounded up past it.' }),
-    el('p', { text: 'RIR and notes are recorded per set. Where sets are counted onto one row, that row keeps the lowest RIR — the set that came closest to failure — and collects the notes.' }),
-    el('p', { text: 'For a ramping or pyramid session, just log each set: the different loads become their own rows on their own.' }),
-  ]));
-  root.append(details('Reading the plan', [
-    el('p', { text: 'Grey means you have already beaten that session, so it is not progression. Green is the smallest honest step forward. Amber is a stretch — ambitious but usually doable. Red means the jump is big enough that you will probably miss reps. Aim for green on most sessions and take amber when you are feeling strong.' }),
-    el('p', { text: 'Sets are a progression lever in their own right, and the cheapest one. Going 3×5 to 4×5 at the same weight raises adjusted e1RM by about 1.4% at k = 0.05 — less than adding 2.5 kg to a 100 kg squat, and it adds real work. The usual order is reps first, then weight, then sets.' }),
-  ]));
-  root.append(details('What to watch out for', [
-    el('p', { text: 'e1RM formulas drift above roughly 10–12 reps and will overestimate. Keep comparisons inside 1–10 reps where you can.' }),
-    el('p', { text: 'A set taken to failure and a set with 3 reps left produce the same e1RM but are not the same session. That is what RIR is for — log it, and read the trend with it in mind.' }),
-    el('p', { text: 'The set bonus is a heuristic. There is no agreed formula for folding sets into one strength number, so treat k as a dial you tune to your own training rather than a constant to trust.' }),
-    el('p', { text: 'Projections are straight lines. Real progress is roughly linear for a few months and then flattens, so the +12 week figure is a ceiling, not a forecast. The trend is only honest if your set count is reasonably stable.' }),
-  ]));
+  root.append(el("h2", { class: "section-title", text: "How this works" }));
+  root.append(
+    details("Logging", [
+      el("p", {
+        text: "Two ways in, and they store the same thing. Set by set logs the set you have just finished and starts the rest clock; all at once writes up a session that is already over. Sets that match on weight and reps are counted onto one row either way, so 3×5 at 100 kg is a single entry however you typed it.",
+      }),
+      el("p", {
+        text: "Drop the reps before your last set and it is recorded as it happened: four sets of five plus one of four is stored as two rows, and the session is scored on the four honest sets rather than being dragged down to the short one or rounded up past it.",
+      }),
+      el("p", {
+        text: "RIR and notes are recorded per set. Where sets are counted onto one row, that row keeps the lowest RIR — the set that came closest to failure — and collects the notes.",
+      }),
+      el("p", {
+        text: "For a ramping or pyramid session, just log each set: the different loads become their own rows on their own.",
+      }),
+    ]),
+  );
+  root.append(
+    details("Reading the plan", [
+      el("p", {
+        text: "Grey means you have already beaten that session, so it is not progression. Green is the smallest honest step forward. Amber is a stretch — ambitious but usually doable. Red means the jump is big enough that you will probably miss reps. Aim for green on most sessions and take amber when you are feeling strong.",
+      }),
+      el("p", {
+        text: "Sets are a progression lever in their own right, and the cheapest one. Going 3×5 to 4×5 at the same weight raises adjusted e1RM by about 1.4% at k = 0.05 — less than adding 2.5 kg to a 100 kg squat, and it adds real work. The usual order is reps first, then weight, then sets.",
+      }),
+    ]),
+  );
+  root.append(
+    details("What to watch out for", [
+      el("p", {
+        text: "e1RM formulas drift above roughly 10–12 reps and will overestimate. Keep comparisons inside 1–10 reps where you can.",
+      }),
+      el("p", {
+        text: "A set taken to failure and a set with 3 reps left produce the same e1RM but are not the same session. That is what RIR is for — log it, and read the trend with it in mind.",
+      }),
+      el("p", {
+        text: "The set bonus is a heuristic. There is no agreed formula for folding sets into one strength number, so treat k as a dial you tune to your own training rather than a constant to trust.",
+      }),
+      el("p", {
+        text: "Projections are straight lines. Real progress is roughly linear for a few months and then flattens, so the +12 week figure is a ceiling, not a forecast. The trend is only honest if your set count is reasonably stable.",
+      }),
+    ]),
+  );
 
   // Only worth saying while the app is still running in a browser tab.
-  const standalone = window.navigator.standalone === true
-    || window.matchMedia?.('(display-mode: standalone)').matches;
+  const standalone =
+    window.navigator.standalone === true ||
+    window.matchMedia?.("(display-mode: standalone)").matches;
   if (!standalone) {
-    root.append(details('Add it to your Home Screen', [
-      el('p', { text: 'Tap the Share button in Safari, scroll down, and choose “Add to Home Screen”. It then launches full-screen, keeps working with no signal, and iOS stops treating its data as a disposable browser cache.' }),
-      el('p', { text: 'Open it from the Home Screen icon after that, rather than from a Safari tab.' }),
-    ]));
+    root.append(
+      details("Add it to your Home Screen", [
+        el("p", {
+          text: "Tap the Share button in Safari, scroll down, and choose “Add to Home Screen”. It then launches full-screen, keeps working with no signal, and iOS stops treating its data as a disposable browser cache.",
+        }),
+        el("p", {
+          text: "Open it from the Home Screen icon after that, rather than from a Safari tab.",
+        }),
+      ]),
+    );
   }
 
-  root.append(el('button', {
-    type: 'button', class: 'btn btn-ghost btn-block',
-    onclick: () => showWelcome({ onDone: () => ctx.refresh({ transition: true }) }),
-  }, ['Show the welcome tour again']));
+  root.append(
+    el(
+      "button",
+      {
+        type: "button",
+        class: "btn btn-ghost btn-block",
+        onclick: () =>
+          showWelcome({ onDone: () => ctx.refresh({ transition: true }) }),
+      },
+      ["Show the welcome tour again"],
+    ),
+  );
 
-  root.append(el('p', { class: 'foot-note', text: 'Lifting Tracker · built from your spreadsheet · works offline · no accounts, no network, no tracking.' }));
+  root.append(
+    el("p", {
+      class: "foot-note",
+      text: "Lifting Tracker · built from your spreadsheet · works offline · no accounts, no network, no tracking.",
+    }),
+  );
   return root;
 }
 
 /** "20, 22.5, 25 …" — the first few loads this lift can actually be set to. */
 function ladderExample(ex) {
-  const rungs = [0, 1, 2].map((n) => fmt(ex.base + n * ex.step, 1).replace(/\.0$/, ''));
-  return rungs.join(', ') + ' …';
+  const rungs = [0, 1, 2].map((n) =>
+    fmt(ex.base + n * ex.step, 1).replace(/\.0$/, ""),
+  );
+  return rungs.join(", ") + " …";
 }
 
 function pct(mult) {
@@ -261,7 +635,7 @@ function pct(mult) {
 }
 
 function pct1(fraction) {
-  return `${(Number(fraction) * 100).toFixed(1).replace(/\.0$/, '')}%`;
+  return `${(Number(fraction) * 100).toFixed(1).replace(/\.0$/, "")}%`;
 }
 
 /** Gain rates live in hundredths of a percent, so one decimal is not enough. */
@@ -275,24 +649,31 @@ function fatigueLadder(settings) {
   return [1, 2, 3, 4]
     .map((d) => {
       const f = fatigueAt(d, 1, rs);
-      return `day ${d} ${f > 0 ? '−' + (f * 100).toFixed(1) + '%' : 'spent'}`;
+      return `day ${d} ${f > 0 ? "−" + (f * 100).toFixed(1) + "%" : "spent"}`;
     })
-    .join(', ');
+    .join(", ");
 }
 
 /** "4 weeks −5.2%, 8 weeks −12.5%, 6 months −23.4%". */
 function detrainLadder(settings) {
   const rs = readinessSettings(settings);
-  return [['4 weeks', 28], ['8 weeks', 56], ['6 months', 182]]
-    .map(([label, d]) => `${label} ${'−' + ((1 - retentionAt(d, rs.graceDays, rs)) * 100).toFixed(1)}%`)
-    .join(', ');
+  return [
+    ["4 weeks", 28],
+    ["8 weeks", 56],
+    ["6 months", 182],
+  ]
+    .map(
+      ([label, d]) =>
+        `${label} ${"−" + ((1 - retentionAt(d, rs.graceDays, rs)) * 100).toFixed(1)}%`,
+    )
+    .join(", ");
 }
 
 function today() {
   return new Date().toISOString().slice(0, 10);
 }
 
-const OPEN_EX = 'setup.openExerciseId';
+const OPEN_EX = "setup.openExerciseId";
 
 /**
  * The training level every new lift starts from.
@@ -304,44 +685,83 @@ const OPEN_EX = 'setup.openExerciseId';
  */
 function globalLevel(ctx) {
   const s = ctx.settings;
-  const current = LEVELS.find((l) => Math.abs(l.gainPerWeek - Number(s.defaultGainPerWeek)) < 1e-9) || null;
+  const current =
+    LEVELS.find(
+      (l) => Math.abs(l.gainPerWeek - Number(s.defaultGainPerWeek)) < 1e-9,
+    ) || null;
 
-  const chips = el('div', { class: 'chips', role: 'radiogroup', 'aria-label': 'Starting level for new lifts' });
+  const chips = el("div", {
+    class: "chips",
+    role: "radiogroup",
+    "aria-label": "Starting level for new lifts",
+  });
   for (const l of LEVELS) {
     const on = current && current.key === l.key;
-    chips.append(el('button', {
-      type: 'button', class: `chip${on ? ' is-selected' : ''}`, role: 'radio',
-      'aria-checked': on ? 'true' : 'false', title: l.hint,
-      onclick: () => { store.updateSettings({ defaultGainPerWeek: l.gainPerWeek }); ctx.refresh(); },
-    }, [el('span', { text: l.label })]));
+    chips.append(
+      el(
+        "button",
+        {
+          type: "button",
+          class: `chip${on ? " is-selected" : ""}`,
+          role: "radio",
+          "aria-checked": on ? "true" : "false",
+          title: l.hint,
+          onclick: () => {
+            store.updateSettings({ defaultGainPerWeek: l.gainPerWeek });
+            ctx.refresh();
+          },
+        },
+        [el("span", { text: l.label })],
+      ),
+    );
   }
-  if (!current) chips.append(el('span', { class: 'chip is-selected is-static' }, [el('span', { text: 'Custom' })]));
+  if (!current)
+    chips.append(
+      el("span", { class: "chip is-selected is-static" }, [
+        el("span", { text: "Custom" }),
+      ]),
+    );
 
   const lifts = store.getExercises();
-  return el('div', { class: 'card card-pad' }, [
-    el('div', { class: 'field-block' }, [
-      el('span', { class: 'field-label', text: 'Training level' }),
+  return el("div", { class: "card card-pad" }, [
+    el("div", { class: "field-block" }, [
+      el("span", { class: "field-label", text: "Training level" }),
       chips,
-      el('p', { class: 'field-hint', text: current
-        ? `${current.hint} New lifts start at ${(current.gainPerWeek * 100).toFixed(2)}%/week and ${current.setsPerWeek} sets a week.`
-        : 'New lifts start from the weekly gain set under The maths below.' }),
-    ]),
-    current && lifts.length ? el('button', {
-      type: 'button', class: 'btn btn-ghost btn-block btn-sm',
-      onclick: () => confirmSheet({
-        title: `Set all ${lifts.length} lifts to ${current.label}?`,
-        message: 'This replaces the weekly gain and set targets on every lift, including any you have tuned by hand. You can undo straight afterwards.',
-        confirmLabel: 'Set them all',
-        onConfirm: () => {
-          for (const ex of lifts) applyLevel(ex.id, current.key);
-          ctx.refresh();
-          toast(`Every lift set to ${current.label}`, {
-            action: () => { for (let i = 0; i < lifts.length; i++) store.undo(); ctx.refresh(); },
-            actionLabel: 'Undo',
-          });
-        },
+      el("p", {
+        class: "field-hint",
+        text: current
+          ? `${current.hint} New lifts start at ${(current.gainPerWeek * 100).toFixed(2)}%/week and ${current.setsPerWeek} sets a week.`
+          : "New lifts start from the weekly gain set under The maths below.",
       }),
-    }, [`Apply ${current.label} to all ${lifts.length} lifts`]) : null,
+    ]),
+    current && lifts.length
+      ? el(
+          "button",
+          {
+            type: "button",
+            class: "btn btn-ghost btn-block btn-sm",
+            onclick: () =>
+              confirmSheet({
+                title: `Set all ${lifts.length} lifts to ${current.label}?`,
+                message:
+                  "This replaces the weekly gain and set targets on every lift, including any you have tuned by hand. You can undo straight afterwards.",
+                confirmLabel: "Set them all",
+                onConfirm: () => {
+                  for (const ex of lifts) applyLevel(ex.id, current.key);
+                  ctx.refresh();
+                  toast(`Every lift set to ${current.label}`, {
+                    action: () => {
+                      for (let i = 0; i < lifts.length; i++) store.undo();
+                      ctx.refresh();
+                    },
+                    actionLabel: "Undo",
+                  });
+                },
+              }),
+          },
+          [`Apply ${current.label} to all ${lifts.length} lifts`],
+        )
+      : null,
   ]);
 }
 
@@ -350,79 +770,234 @@ function exerciseCard(ex, index, total, ctx) {
   const reps = isBodyweight(ex);
   const st = ctx.stats.find((x) => x.exercise.id === ex.id);
 
-  const body = el('div', { class: 'card-body' }, [
-    el('div', { class: 'field-block' }, [
-      el('span', { class: 'field-label', text: 'What changes between sessions' }),
-      segmented({
-        label: 'What changes between sessions', value: reps ? 'bodyweight' : 'weight',
-        options: [{ value: 'weight', label: 'Weight' }, { value: 'bodyweight', label: 'Bodyweight' }],
-        onChange: (v) => { store.updateExercise(ex.id, { kind: v }); ctx.refresh({ transition: true }); },
+  const body = el("div", { class: "card-body" }, [
+    el("div", { class: "field-block" }, [
+      el("span", {
+        class: "field-label",
+        text: "What changes between sessions",
       }),
-      el('p', { class: 'field-hint', text: reps
-        ? 'Nothing to load — a press-up, a pull-up, a dip. There is no weight to ask for and no one-rep max to estimate from one, so progress is measured in reps and the planner asks for a rep count. It counts sets but adds no tonnage, because the app does not know what you weigh.'
-        : 'Weight on the bar or the stack. Progress is more of it.' }),
+      segmented({
+        label: "What changes between sessions",
+        value: reps ? "bodyweight" : "weight",
+        options: [
+          { value: "weight", label: "Weight" },
+          { value: "bodyweight", label: "Bodyweight" },
+        ],
+        onChange: (v) => {
+          store.updateExercise(ex.id, { kind: v });
+          ctx.refresh({ transition: true });
+        },
+      }),
+      el("p", {
+        class: "field-hint",
+        text: reps
+          ? "Nothing to load — a press-up, a pull-up, a dip. There is no weight to ask for and no one-rep max to estimate from one, so progress is measured in reps and the planner asks for a rep count. It counts sets but adds no tonnage, because the app does not know what you weigh."
+          : "Weight on the bar or the stack. Progress is more of it.",
+      }),
     ]),
 
-    tagEditor({ tags: ex.tags || [], onChange: (tags) => { store.updateExercise(ex.id, { tags }); ctx.refresh(); } }),
+    tagEditor({
+      tags: ex.tags || [],
+      onChange: (tags) => {
+        store.updateExercise(ex.id, { tags });
+        ctx.refresh();
+      },
+    }),
 
     // Nothing to load means nothing to say about bars, pins or plate steps.
-    reps ? null : el('div', { class: 'lever-row' }, [
-      stepper({ label: 'Starting weight', value: ex.base, step: 0.5, min: 0, max: 200, dp: 1, id: `bs-${ex.id}`,
-        onChange: (v) => { store.updateExercise(ex.id, { base: v }); ctx.refresh(); } }),
-      stepper({ label: 'Weight step', value: ex.step, step: 0.1, min: 0.1, max: 25, dp: 1, id: `st-${ex.id}`,
-        onChange: (v) => { store.updateExercise(ex.id, { step: v }); ctx.refresh(); } }),
-    ]),
-    reps ? null : el('p', { class: 'field-hint', text: ex.base > 0
-      ? `Loads are ${fmt(ex.base, 1).replace('.0', '')} kg and up, in ${fmt(ex.step, 1).replace('.0', '')} kg steps — ${ladderExample(ex)}.`
-      : 'Starting weight is the empty bar, or the lightest pin on the stack. Leave it at 0 if anything is loadable.' }),
+    reps
+      ? null
+      : el("div", { class: "lever-row" }, [
+          stepper({
+            label: "Starting weight",
+            value: ex.base,
+            step: 0.5,
+            min: 0,
+            max: 200,
+            dp: 1,
+            id: `bs-${ex.id}`,
+            onChange: (v) => {
+              store.updateExercise(ex.id, { base: v });
+              ctx.refresh();
+            },
+          }),
+          stepper({
+            label: "Weight step",
+            value: ex.step,
+            step: 0.1,
+            min: 0.1,
+            max: 25,
+            dp: 1,
+            id: `st-${ex.id}`,
+            onChange: (v) => {
+              store.updateExercise(ex.id, { step: v });
+              ctx.refresh();
+            },
+          }),
+        ]),
+    reps
+      ? null
+      : el("p", {
+          class: "field-hint",
+          text:
+            ex.base > 0
+              ? `Loads are ${fmt(ex.base, 1).replace(".0", "")} kg and up, in ${fmt(ex.step, 1).replace(".0", "")} kg steps — ${ladderExample(ex)}.`
+              : "Starting weight is the empty bar, or the lightest pin on the stack. Leave it at 0 if anything is loadable.",
+        }),
 
     levelPicker(ex, st, ctx),
 
-    el('div', { class: 'lever-row' }, [
-      stepper({ label: 'Gain %/week', value: ex.gainPerWeek * 100, step: 0.05, min: 0, max: 5, dp: 2, id: `gn-${ex.id}`,
-        onChange: (v) => { store.updateExercise(ex.id, { gainPerWeek: v / 100 }); ctx.refresh(); } }),
-      stepper({ label: 'Sets / session', value: ex.setsPerSession, step: 1, min: 1, max: 12, dp: 0, id: `ss-${ex.id}`,
-        onChange: (v) => { store.updateExercise(ex.id, { setsPerSession: v }); ctx.refresh(); } }),
+    el("div", { class: "lever-row" }, [
+      stepper({
+        label: "Gain %/week",
+        value: ex.gainPerWeek * 100,
+        step: 0.05,
+        min: 0,
+        max: 5,
+        dp: 2,
+        id: `gn-${ex.id}`,
+        onChange: (v) => {
+          store.updateExercise(ex.id, { gainPerWeek: v / 100 });
+          ctx.refresh();
+        },
+      }),
+      stepper({
+        label: "Sets / session",
+        value: ex.setsPerSession,
+        step: 1,
+        min: 1,
+        max: 12,
+        dp: 0,
+        id: `ss-${ex.id}`,
+        onChange: (v) => {
+          store.updateExercise(ex.id, { setsPerSession: v });
+          ctx.refresh();
+        },
+      }),
     ]),
-    el('div', { class: 'lever-row lever-row-half' }, [
-      stepper({ label: 'Sets / week', value: ex.setsPerWeek, step: 1, min: 0, max: 60, dp: 0, id: `sw-${ex.id}`,
-        onChange: (v) => { store.updateExercise(ex.id, { setsPerWeek: v }); ctx.refresh(); } }),
+    el("div", { class: "lever-row lever-row-half" }, [
+      stepper({
+        label: "Sets / week",
+        value: ex.setsPerWeek,
+        step: 1,
+        min: 0,
+        max: 60,
+        dp: 0,
+        id: `sw-${ex.id}`,
+        onChange: (v) => {
+          store.updateExercise(ex.id, { setsPerWeek: v });
+          ctx.refresh();
+        },
+      }),
     ]),
 
     milestoneEditor(ex, ctx),
 
-    el('div', { class: 'card-actions card-actions-end' }, [
-      el('button', { type: 'button', class: 'btn btn-ghost btn-sm', disabled: index === 0, onclick: () => { store.moveExercise(ex.id, -1); ctx.refresh(); } }, ['↑ Up']),
-      el('button', { type: 'button', class: 'btn btn-ghost btn-sm', disabled: index === total - 1, onclick: () => { store.moveExercise(ex.id, 1); ctx.refresh(); } }, ['↓ Down']),
-      el('button', { type: 'button', class: 'btn btn-ghost btn-sm', onclick: () => renameSheet(ex, ctx) }, ['Rename']),
-      el('button', { type: 'button', class: 'btn btn-danger btn-sm', onclick: () => {
-        const n = store.getEntries().filter((e) => e.exerciseId === ex.id).length;
-        confirmSheet({
-          title: `Delete ${ex.name}?`,
-          message: n ? `Its ${n} logged entries go with it. You can undo straight afterwards.` : 'It has no logged entries.',
-          onConfirm: () => { store.deleteExercise(ex.id); ctx.refresh(); toast(`${ex.name} deleted`, { action: () => { store.undo(); ctx.refresh(); }, actionLabel: 'Undo' }); },
-        });
-      } }, ['Delete']),
+    el("div", { class: "card-actions card-actions-end" }, [
+      el(
+        "button",
+        {
+          type: "button",
+          class: "btn btn-ghost btn-sm",
+          disabled: index === 0,
+          onclick: () => {
+            store.moveExercise(ex.id, -1);
+            ctx.refresh();
+          },
+        },
+        ["↑ Up"],
+      ),
+      el(
+        "button",
+        {
+          type: "button",
+          class: "btn btn-ghost btn-sm",
+          disabled: index === total - 1,
+          onclick: () => {
+            store.moveExercise(ex.id, 1);
+            ctx.refresh();
+          },
+        },
+        ["↓ Down"],
+      ),
+      el(
+        "button",
+        {
+          type: "button",
+          class: "btn btn-ghost btn-sm",
+          onclick: () => renameSheet(ex, ctx),
+        },
+        ["Rename"],
+      ),
+      el(
+        "button",
+        {
+          type: "button",
+          class: "btn btn-danger btn-sm",
+          onclick: () => {
+            const n = store
+              .getEntries()
+              .filter((e) => e.exerciseId === ex.id).length;
+            confirmSheet({
+              title: `Delete ${ex.name}?`,
+              message: n
+                ? `Its ${n} logged entries go with it. You can undo straight afterwards.`
+                : "It has no logged entries.",
+              onConfirm: () => {
+                store.deleteExercise(ex.id);
+                ctx.refresh();
+                toast(`${ex.name} deleted`, {
+                  action: () => {
+                    store.undo();
+                    ctx.refresh();
+                  },
+                  actionLabel: "Undo",
+                });
+              },
+            });
+          },
+        },
+        ["Delete"],
+      ),
     ]),
   ]);
 
-  return el('article', { class: `card${isOpen ? ' is-open' : ''}` }, [
-    el('button', {
-      type: 'button', class: 'card-head', 'aria-expanded': isOpen ? 'true' : 'false',
-      onclick: () => { ui.set(OPEN_EX, isOpen ? null : ex.id); ctx.refresh({ transition: true }); },
-    }, [
-      accentDot(ex.id),
-      el('div', { class: 'card-head-main' }, [
-        el('h3', { class: 'card-title', text: ex.name }),
-        el('p', { class: 'card-meta', text: [
-          reps ? 'bodyweight' : (ex.base > 0 ? `from ${fmt(ex.base, 1).replace('.0', '')} kg` : null),
-          reps ? null : `${fmt(ex.step, 1).replace('.0', '')} kg steps`,
-          (levelOf(ex) || { label: 'Custom' }).label.toLowerCase() + ` · ${(ex.gainPerWeek * 100).toFixed(2)}%/wk`,
-          `${ex.setsPerSession} sets/session · ${ex.setsPerWeek}/week`,
-        ].filter(Boolean).join(' · ') }),
-      ]),
-      chevron(),
-    ]),
+  return el("article", { class: `card${isOpen ? " is-open" : ""}` }, [
+    el(
+      "button",
+      {
+        type: "button",
+        class: "card-head",
+        "aria-expanded": isOpen ? "true" : "false",
+        onclick: () => {
+          ui.set(OPEN_EX, isOpen ? null : ex.id);
+          ctx.refresh({ transition: true });
+        },
+      },
+      [
+        accentDot(ex.id),
+        el("div", { class: "card-head-main" }, [
+          el("h3", { class: "card-title", text: ex.name }),
+          el("p", {
+            class: "card-meta",
+            text: [
+              reps
+                ? "bodyweight"
+                : ex.base > 0
+                  ? `from ${fmt(ex.base, 1).replace(".0", "")} kg`
+                  : null,
+              reps ? null : `${fmt(ex.step, 1).replace(".0", "")} kg steps`,
+              (levelOf(ex) || { label: "Custom" }).label.toLowerCase() +
+                ` · ${(ex.gainPerWeek * 100).toFixed(2)}%/wk`,
+              `${ex.setsPerSession} sets/session · ${ex.setsPerWeek}/week`,
+            ]
+              .filter(Boolean)
+              .join(" · "),
+          }),
+        ]),
+        chevron(),
+      ],
+    ),
     isOpen ? body : null,
   ]);
 }
@@ -437,28 +1012,64 @@ function exerciseCard(ex, index, total, ctx) {
 function milestoneEditor(ex, ctx) {
   const bw = isBodyweight(ex);
   const m = ex.milestone || null;
-  return el('div', { class: 'field-block' }, [
-    el('span', { class: 'field-label', text: 'Milestone to chase' }),
-    el('p', { class: 'field-hint', text: bw
-      ? 'Left blank, the app picks the next round number of reps above your best.'
-      : 'Left blank, the app picks the next round number on the bar above your best, at whatever reps you last did. Set one to chase a specific weight for a specific rep count instead.' }),
-    el('div', { class: bw ? 'lever-row lever-row-half' : 'lever-row' }, [
+  return el("div", { class: "field-block" }, [
+    el("span", { class: "field-label", text: "Milestone to chase" }),
+    el("p", {
+      class: "field-hint",
+      text: bw
+        ? "Left blank, the app picks the next round number of reps above your best."
+        : "Left blank, the app picks the next round number on the bar above your best, at whatever reps you last did. Set one to chase a specific weight for a specific rep count instead.",
+    }),
+    el("div", { class: bw ? "lever-row lever-row-half" : "lever-row" }, [
       stepper({
-        label: bw ? 'Target reps' : 'Target weight', value: m?.value ?? '',
-        step: bw ? 1 : (ex.step || 2.5), min: 0, max: 999, dp: bw ? 0 : 1,
-        id: `ms-val-${ex.id}`, placeholder: 'auto',
-        onChange: (v) => { store.updateExercise(ex.id, { milestone: { value: v > 0 ? v : null, reps: m?.reps ?? null } }); ctx.refresh(); },
+        label: bw ? "Target reps" : "Target weight",
+        value: m?.value ?? "",
+        step: bw ? 1 : ex.step || 2.5,
+        min: 0,
+        max: 999,
+        dp: bw ? 0 : 1,
+        id: `ms-val-${ex.id}`,
+        placeholder: "auto",
+        onChange: (v) => {
+          store.updateExercise(ex.id, {
+            milestone: { value: v > 0 ? v : null, reps: m?.reps ?? null },
+          });
+          ctx.refresh();
+        },
       }),
-      bw ? null : stepper({
-        label: 'At reps', value: m?.reps ?? 5, step: 1, min: 1, max: 20, dp: 0,
-        id: `ms-reps-${ex.id}`,
-        onChange: (v) => { store.updateExercise(ex.id, { milestone: { value: m?.value ?? null, reps: v } }); ctx.refresh(); },
-      }),
+      bw
+        ? null
+        : stepper({
+            label: "At reps",
+            value: m?.reps ?? 5,
+            step: 1,
+            min: 1,
+            max: 20,
+            dp: 0,
+            id: `ms-reps-${ex.id}`,
+            onChange: (v) => {
+              store.updateExercise(ex.id, {
+                milestone: { value: m?.value ?? null, reps: v },
+              });
+              ctx.refresh();
+            },
+          }),
     ]),
-    m ? el('button', {
-      type: 'button', class: 'btn btn-ghost btn-sm',
-      onclick: () => { store.updateExercise(ex.id, { milestone: null }); ctx.refresh(); toast('Back to automatic milestones'); },
-    }, ['Clear — back to automatic']) : null,
+    m
+      ? el(
+          "button",
+          {
+            type: "button",
+            class: "btn btn-ghost btn-sm",
+            onclick: () => {
+              store.updateExercise(ex.id, { milestone: null });
+              ctx.refresh();
+              toast("Back to automatic milestones");
+            },
+          },
+          ["Clear — back to automatic"],
+        )
+      : null,
   ]);
 }
 
@@ -476,43 +1087,85 @@ function levelPicker(ex, st, ctx) {
   const current = levelOf(ex);
   const suggestion = st ? suggestLevel(st) : null;
 
-  const chips = el('div', { class: 'chips', role: 'radiogroup', 'aria-label': 'Training level' });
+  const chips = el("div", {
+    class: "chips",
+    role: "radiogroup",
+    "aria-label": "Training level",
+  });
   for (const l of LEVELS) {
     const on = current && current.key === l.key;
-    chips.append(el('button', {
-      type: 'button', class: `chip${on ? ' is-selected' : ''}`, role: 'radio',
-      'aria-checked': on ? 'true' : 'false', title: l.hint,
-      onclick: () => { applyLevel(ex.id, l.key); ctx.refresh(); },
-    }, [el('span', { text: l.label })]));
+    chips.append(
+      el(
+        "button",
+        {
+          type: "button",
+          class: `chip${on ? " is-selected" : ""}`,
+          role: "radio",
+          "aria-checked": on ? "true" : "false",
+          title: l.hint,
+          onclick: () => {
+            applyLevel(ex.id, l.key);
+            ctx.refresh();
+          },
+        },
+        [el("span", { text: l.label })],
+      ),
+    );
   }
   if (!current) {
-    chips.append(el('span', { class: 'chip is-selected is-static', 'aria-label': 'Tuned by hand' }, [
-      el('span', { text: 'Custom' }),
-    ]));
+    chips.append(
+      el(
+        "span",
+        { class: "chip is-selected is-static", "aria-label": "Tuned by hand" },
+        [el("span", { text: "Custom" })],
+      ),
+    );
   }
 
-  return el('div', { class: 'field-block' }, [
-    el('span', { class: 'field-label', text: 'How fast this lift should move' }),
+  return el("div", { class: "field-block" }, [
+    el("span", {
+      class: "field-label",
+      text: "How fast this lift should move",
+    }),
     chips,
-    el('p', { class: 'field-hint', text: current ? current.hint
-      : 'Tuned by hand. Pick a level to go back to a preset, or leave it — the numbers below are what actually count.' }),
-    suggestion ? el('button', {
-      type: 'button', class: 'hint-btn',
-      onclick: () => {
-        applyLevel(ex.id, suggestion.level.key);
-        ctx.refresh();
-        toast(`${ex.name} set to ${suggestion.level.label}`, {
-          action: () => { store.undo(); ctx.refresh(); }, actionLabel: 'Undo',
-        });
-      },
-    }, [
-      el('span', { class: 'hint-label', text: 'This lift has been moving faster than that' }),
-      el('span', {
-        class: 'hint-value',
-        text: `${(suggestion.measured * 100).toFixed(2)}%/wk over the last ${suggestion.weeks} weeks, `
-          + `which looks like ${suggestion.level.label}. Use it →`,
-      }),
-    ]) : null,
+    el("p", {
+      class: "field-hint",
+      text: current
+        ? current.hint
+        : "Tuned by hand. Pick a level to go back to a preset, or leave it — the numbers below are what actually count.",
+    }),
+    suggestion
+      ? el(
+          "button",
+          {
+            type: "button",
+            class: "hint-btn",
+            onclick: () => {
+              applyLevel(ex.id, suggestion.level.key);
+              ctx.refresh();
+              toast(`${ex.name} set to ${suggestion.level.label}`, {
+                action: () => {
+                  store.undo();
+                  ctx.refresh();
+                },
+                actionLabel: "Undo",
+              });
+            },
+          },
+          [
+            el("span", {
+              class: "hint-label",
+              text: "This lift has been moving faster than that",
+            }),
+            el("span", {
+              class: "hint-value",
+              text:
+                `${(suggestion.measured * 100).toFixed(2)}%/wk over the last ${suggestion.weeks} weeks, ` +
+                `which looks like ${suggestion.level.label}. Use it →`,
+            }),
+          ],
+        )
+      : null,
   ]);
 }
 
@@ -527,86 +1180,242 @@ function applyLevel(id, key) {
 }
 
 function renameSheet(ex, ctx) {
-  const input = el('input', { type: 'text', class: 'text-input', value: ex.name, 'aria-label': 'Exercise name' });
+  const input = el("input", {
+    type: "text",
+    class: "text-input",
+    value: ex.name,
+    "aria-label": "Exercise name",
+  });
   sheet({
-    title: 'Rename lift',
-    body: [el('div', { class: 'field-block' }, [el('span', { class: 'field-label', text: 'Name' }), input])],
+    title: "Rename lift",
+    body: [
+      el("div", { class: "field-block" }, [
+        el("span", { class: "field-label", text: "Name" }),
+        input,
+      ]),
+    ],
     actions: [
-      { label: 'Cancel', className: 'btn-ghost' },
-      { label: 'Save', className: 'btn-primary', onClick: () => { store.updateExercise(ex.id, { name: input.value }); ctx.refresh(); } },
+      { label: "Cancel", className: "btn-ghost" },
+      {
+        label: "Save",
+        className: "btn-primary",
+        onClick: () => {
+          store.updateExercise(ex.id, { name: input.value });
+          ctx.refresh();
+        },
+      },
     ],
   });
 }
 
 function addSheet(ctx) {
   const s = ctx.settings;
-  const lvl = LEVELS.find((l) => Math.abs(l.gainPerWeek - Number(s.defaultGainPerWeek)) < 1e-9);
+  const lvl = LEVELS.find(
+    (l) => Math.abs(l.gainPerWeek - Number(s.defaultGainPerWeek)) < 1e-9,
+  );
   const draft = {
-    name: '', kind: 'weight', base: 0, step: s.defaultStep,
+    name: "",
+    kind: "weight",
+    base: 0,
+    step: s.defaultStep,
     gainPerWeek: s.defaultGainPerWeek,
     setsPerSession: lvl ? lvl.setsPerSession : 3,
     setsPerWeek: lvl ? lvl.setsPerWeek : 15,
     tags: [],
   };
-  const input = el('input', { type: 'text', class: 'text-input', placeholder: 'e.g. Romanian deadlift', 'aria-label': 'Exercise name' });
-  input.addEventListener('input', () => { draft.name = input.value; });
+  const input = el("input", {
+    type: "text",
+    class: "text-input",
+    placeholder: "e.g. Romanian deadlift",
+    "aria-label": "Exercise name",
+  });
+  input.addEventListener("input", () => {
+    draft.name = input.value;
+  });
 
   // A reps lift has nothing to load, so the load fields go away rather than
   // sitting there asking for a number that will never mean anything.
-  const loadFields = el('div', { class: 'field-block' }, [
-    el('div', { class: 'lever-row' }, [
-      stepper({ label: 'Starting weight', value: draft.base, step: 0.5, min: 0, max: 200, dp: 1, id: 'new-base', onChange: (v) => { draft.base = v; } }),
-      stepper({ label: 'Weight step', value: draft.step, step: 0.1, min: 0.1, max: 25, dp: 1, id: 'new-step', onChange: (v) => { draft.step = v; } }),
+  const loadFields = el("div", { class: "field-block" }, [
+    el("div", { class: "lever-row" }, [
+      stepper({
+        label: "Starting weight",
+        value: draft.base,
+        step: 0.5,
+        min: 0,
+        max: 200,
+        dp: 1,
+        id: "new-base",
+        onChange: (v) => {
+          draft.base = v;
+        },
+      }),
+      stepper({
+        label: "Weight step",
+        value: draft.step,
+        step: 0.1,
+        min: 0.1,
+        max: 25,
+        dp: 1,
+        id: "new-step",
+        onChange: (v) => {
+          draft.step = v;
+        },
+      }),
     ]),
-    el('p', { class: 'field-hint', text: 'Starting weight is the empty bar, or the lightest pin on the stack — every suggestion is that plus a whole number of steps. Leave it at 0 if anything is loadable.' }),
+    el("p", {
+      class: "field-hint",
+      text: "Starting weight is the empty bar, or the lightest pin on the stack — every suggestion is that plus a whole number of steps. Leave it at 0 if anything is loadable.",
+    }),
   ]);
 
   sheet({
-    title: 'Add a lift',
+    title: "Add a lift",
     body: [
-      el('div', { class: 'field-block' }, [el('span', { class: 'field-label', text: 'Name' }), input]),
-      el('div', { class: 'field-block' }, [
-        el('span', { class: 'field-label', text: 'What changes between sessions' }),
+      el("div", { class: "field-block" }, [
+        el("span", { class: "field-label", text: "Name" }),
+        input,
+      ]),
+      el("div", { class: "field-block" }, [
+        el("span", {
+          class: "field-label",
+          text: "What changes between sessions",
+        }),
         segmented({
-          label: 'What changes between sessions', value: 'weight',
-          options: [{ value: 'weight', label: 'Weight' }, { value: 'bodyweight', label: 'Bodyweight' }],
-          onChange: (v) => { draft.kind = v; loadFields.hidden = v === 'bodyweight'; },
+          label: "What changes between sessions",
+          value: "weight",
+          options: [
+            { value: "weight", label: "Weight" },
+            { value: "bodyweight", label: "Bodyweight" },
+          ],
+          onChange: (v) => {
+            draft.kind = v;
+            loadFields.hidden = v === "bodyweight";
+          },
         }),
       ]),
       loadFields,
-      tagEditor({ tags: [], onChange: (tags) => { draft.tags = tags; } }),
-      el('div', { class: 'lever-row lever-row-half' }, [
-        stepper({ label: 'Gain %/week', value: draft.gainPerWeek * 100, step: 0.05, min: 0, max: 5, dp: 2, id: 'new-gain', onChange: (v) => { draft.gainPerWeek = v / 100; } }),
+      tagEditor({
+        tags: [],
+        onChange: (tags) => {
+          draft.tags = tags;
+        },
+      }),
+      el("div", { class: "lever-row lever-row-half" }, [
+        stepper({
+          label: "Gain %/week",
+          value: draft.gainPerWeek * 100,
+          step: 0.05,
+          min: 0,
+          max: 5,
+          dp: 2,
+          id: "new-gain",
+          onChange: (v) => {
+            draft.gainPerWeek = v / 100;
+          },
+        }),
       ]),
-      el('div', { class: 'lever-row' }, [
-        stepper({ label: 'Sets / session', value: draft.setsPerSession, step: 1, min: 1, max: 12, dp: 0, id: 'new-ss', onChange: (v) => { draft.setsPerSession = v; } }),
-        stepper({ label: 'Sets / week', value: draft.setsPerWeek, step: 1, min: 0, max: 60, dp: 0, id: 'new-sw', onChange: (v) => { draft.setsPerWeek = v; } }),
+      el("div", { class: "lever-row" }, [
+        stepper({
+          label: "Sets / session",
+          value: draft.setsPerSession,
+          step: 1,
+          min: 1,
+          max: 12,
+          dp: 0,
+          id: "new-ss",
+          onChange: (v) => {
+            draft.setsPerSession = v;
+          },
+        }),
+        stepper({
+          label: "Sets / week",
+          value: draft.setsPerWeek,
+          step: 1,
+          min: 0,
+          max: 60,
+          dp: 0,
+          id: "new-sw",
+          onChange: (v) => {
+            draft.setsPerWeek = v;
+          },
+        }),
       ]),
     ],
     actions: [
-      { label: 'Cancel', className: 'btn-ghost' },
-      { label: 'Add', className: 'btn-primary', onClick: () => {
-        if (!draft.name.trim()) { toast('Give the lift a name.'); return true; }
-        store.addExercise(draft); ctx.refresh(); toast(`${draft.name.trim()} added`);
-      } },
+      { label: "Cancel", className: "btn-ghost" },
+      {
+        label: "Add",
+        className: "btn-primary",
+        onClick: () => {
+          if (!draft.name.trim()) {
+            toast("Give the lift a name.");
+            return true;
+          }
+          store.addExercise(draft);
+          ctx.refresh();
+          toast(`${draft.name.trim()} added`);
+        },
+      },
     ],
   });
 }
 
 function resetSheet(ctx) {
   sheet({
-    title: 'Reset options',
-    body: [el('p', { class: 'sheet-text', text: 'Both of these can be undone immediately afterwards from the toast.' })],
+    title: "Reset options",
+    body: [
+      el("p", {
+        class: "sheet-text",
+        text: "Both of these can be undone immediately afterwards from the toast.",
+      }),
+    ],
     actions: [
-      { label: 'Cancel', className: 'btn-ghost' },
-      { label: 'Clear log only', className: 'btn-ghost', onClick: () => {
-        confirmSheet({ title: 'Clear every logged entry?', message: 'Your lifts and settings stay. The log is emptied.', confirmLabel: 'Clear log',
-          onConfirm: () => { store.clearAll(); ctx.refresh(); toast('Log cleared', { action: () => { store.undo(); ctx.refresh(); }, actionLabel: 'Undo' }); } });
-      } },
-      { label: 'Back to spreadsheet data', className: 'btn-danger', onClick: () => {
-        confirmSheet({ title: 'Reload the spreadsheet data?', message: 'Everything is replaced by the lifts, sessions and settings imported from Lifting Tracker.xlsx.', confirmLabel: 'Reload',
-          onConfirm: () => { store.resetToSeed(); ctx.refresh(); toast('Spreadsheet data reloaded', { action: () => { store.undo(); ctx.refresh(); }, actionLabel: 'Undo' }); } });
-      } },
+      { label: "Cancel", className: "btn-ghost" },
+      {
+        label: "Clear log only",
+        className: "btn-ghost",
+        onClick: () => {
+          confirmSheet({
+            title: "Clear every logged entry?",
+            message: "Your lifts and settings stay. The log is emptied.",
+            confirmLabel: "Clear log",
+            onConfirm: () => {
+              store.clearAll();
+              ctx.refresh();
+              toast("Log cleared", {
+                action: () => {
+                  store.undo();
+                  ctx.refresh();
+                },
+                actionLabel: "Undo",
+              });
+            },
+          });
+        },
+      },
+      {
+        label: "Back to spreadsheet data",
+        className: "btn-danger",
+        onClick: () => {
+          confirmSheet({
+            title: "Reload the spreadsheet data?",
+            message:
+              "Everything is replaced by the lifts, sessions and settings imported from Lifting Tracker.xlsx.",
+            confirmLabel: "Reload",
+            onConfirm: () => {
+              store.resetToSeed();
+              ctx.refresh();
+              toast("Spreadsheet data reloaded", {
+                action: () => {
+                  store.undo();
+                  ctx.refresh();
+                },
+                actionLabel: "Undo",
+              });
+            },
+          });
+        },
+      },
     ],
   });
 }
@@ -621,31 +1430,48 @@ async function shareFile(filename, content, type) {
       await navigator.share({ files: [file], title: filename });
       return;
     } catch (err) {
-      if (err?.name === 'AbortError') return;
+      if (err?.name === "AbortError") return;
     }
   }
   const url = URL.createObjectURL(new Blob([content], { type }));
-  const a = el('a', { href: url, download: filename });
+  const a = el("a", { href: url, download: filename });
   document.body.append(a);
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 4000);
-  toast('Backup saved to your downloads.');
+  toast("Backup saved to your downloads.");
 }
 
 function importPicker(ctx) {
-  const input = el('input', { type: 'file', accept: '.json,application/json', class: 'visually-hidden' });
-  input.addEventListener('change', async () => {
+  const input = el("input", {
+    type: "file",
+    accept: ".json,application/json",
+    class: "visually-hidden",
+  });
+  input.addEventListener("change", async () => {
     const file = input.files?.[0];
     if (!file) return;
     const text = await file.text();
     sheet({
-      title: 'Restore backup',
-      body: [el('p', { class: 'sheet-text', text: `${file.name} — replace everything on this device, or merge it into what is already here?` })],
+      title: "Restore backup",
+      body: [
+        el("p", {
+          class: "sheet-text",
+          text: `${file.name} — replace everything on this device, or merge it into what is already here?`,
+        }),
+      ],
       actions: [
-        { label: 'Cancel', className: 'btn-ghost' },
-        { label: 'Merge', className: 'btn-ghost', onClick: () => run(text, true, ctx) },
-        { label: 'Replace', className: 'btn-primary', onClick: () => run(text, false, ctx) },
+        { label: "Cancel", className: "btn-ghost" },
+        {
+          label: "Merge",
+          className: "btn-ghost",
+          onClick: () => run(text, true, ctx),
+        },
+        {
+          label: "Replace",
+          className: "btn-primary",
+          onClick: () => run(text, false, ctx),
+        },
       ],
     });
     input.remove();
@@ -658,8 +1484,14 @@ function run(text, merge, ctx) {
   try {
     store.importJSON(text, { merge });
     ctx.refresh();
-    toast(merge ? 'Backup merged' : 'Backup restored', { action: () => { store.undo(); ctx.refresh(); }, actionLabel: 'Undo' });
+    toast(merge ? "Backup merged" : "Backup restored", {
+      action: () => {
+        store.undo();
+        ctx.refresh();
+      },
+      actionLabel: "Undo",
+    });
   } catch (err) {
-    toast(err.message || 'That file could not be read.');
+    toast(err.message || "That file could not be read.");
   }
 }
