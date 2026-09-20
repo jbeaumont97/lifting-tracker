@@ -759,8 +759,11 @@ function readinessLabel(stats, curve, ready, here) {
  *
  * The app has counted volume per lift since the spreadsheet; what it has never
  * shown is the total, which is the number that says whether a week was heavy or
- * light. A median line rather than a target, because there is no such thing as
- * a correct tonnage — only more or less than you usually do.
+ * light. A median line rather than a target, and it stays that way now that
+ * work has a target of its own: that target is per lift and per session, and
+ * summing seven of them across every lift you own would produce a weekly
+ * number nobody prescribed. There is still no such thing as a correct total
+ * tonnage — only more or less than you usually do.
  */
 export function tonnageChart(series, { width = 340, height = 150 } = {}) {
   const fig = el('figure', { class: 'chart chart-sm' });

@@ -20,7 +20,7 @@ import { startRest, stopRest } from '../timer.js';
 import * as store from '../store.js';
 import {
   isoToday, isoAddDays, relativeDate, formatDate, fmt, fmtWeight, fmtSigned,
-  adjE1rm, e1rm, volume, planFor, bandFor, exerciseStats, sessionAdjWith, isBodyweight, describeSet,
+  adjE1rm, e1rm, volume, planFor, bandFor, bandForWork, exerciseStats, sessionAdjWith, isBodyweight, describeSet,
   warmupPlan,
 } from '../metrics.js';
 import { bandChip } from '../ui.js';
@@ -326,6 +326,10 @@ function entryForm(st, ctx, settings) {
   // against everything, adding a fourth set to today's block would "beat" the
   // third set of the same block, and every set would set a record.
   const bestBefore = st.entries.reduce((m, e) => (e.date !== form.date && Number.isFinite(e.adj) && e.adj > m ? e.adj : m), -Infinity);
+  // The work scale needs the same "before today" figure, and for the same
+  // reason: measured against a best that includes the session you are in the
+  // middle of, every set you log reads as already beaten.
+  const bestWorkBefore = st.sessions.reduce((m, x) => (x.date !== form.date && x.work > m ? x.work : m), 0);
 
   const modeSwitch = segmented({
     label: 'How to log', value: form.mode,
@@ -373,20 +377,26 @@ function entryForm(st, ctx, settings) {
     const adjSoFar = live && todays.length ? sessionAdjWith(todays, null, settings, ex.kind) : -Infinity;
     const alreadyBest = bestBefore > -Infinity && adjSoFar > bestBefore + 1e-9;
     const beatsBest = bestBefore > -Infinity && adj > bestBefore + 1e-9 && !alreadyBest;
-    const work = repsOnly
+    const done = repsOnly
       ? todays.reduce((n, e) => n + e.reps * setCount(e), 0) + r * (live ? 1 : s)
       : volSoFar + volume(w, r, live ? 1 : s);
-    const workText = repsOnly ? `${fmt(work, 0)} reps in total` : `${fmt(work, 0)} kg of work`;
+    const workText = repsOnly ? `${fmt(done, 0)} reps in total` : `${fmt(done, 0)} kg of work`;
+    // What the session is worth on the other scale. Only while there is a
+    // target to measure it against — a lift's first session has none.
+    const workBand = st.workTarget > 0
+      ? bandForWork(done, st.workTarget, bestWorkBefore || null, settings) : null;
 
     const scoreNum = el('span', { class: 'preview-num' });
     preview.replaceChildren(
       el('div', { class: 'preview-main' }, [
         el('span', { class: 'preview-value' }, [scoreNum, el('small', { text: ' score' })]),
-        band ? bandChip(band) : null,
+        band ? bandChip(band, { compact: true }) : null,
+        workBand ? bandChip(workBand, { compact: true }) : null,
         beatsBest ? prBadge() : null,
       ]),
       el('div', { class: 'preview-sub', text: live
         ? `after ${doneSoFar + 1} set${doneSoFar ? 's' : ''} · ${workText}`
+          + (st.workTarget > 0 ? ` of ${fmt(st.workTarget, 0)}` : '')
           + (alreadyBest ? ' · already your best session'
             : bestBefore > -Infinity ? ` · best before today ${fmt(bestBefore, 1)}` : '')
         : workText

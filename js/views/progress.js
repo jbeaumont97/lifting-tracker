@@ -70,21 +70,22 @@ function listView(ctx) {
   const days7 = new Set();
   for (const s of stats) for (const e of s.entries) if (e.day >= dayNumber(ctx.today) - 7) days7.add(e.date);
   const rising = trained.filter((s) => (s.trendPerWeek ?? 0) > 0).length;
-
   // A week of nothing but bodyweight work moved no bar, and "0 kg" is a worse
-  // summary of it than the reps it actually was.
-  const reps7 = stats.reduce((n, s) => n + (isBodyweight(s.exercise)
-    ? s.entries.filter((e) => e.day >= dayNumber(ctx.today) - 7)
-      .reduce((m, e) => m + e.reps * (Number(e.sets) > 0 ? Number(e.sets) : 1), 0)
-    : 0), 0);
+  // summary of it than the reps it actually was. work7 already makes that
+  // distinction per lift, so the total is just the ones counted in reps.
+  const reps7 = stats.reduce((n, s) => n + (isBodyweight(s.exercise) ? s.work7 : 0), 0);
+  const growing = trained.filter((s) => (s.workTrendPerWeek ?? 0) > 0).length;
 
   root.append(el('div', { class: 'kpi-row' }, [
     statTile({ label: 'Sets, last 7 days', value: fmtCompact(sets7) }),
     vol7 > 0
-      ? statTile({ label: 'Volume, last 7 days', value: fmtCompact(vol7), unit: 'kg' })
+      ? statTile({ label: 'Work, last 7 days', value: fmtCompact(vol7), unit: 'kg' })
       : statTile({ label: 'Reps, last 7 days', value: fmtCompact(reps7) }),
     statTile({ label: 'Sessions, last 7 days', value: String(days7.size) }),
-    statTile({ label: 'Lifts trending up', value: `${rising}/${trained.length}` }),
+    // Two questions, two answers: which lifts are getting stronger, and which
+    // are getting more work. They are not the same lifts.
+    statTile({ label: 'Lifting heavier', value: `${rising}/${trained.length}` }),
+    statTile({ label: 'Doing more work', value: `${growing}/${trained.length}` }),
   ]));
 
   root.append(el('div', { class: 'section-head' }, [
@@ -108,13 +109,16 @@ function listView(ctx) {
   }
 
   root.append(details('What these numbers mean', [
-    el('p', { text: 'Every lift is boiled down to one number — an estimate of the most you could lift once, adjusted for how many sets you did. It lets 8 reps at 60 kg and 5 reps at 70 kg be compared honestly, so the line goes up when you get stronger rather than when you simply do more reps.' }),
-    el('p', { text: 'The trend is that number fitted against time over your recent sessions, in kilos per week. Two sessions is not a trend — give it a few.' }),
+    el('p', { text: 'Every lift is read on two scales, because "how heavy" and "how much" are different questions and training answers them differently.' }),
+    el('p', { text: 'Strength is an estimate of the most you could lift once, adjusted for how many sets you did. It lets 8 reps at 60 kg and 5 reps at 70 kg be compared honestly, so the line goes up when you get stronger rather than when you simply do more reps.' }),
+    el('p', { text: 'Work is how much you actually moved: weight × reps × sets, added up across the session — or total reps, on a lift with nothing to load. It is what sets in the 6–12 range are for, and it is the number that barely moves when you add weight to a heavy triple.' }),
+    el('p', { text: 'Each has its own trend, fitted against time over your recent sessions. Two sessions is not a trend — give it a few.' }),
     el('p', { text: 'Weekly sets is a plain count of working sets. Roughly 10–20 hard sets per muscle per week is the usual recommendation, spread across every lift that trains it.' }),
     disclose('Show the formulas', [
       el('p', { text: 'e1RM (Epley) = weight × (1 + reps/30). It puts 8 reps at 60 kg and 5 reps at 70 kg on the same scale. Adjusted e1RM multiplies that by (1 + k × ln(sets)) — extra sets earn credit with diminishing returns: +3.5% for 2 sets, +5.5% for 3, +8.0% for 5 at the default k of 0.05.' }),
-      el('p', { text: 'Volume (weight × reps × sets) is tracked separately because it measures a different thing. Weekly sets is a plain count of working sets, because sets per week is the unit training is actually prescribed in — commonly 10–20 per muscle per week, spread across every lift that trains it.' }),
-      el('p', { text: 'Trend is a least-squares fit of adjusted e1RM against date over the lookback window. Projections extend that straight line; real progress decelerates, so treat +12 weeks as an optimistic ceiling rather than a forecast.' }),
+      el('p', { text: 'Work (weight × reps × sets, summed over the session) is progressed on its own terms: its target is last session’s work moved by the same fatigue, accrual and detraining model the strength target uses, only at a faster rate — volume climbs quicker than a one-rep max does. Its colour bands are correspondingly wider, because on 3 × 10 at 65 kg one rung of weight is +3.8%, one more rep is +10% and one more set is +33%.' }),
+      el('p', { text: 'Weekly sets is a plain count of working sets, because sets per week is the unit training is actually prescribed in — commonly 10–20 per muscle per week, spread across every lift that trains it.' }),
+      el('p', { text: 'Both trends are least-squares fits against date over the lookback window. Projections extend the strength line; real progress decelerates, so treat +12 weeks as an optimistic ceiling rather than a forecast.' }),
     ], { open: ctx.numbersOpen }),
   ]));
   return root;
@@ -399,15 +403,38 @@ function detailView(st, ctx) {
   requestAnimationFrame(paintVol);
   ctx.onResize(paintVol);
 
+  const repsOnly = isBodyweight(st.exercise);
   root.append(el('div', { class: 'kpi-row kpi-row-2' }, [
-    isBodyweight(st.exercise)
-      ? statTile({ label: 'Reps, last 7 days',
-        value: fmtCompact(st.entries.filter((e) => e.day >= dayNumber(ctx.today) - 7)
-          .reduce((n, e) => n + e.reps * (Number(e.sets) > 0 ? Number(e.sets) : 1), 0)) })
-      : statTile({ label: 'Volume, last 7 days', value: fmtCompact(st.volume7), unit: 'kg' }),
+    statTile({ label: repsOnly ? 'Reps, last 7 days' : 'Work, last 7 days',
+      value: fmtCompact(st.work7), unit: repsOnly ? '' : loadUnit(st.exercise) }),
     statTile({ label: 'Last session', value: `${st.lastSets} × ${st.lastReps}`, deltaLabel: '',
-      delta: isBodyweight(st.exercise) ? 'reps' : `@ ${fmtWeight(st.sessions[st.sessions.length - 1].best.weight)} kg` }),
+      delta: repsOnly ? 'reps' : `@ ${fmtWeight(st.sessions[st.sessions.length - 1].best.weight)} kg` }),
   ]));
+
+  // The two trends side by side: getting stronger and doing more are different
+  // achievements, and a lift can be doing one without the other.
+  root.append(el('div', { class: 'kpi-row kpi-row-2' }, [
+    statTile({
+      label: 'Strength trend',
+      value: st.trendPerWeek != null ? fmtSigned(st.trendPerWeek, 2) : '—',
+      unit: st.trendPerWeek != null ? `${loadUnit(st.exercise)}/wk` : '',
+      good: st.trendPerWeek != null ? st.trendPerWeek > 0 : undefined,
+      deltaLabel: st.trendPerWeek != null && !st.trendReliable ? 'provisional' : '',
+    }),
+    statTile({
+      label: 'Work trend',
+      value: st.workTrendPerWeek != null ? fmtSigned(st.workTrendPerWeek, 0) : '—',
+      unit: st.workTrendPerWeek != null ? `${loadUnit(st.exercise)}/wk` : '',
+      good: st.workTrendPerWeek != null ? st.workTrendPerWeek > 0 : undefined,
+      deltaLabel: st.workTrendPerWeek != null && !st.workTrendReliable ? 'provisional' : '',
+    }),
+  ]));
+
+  if (st.workTarget > 0) {
+    root.append(el('p', { class: 'card-note', text:
+      `Next session asks for ${fmt(st.workTarget, 0)} ${loadUnit(st.exercise)} of work — `
+      + `last session came to ${fmt(st.lastWork, 0)}, and your best is ${fmt(st.bestWork, 0)}.` }));
+  }
 
   root.append(el('h2', { class: 'section-title', text: 'Every session' }));
   root.append(sessionTable(st, settings));
@@ -458,7 +485,7 @@ function dashboardTable(stats) {
     el('table', { class: 'data-table data-table-wide' }, [
       el('caption', { text: 'The Dashboard sheet, one row per lift. * = provisional fit, fewer than 3 sessions or under 2 weeks. Flat target is the spreadsheet’s — last session plus the weekly gain; Next target is that number after fatigue and detraining.' }),
       el('thead', {}, [el('tr', {}, [
-        'Lift', 'Sessions', 'Last', 'Last adj', 'Best adj', 'Trend kg/wk', '+4 wks', '+12 wks', 'Flat target', 'Next target', 'Vol 7d', 'Sets 7d', 'Target/wk', 'Status',
+        'Lift', 'Sessions', 'Last', 'Last adj', 'Best adj', 'Trend kg/wk', '+4 wks', '+12 wks', 'Flat target', 'Next target', 'Last work', 'Work target', 'Work/wk', 'Work 7d', 'Sets 7d', 'Target/wk', 'Status',
       ].map((h) => el('th', { scope: 'col', text: h })))]),
       el('tbody', {}, stats.map((s) => el('tr', {}, [
         el('th', { scope: 'row', text: s.exercise.name }),
@@ -471,7 +498,10 @@ function dashboardTable(stats) {
         el('td', { text: s.proj12 != null ? fmt(s.proj12, 1) : '—' }),
         el('td', { text: s.baseTarget != null ? fmt(s.baseTarget, 1) : '—' }),
         el('td', { text: s.nextTarget != null ? fmt(s.nextTarget, 1) : '—' }),
-        el('td', { text: fmtCompact(s.volume7) }),
+        el('td', { text: s.lastWork != null ? fmtCompact(s.lastWork) : '—' }),
+        el('td', { text: s.workTarget != null ? fmtCompact(s.workTarget) : '—' }),
+        el('td', { text: s.workTrendPerWeek != null ? fmtSigned(s.workTrendPerWeek, 0) + (s.workTrendReliable ? '' : '*') : '—' }),
+        el('td', { text: fmtCompact(s.work7) }),
         el('td', { text: String(s.sets7) }),
         el('td', { text: s.setsPerWeekTarget ? String(s.setsPerWeekTarget) : '—' }),
         el('td', {}, [s.setStatus ? el('span', { class: `status-chip is-${s.setStatus.replace(' ', '-')}` }, [
