@@ -12,6 +12,7 @@
 import { el, stepper, segmented, bandChip, toast, details, disclose, milestoneTrack, chevron, accentDot, tap, multiChipGroup } from '../ui.js';
 import * as store from '../store.js';
 import { runway, looksBodyweight } from '../insights.js';
+import { measureDue, bodyweightOn } from '../measure.js';
 import * as ui from '../core/uistate.js';
 import {
   planFor,
@@ -21,6 +22,7 @@ import {
   fmtSigned,
   relativeDate,
   weekdayName,
+  isoAddDays,
   plainVerdict,
   snapReps,
   readinessNote,
@@ -29,6 +31,7 @@ import {
   isBodyweight,
   describeSet,
   ZONES,
+  TOPSET,
   zonesFor,
   REP_SCHEMES,
   SET_COLUMNS,
@@ -94,6 +97,8 @@ export function renderPlan(ctx) {
   }
 
   root.append(sessionStrip(ctx, trained));
+  const prompt = measurePrompt(ctx);
+  if (prompt) root.append(prompt);
 
   // --- who is ready, stalest first ---
   // A lift you have called done today is not a question any more, so it leaves
@@ -204,7 +209,8 @@ export function renderPlan(ctx) {
       el('p', { text: 'Every lift is read two ways, because "how heavy" and "how much of the right kind" are different questions. A heavy triple answers the first and barely touches the second; four sets of twelve answer the second and barely touch the first. Both are training; they are not the same training.' }),
       el('p', { text: `The weight is worked out the same way either way — your adjusted e1RM tells the app what you can do for three reps or for twelve, and it rounds up to a loadable step. What changes is the rep range: ${ZONES.strength.minReps}–${ZONES.strength.maxReps} for strength, ${ZONES.hypertrophy.minReps}–${ZONES.hypertrophy.maxReps} for size, marked down the side of the grid. They overlap at six on purpose. Six reps is genuinely both, and a clean line between them would be a precision that does not exist.` }),
       el('p', { text: 'Size is then measured in hard sets, not in tonnage. Tonnage cannot tell a single at 300 kg from thirty reps at 10 kg — the two multiply out the same — so it is a poor judge of something that depends almost entirely on how many reps you did and how close to failure you took them. A set counts fully inside the rep range and taken within a couple of reps of failure, and counts for less the further outside that it falls. Your weekly budget in Setup is what it counts against.' }),
-      el('p', { text: 'Neither pick is the app’s recommendation. Both are on every card, and taking one is a tap; nothing is stored against the lift and nothing is hidden behind a setting.' }),
+      el('p', { text: `The third pick, Both, splits the session instead of choosing: one top set of ${ZONES.strength.minReps}–${ZONES.strength.maxReps} reps solved against your target as a single set, then back-off sets of ${TOPSET.backoffReps} at ${Math.round(TOPSET.backoffFraction * 100)}% of it. The top set is where strength is chased, so it is the number the colour judges; the back-offs are where the hard sets come from. While it is the pick, the reps lever sets the top set and the sets lever sets how many back-offs.` }),
+      el('p', { text: 'None of the picks is the app’s recommendation. All are on every card, and taking one is a tap; nothing is stored against the lift and nothing is hidden behind a setting.' }),
       disclose('Show the maths', [
         el('p', { text: `A set is worth its rep credit times its failure credit. Rep credit is 1 from ${ZONES.hypertrophy.minReps} to ${ZONES.hypertrophy.maxReps} reps, ramping up from zero over the three reps below that and tapering back to zero over the ten above — so a triple is worth nothing, five reps about two thirds, and a set of twenty-five about half. Failure credit is 1 at nought to two reps in reserve and falls away past that.` }),
         el('p', { text: 'A set logged with no RIR is assumed to have been a normal hard one, so not recording it costs you nothing. Where the per-set log has RIR, each set is credited on its own: a block keeps the lowest RIR of the sets counted onto it, and using that for all of them would credit five sets as though they had all started at the hardest one.' }),
@@ -213,6 +219,56 @@ export function renderPlan(ctx) {
     ]),
   );
   return root;
+}
+
+/**
+ * The body check-in, when one is due. It sits above the lifts because it takes
+ * two minutes and is easiest done before training, and it can be put off — a
+ * prompt you cannot dismiss is one you learn to scroll past.
+ */
+function measurePrompt(ctx) {
+  const { settings, today } = ctx;
+  const due = measureDue(store.getMeasurements(), settings, today, store.getMeasureSnooze());
+  if (!due.due) return null;
+  const photos = settings.measurePhotos ? ' and take your progress photos' : '';
+  return el('div', { class: 'measure-prompt', role: 'status' }, [
+    el('div', { class: 'measure-prompt-text' }, [
+      el('strong', { text: due.never ? 'Start tracking size' : 'Body check-in due' }),
+      el('span', { text: due.never
+        ? `Measure arms, chest, waist and the rest${photos} so there is something to compare against. Every ${due.interval} days after that.`
+        : `It has been ${due.days} days. Measure${photos} — two minutes, ideally before you train.` }),
+    ]),
+    el('div', { class: 'measure-prompt-actions' }, [
+      el('button', {
+        type: 'button', class: 'btn btn-primary btn-sm',
+        onclick: () => { tap(); ctx.goTo('progress', { measure: true }); },
+      }, ['Measure now']),
+      el('button', {
+        type: 'button', class: 'btn btn-ghost btn-sm',
+        onclick: () => {
+          store.snoozeMeasure(isoAddDays(today, 2));
+          toast('I’ll ask again in two days.', { action: () => { store.undo(); ctx.refresh(); }, actionLabel: 'Undo' });
+          ctx.refresh({ transition: true });
+        },
+      }, ['Not today']),
+    ]),
+  ]);
+}
+
+/**
+ * On a bodyweight lift the load is you. The plan stays in reps, but a rep at
+ * 90 kg is not a rep at 85 kg, so the card says what you weighed last time and
+ * what you weigh now. Shown for context; it never moves the target.
+ */
+function bodyweightLine(stats, ctx) {
+  const list = store.getMeasurements();
+  const now = bodyweightOn(list, ctx.today);
+  if (!now) return null;
+  const then = stats.lastDate ? bodyweightOn(list, stats.lastDate) : null;
+  const text = then && Math.abs(then.value - now.value) >= 0.5
+    ? `Last session at ${fmtWeight(then.value)} kg bodyweight — you are ${fmtWeight(now.value)} kg now, so the same reps are ${now.value > then.value ? 'more' : 'less'} work.`
+    : `At ${fmtWeight(now.value)} kg bodyweight.`;
+  return el('p', { class: 'bw-note' }, [el('span', { text })]);
 }
 
 /** "Tuesday · last trained 2 days ago · 9 sets this week." */
@@ -340,9 +396,12 @@ function card(stats, ctx, settings) {
   // The prescription is laid out in pieces with the spacing done by flex, which
   // means its text content runs together — "5 reps@102.5 kg". Say it once,
   // properly, and hide the pieces from anything reading rather than looking.
+  const ts = plan.topset;
   const spoken = repsOnly
     ? `${plan.sets} sets of ${plan.reps} reps`
-    : `${plan.sets} sets of ${plan.reps} reps at ${fmtWeight(plan.weight)} kilos`;
+    : ts
+      ? `One top set of ${ts.top.reps} at ${fmtWeight(ts.top.weight)} kilos, then ${ts.backoff.sets} sets of ${ts.backoff.reps} at ${fmtWeight(ts.backoff.weight)}`
+      : `${plan.sets} sets of ${plan.reps} reps at ${fmtWeight(plan.weight)} kilos`;
   body.append(
     el('div', { class: 'presc' }, [
       el('div', { class: isOpen ? 'presc-hero' : 'presc-line' }, [
@@ -351,7 +410,7 @@ function card(stats, ctx, settings) {
           el('span', { class: 'presc-scheme', 'aria-hidden': 'true', text: `${plan.sets} sets ×` }),
           el('span', { class: 'presc-weight', 'aria-hidden': 'true' }, [String(plan.reps), el('small', { text: ' reps' })]),
         ] : [
-          el('span', { class: 'presc-scheme', 'aria-hidden': 'true', text: `${plan.sets} sets × ${plan.reps} reps` }),
+          el('span', { class: 'presc-scheme', 'aria-hidden': 'true', text: ts ? `Top set · 1 × ${ts.top.reps}` : `${plan.sets} sets × ${plan.reps} reps` }),
           el('span', { class: 'presc-at', 'aria-hidden': 'true', text: '@' }),
           el('span', { class: 'presc-weight', 'aria-hidden': 'true' }, [fmtWeight(plan.weight), el('small', { text: ' kg' })]),
         ]),
@@ -360,10 +419,18 @@ function card(stats, ctx, settings) {
         bandChip(plan.band),
         changeText ? el('span', { class: 'presc-delta', text: changeText }) : null,
       ]),
+      ts ? el('p', { class: 'presc-then', 'aria-hidden': 'true' }, [
+        el('span', { class: 'presc-then-label', text: 'then' }),
+        el('span', { text: `${ts.backoff.sets} × ${ts.backoff.reps} @ ${fmtWeight(ts.backoff.weight)} kg` }),
+        el('span', { class: 'presc-then-sub', text: `${fmt(ts.hardSets, 1)} hard sets` }),
+      ]) : null,
     ]),
   );
 
-  body.append(zonePicks(stats, plan, ctx, settings));
+  const picksNode = zonePicks(stats, plan, ctx, settings);
+  if (picksNode) body.append(picksNode);
+  const bwLine = repsOnly ? bodyweightLine(stats, ctx) : null;
+  if (bwLine) body.append(bwLine);
 
   // Plain words carry the verdict; the arithmetic sits under them.
   body.append(el('p', {
@@ -422,7 +489,10 @@ function card(stats, ctx, settings) {
   const actions = el('div', { class: 'card-actions' }, [
     el('button', {
       type: 'button', class: 'btn btn-primary',
-      onclick: () => ctx.goTo('log', { exerciseId: id, weight: plan.weight, reps: plan.reps, sets: plan.sets }),
+      onclick: () => ctx.goTo('log', ts
+        ? { exerciseId: id, weight: ts.top.weight, reps: ts.top.reps, sets: ts.totalSets,
+          backoff: { weight: ts.backoff.weight, reps: ts.backoff.reps, sets: ts.backoff.sets } }
+        : { exerciseId: id, weight: plan.weight, reps: plan.reps, sets: plan.sets }),
     }, ['Log this']),
     el('button', {
       type: 'button', class: 'btn btn-ghost',
@@ -454,7 +524,7 @@ function card(stats, ctx, settings) {
  */
 function zonePicks(stats, plan, ctx, settings) {
   const picks = plan.picks;
-  if (!picks || (!picks.strength && !picks.hypertrophy)) return null;
+  if (!picks || (!picks.strength && !picks.hypertrophy && !picks.topset)) return null;
   const id = stats.exercise.id;
   const repsOnly = plan.kind === 'bodyweight';
 
@@ -463,10 +533,14 @@ function zonePicks(stats, plan, ctx, settings) {
     const current = plan.zone === zone.key;
     const value = repsOnly
       ? `${pick.sets} × ${pick.reps} reps`
-      : `${pick.sets} × ${pick.reps} @ ${fmtWeight(pick.weight)} kg`;
+      : zone.key === TOPSET.key
+        ? `1 × ${pick.top.reps} @ ${fmtWeight(pick.top.weight)}, then ${pick.backoff.sets} × ${pick.backoff.reps} @ ${fmtWeight(pick.backoff.weight)} kg`
+        : `${pick.sets} × ${pick.reps} @ ${fmtWeight(pick.weight)} kg`;
     const sub = zone.key === 'hypertrophy'
       ? (pick.hardSets > 0 ? `${fmt(pick.hardSets, 1)} hard sets` : 'no hypertrophy credit')
-      : `scores ${fmt(pick.score, 1)}`;
+      : zone.key === TOPSET.key
+        ? `scores ${fmt(pick.score, 1)} · ${fmt(pick.hardSets, 1)} hard sets`
+        : `scores ${fmt(pick.score, 1)}`;
     const kids = [
       el('span', { class: 'pick-zone', text: zone.label }),
       el('span', { class: 'pick-value', text: value }),
@@ -490,9 +564,10 @@ function zonePicks(stats, plan, ctx, settings) {
   };
 
   return el('div', { class: 'picks' }, [
-    el('span', { class: 'picks-label', text: 'Two ways to do this' }),
+    el('span', { class: 'picks-label', text: picks.topset ? 'Three ways to do this' : 'Two ways to do this' }),
     row(ZONES.strength, picks.strength),
     row(ZONES.hypertrophy, picks.hypertrophy),
+    row(TOPSET, picks.topset),
   ]);
 }
 

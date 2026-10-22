@@ -124,11 +124,20 @@ this** and the log form opens pre-filled.
 Tap a card to open it and you get the reps/sets levers, the target and the full
 trade-off grid.
 
-Under every prescription are **two ways to do it** — the option for strength and
-the option for size, the first priced in what it scores and the second in hard
-sets, each one tap away. Neither is the recommendation; both are simply there, because "how
+Under every prescription are **three ways to do it** — the option for strength,
+the option for size, and **Both**: one heavy top set followed by lighter
+back-off sets. The first is priced in what it scores, the second in hard sets,
+the third in both. None is the recommendation; all are simply there, because "how
 heavy" and "how much" are different questions. Taking one moves the card onto
-that scale, and **Reset to automatic** puts it back.
+it, and **Reset to automatic** puts it back.
+
+**Both** solves the top set against your target as a single set of 3–6 reps, so
+it is the heaviest thing on the card and the number the colour judges. The
+back-offs are sets of eight at 80% of it, rounded to the nearest loadable weight
+— there for the hard sets, not chased. While Both is the pick, the reps lever
+sets the top set and the sets lever sets how many back-offs (never fewer than
+two). **Log this** opens the form on the top set and moves it onto the back-off
+weight and reps as soon as the top set is in, set by set or all at once.
 
 A lift you have finished for the day drops out of the readiness order into a
 **Done today** group at the bottom, and leads with what it did rather than what
@@ -205,7 +214,22 @@ marking your next target. Drag across the chart to read any
 session. Below that: weekly sets against your budget, working sets per week over
 the last 8 weeks, and every session as a table.
 
-**Setup** — how much detail to show, the rest timer's target (0 turns it off), your
+**Progress → Body** — body measurements, because strength shows up on the bar
+and size only shows up on a tape. Each check-in takes bodyweight, shoulders,
+chest, arms, waist, thighs and calves (skip any you like), starts from last
+time's numbers, and can note that you took progress photos — the photos stay in
+your camera roll. Tiles show each site's change since your first check-in, with
+a sparkline, and a note appears if your waist has grown faster than every site
+you are training for over four weeks or more. When a check-in is due (every two
+weeks by default; Setup changes it or turns it off) the Next screen asks for
+one, and **Not today** holds it off for two days.
+
+Bodyweight lifts show the bodyweight you logged nearest before each session, in
+the history and on the card — _last session at 88 kg bodyweight, you are 85 kg
+now_ — so ten pull-ups at 90 kg and twelve at 85 kg are not mistaken for the
+same thing. It is context only: the plan and the trend stay in reps.
+
+**Setup** — how much detail to show, the rest timer's target (0 turns it off), body measurement reminders, your
 lifts (tap one to edit), the maths dials, the fatigue/recovery/detraining model
 and its six coefficients, light/dark theme, and your backups. The welcome tour can
 lifts (tap one to edit), the maths dials, the fatigue/recovery/detraining model

@@ -2659,7 +2659,7 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
     /Strength/.test(picks.textContent) && /Size/.test(picks.textContent),
   );
   const rows = card.querySelectorAll(".pick");
-  ok("one row each", rows.length === 2, String(rows.length));
+  ok("one row each — strength, size, and top set + back-offs", rows.length === 3, String(rows.length));
   ok(
     "exactly one is marked as today",
     rows.filter((r) => /is-current/.test(r.className)).length === 1,
@@ -2804,6 +2804,223 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
     uistate.forExercise("plan.overrides", ex.id, {}).zone === undefined,
     JSON.stringify(uistate.forExercise("plan.overrides", ex.id, {})),
   );
+}
+
+/* ----------------------------- 6p. the third pick: top set + back-offs */
+
+// --- it is on the card, priced both ways, and taking it moves the hero ---
+{
+  reset();
+  const ex = store.getExercises()[0];
+  uistate.set("plan.openId", ex.id);
+  select.invalidate();
+  const before = renderPlan(ctx({ route: "plan" })).querySelector(".card.is-open");
+  const row = before.querySelectorAll(".pick").find((r) => r.dataset.zone === "topset");
+  ok("the top-set row is on the card", !!row);
+  ok("and offered as a button", row.localName === "button");
+  ok(
+    "it names the top set and the back-offs",
+    /^1 × \d+ @ [\d.]+, then \d+ × 8 @ [\d.]+ kg$/.test(row.querySelector(".pick-value").textContent),
+    row.querySelector(".pick-value").textContent,
+  );
+  ok("priced in score and hard sets", /scores .* hard sets/.test(row.textContent), row.textContent);
+
+  row.click();
+  select.invalidate();
+  const after = renderPlan(ctx({ route: "plan" })).querySelector(".card.is-open");
+  ok(
+    "taking it writes the zone through",
+    uistate.forExercise("plan.overrides", ex.id, {}).zone === "topset",
+  );
+  ok("the hero leads with the top set", /Top set · 1 ×/.test(after.querySelector(".presc").textContent));
+  ok("and says what follows it", !!after.querySelector(".presc-then"));
+}
+
+// --- the maths: one set against the target, back-offs at 80% on the ladder ---
+{
+  const metrics = await import("../js/metrics.js");
+  const s = { formula: "epley", setBonusK: 0.05 };
+  const p = metrics.topSetPlan(95, 5, 3, s, 2.5, 20);
+  ok("the top set meets the target as a single set", p.top.score >= 95 && p.top.weight === 82.5, JSON.stringify(p.top));
+  ok("back-offs land on the nearest rung to 80%", p.backoff.weight === 65, String(p.backoff.weight));
+  ok("a top set never strays out of strength reps", metrics.topSetPlan(95, 12, 3, s, 2.5, 20).top.reps === 6);
+  ok("and there are always at least two back-offs", metrics.topSetPlan(95, 5, 1, s, 2.5, 20).backoff.sets === 2);
+  ok("the bar is the floor", metrics.nearestStep(10, 2.5, 20) === 20);
+}
+
+// --- logging it: the form starts on the top set and moves to the back-offs ---
+{
+  reset();
+  const ex = store.getExercises()[0];
+  setPrefill({
+    exerciseId: ex.id, date: TODAY, weight: 100, reps: 5, sets: 4, mode: "sets",
+    backoff: { weight: 80, reps: 8, sets: 3 },
+  });
+  const first = renderLog(ctx({ route: "log" }));
+  ok("the log says what follows the top set", /then 3 × 8 @ 80 kg/.test(first.textContent));
+  first.querySelector(".btn-save").click();
+  select.invalidate();
+  const second = renderLog(ctx({ route: "log" }));
+  ok(
+    "after the top set the form is on the back-offs",
+    /Log set 2 of 4 — 8 @ 80 kg/.test(second.querySelector(".btn-save").textContent),
+    second.querySelector(".btn-save").textContent,
+  );
+  ok("and the reminder has gone", !second.querySelector(".plan-strip-topset"));
+  const today = store.entriesOn(ex.id, TODAY);
+  ok("the top set is its own row", today.length === 1 && today[0].weight === 100 && today[0].reps === 5);
+}
+
+// --- all at once, the top set is a row of one ---
+{
+  reset();
+  const ex = store.getExercises()[0];
+  setPrefill({
+    exerciseId: ex.id, date: TODAY, weight: 100, reps: 5, sets: 4, mode: "bulk",
+    backoff: { weight: 80, reps: 8, sets: 3 },
+  });
+  const v = renderLog(ctx({ route: "log" }));
+  ok("the bulk form asks for one top set", /Save 1 × 5 @ 100 kg/.test(v.querySelector(".btn-save").textContent), v.querySelector(".btn-save").textContent);
+  v.querySelector(".btn-save").click();
+  select.invalidate();
+  const next = renderLog(ctx({ route: "log" }));
+  ok("then offers the back-offs as the next row", /Save 3 × 8 @ 80 kg/.test(next.querySelector(".btn-save").textContent), next.querySelector(".btn-save").textContent);
+}
+
+/* ---------------- 6q. bodyweight lifts log set by set (regression) */
+
+{
+  reset();
+  store.clearAll();
+  const ex = store.addExercise({ name: "Pull-ups", kind: "bodyweight" });
+  select.invalidate();
+  setPrefill({ exerciseId: ex.id, date: TODAY, reps: 8, mode: "sets" });
+  const view = renderLog(ctx({ route: "log" }));
+  view.querySelector(".btn-save").click();
+  select.invalidate();
+  const rows = store.entriesOn(ex.id, TODAY);
+  ok("a bodyweight set logs from the set-by-set button", rows.length === 1 && rows[0].reps === 8, JSON.stringify(rows));
+  ok("with nothing on the bar", rows.length === 1 && rows[0].weight === 0);
+  const again = renderLog(ctx({ route: "log" }));
+  again.querySelector(".btn-save").click();
+  ok("and a second set counts onto the same row", store.entriesOn(ex.id, TODAY)[0]?.sets === 2);
+}
+
+/* ------------------------------------------- 6r. body measurements */
+
+const measure = await import("../js/measure.js");
+
+// --- the prompt: there before the first check-in, gone after it ---
+{
+  reset();
+  select.invalidate();
+  const v = renderPlan(ctx({ route: "plan" }));
+  ok("a first check-in is asked for", /Start tracking size/.test(v.querySelector(".measure-prompt")?.textContent || ""));
+  ok("and it mentions photos", /photos/.test(v.querySelector(".measure-prompt").textContent));
+
+  store.addMeasurement({ date: TODAY, bodyweight: 90, arms: 36 });
+  select.invalidate();
+  ok("a check-in answers it", !renderPlan(ctx({ route: "plan" })).querySelector(".measure-prompt"));
+
+  const due = measure.measureDue(store.getMeasurements(), store.getSettings(), "2026-09-01");
+  ok("two weeks on, it is due again", due.due && due.days === 14, JSON.stringify(due));
+  ok("but not a day early", !measure.measureDue(store.getMeasurements(), store.getSettings(), "2026-08-31").due);
+  store.updateSettings({ measureEveryDays: 0 });
+  ok("and never, when switched off", !measure.measureDue(store.getMeasurements(), store.getSettings(), "2027-01-01").due);
+}
+
+// --- not today: the snooze holds for two days ---
+{
+  reset();
+  select.invalidate();
+  const v = renderPlan(ctx({ route: "plan" }));
+  v.querySelectorAll(".measure-prompt button").find((b) => /Not today/.test(b.textContent)).click();
+  select.invalidate();
+  ok("snoozing hides the prompt", !renderPlan(ctx({ route: "plan" })).querySelector(".measure-prompt"));
+  ok("until two days later", measure.measureDue([], store.getSettings(), "2026-08-20", store.getMeasureSnooze()).due);
+}
+
+// --- the screen: the form, saving, and the change since you started ---
+{
+  reset();
+  const { renderProgress: rp, openMeasurements } = await import("../js/views/progress.js");
+  openMeasurements();
+  select.invalidate();
+  const first = rp(ctx({ route: "progress" }));
+  ok("the Body view opens on the check-in form", !!first.querySelector(".measure-form"));
+  ok("with every site", first.querySelectorAll(".measure-form .stepper").length === measure.SITES.length);
+  const arms = first.querySelector("#measure-arms");
+  arms.value = "36";
+  arms.dispatchEvent(new Event("change"));
+  first.querySelector(".measure-form .btn-primary").click();
+  ok("saving records only what was filled in", store.getMeasurements().length === 1 && store.getMeasurements()[0].arms === 36 && store.getMeasurements()[0].waist === undefined, JSON.stringify(store.getMeasurements()));
+
+  store.addMeasurement({ date: "2026-09-15", arms: 37.5 });
+  select.invalidate();
+  const later = rp(ctx({ route: "progress", today: "2026-09-15" }));
+  ok("the tiles show the change since the first", /\+1\.5 cm/.test(later.querySelector(".measure-tiles").textContent), later.querySelector(".measure-tiles").textContent);
+  ok("and every check-in is in the table", later.querySelectorAll(".measure-table tbody tr").length === 2);
+  uistate.set("progress.view", "lifts");
+}
+
+// --- a waist that outruns everything else is flagged, and only then ---
+{
+  const flat = [
+    { date: "2026-08-01", waist: 80, arms: 35, chest: 100 },
+    { date: "2026-09-05", waist: 83, arms: 35.5, chest: 101 },
+  ];
+  ok("a waist outpacing the trained sites is flagged", !!measure.waistFlag(flat));
+  const fine = [
+    { date: "2026-08-01", waist: 80, arms: 35, chest: 100 },
+    { date: "2026-09-05", waist: 81, arms: 36, chest: 103 },
+  ];
+  ok("growth that keeps pace is not", measure.waistFlag(fine) === null);
+  ok("and a fortnight is too short to say", measure.waistFlag([flat[0], { ...flat[1], date: "2026-08-10" }]) === null);
+}
+
+// --- bodyweight lifts show what you weighed, and still never say kg in the set ---
+{
+  reset();
+  store.clearAll();
+  const ex = givePressUps();
+  store.addMeasurement({ date: "2026-08-01", bodyweight: 90 });
+  store.addMeasurement({ date: TODAY, bodyweight: 85 });
+  select.invalidate();
+  setPrefill({ exerciseId: ex.id, date: TODAY, mode: "sets" });
+  const log = renderLog(ctx({ route: "log" }));
+  ok("the log shows today's bodyweight", /85 kg/.test(log.querySelector(".bw-note")?.textContent || ""));
+  ok("each history row says what it was done at", log.querySelectorAll(".bw-tag").length > 0);
+  for (const n of log.querySelectorAll(".row-set"))
+    ok("the set itself still says nothing about kilos", !/\bkg\b/.test(n.textContent), n.textContent);
+
+  openCard(ex.id);
+  const card = renderPlan(ctx({ route: "plan" }));
+  ok("the card compares then and now", /90 kg bodyweight — you are 85 kg now/.test(card.querySelector(".bw-note")?.textContent || ""), card.querySelector(".bw-note")?.textContent);
+
+  const back = JSON.parse(store.exportJSON());
+  ok("measurements go into the backup", back.measurements.length === 2);
+  store.importJSON(JSON.stringify({ ...back, measurements: [] }));
+  store.importJSON(JSON.stringify(back), { merge: true });
+  ok("and come back out of it", store.getMeasurements().length === 2);
+}
+
+// --- nothing anywhere prints a stray "null" ---
+// append(null) writes the text "null" in a real browser; every optional piece
+// of a view has to be skipped, not appended.
+{
+  reset();
+  store.clearAll();
+  const ex = givePressUps();
+  store.addMeasurement({ date: TODAY, bodyweight: 85 });
+  select.invalidate();
+  openCard(ex.id);
+  const strays = (node) => node.textContent.includes("null");
+  ok("the Next screen prints no stray null", !strays(renderPlan(ctx({ route: "plan" }))));
+  setPrefill({ exerciseId: ex.id, date: TODAY, mode: "sets" });
+  ok("the Log screen prints no stray null", !strays(renderLog(ctx({ route: "log" }))));
+  reset();
+  select.invalidate();
+  ok("nor with a check-in due", !strays(renderPlan(ctx({ route: "plan" }))));
 }
 
 /* ------------------------------------------------------------------ report */

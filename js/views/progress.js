@@ -48,13 +48,14 @@ import {
 } from "../metrics.js";
 import * as ui from "../core/uistate.js";
 import * as store from "../store.js";
+import { renderMeasure, openMeasureForm } from "./measure.js";
 
 // Which lift is drilled into, and how the list is drawn. Kept in uistate so a
 // reload puts you back where you were rather than at the top of the list.
 const SELECTED = "progress.selectedId";
 const MODE = "progress.listMode";
 const RANGE = "progress.range";
-const VIEW = "progress.view"; // 'lifts' | 'body'
+const VIEW = "progress.view"; // 'lifts' | 'body' | 'measure'
 
 const viewMode = () => ui.get(VIEW, "lifts");
 
@@ -70,6 +71,12 @@ export function clearSelection() {
 export function hasSelection() {
   return selected() !== null;
 }
+/** Straight to the measurements, with the check-in form open. */
+export function openMeasurements() {
+  ui.set(SELECTED, null);
+  ui.set(VIEW, "measure");
+  openMeasureForm();
+}
 
 export function renderProgress(ctx) {
   const { stats } = ctx;
@@ -79,6 +86,20 @@ export function renderProgress(ctx) {
     if (st) return detailView(st, ctx);
     clearSelection(); // the lift was deleted underneath us
   }
+  if (viewMode() === "measure")
+    return renderMeasure(
+      ctx,
+      el("div", {}, [
+        el("header", { class: "view-head" }, [
+          el("h1", { text: "Measurements" }),
+          el("p", {
+            class: "view-sub",
+            text: "Strength shows up on the bar. Size shows up on a tape measure — check in every couple of weeks and watch the change since you started.",
+          }),
+        ]),
+        viewSwitch(ctx),
+      ]),
+    );
   return viewMode() === "body" ? bodyView(ctx) : listView(ctx);
 }
 
@@ -91,6 +112,7 @@ function viewSwitch(ctx) {
       options: [
         { value: "lifts", label: "Your lifts" },
         { value: "body", label: "Everything" },
+        { value: "measure", label: "Body" },
       ],
       onChange: (v) => {
         ui.set(VIEW, v);

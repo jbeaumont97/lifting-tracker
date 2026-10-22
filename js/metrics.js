@@ -50,6 +50,32 @@ export const ZONES = {
   },
 };
 
+/**
+ * The third way to do a session: one heavy top set, then lighter back-off sets.
+ *
+ * It is not a third rep range, so it is deliberately not in ZONES — the grid's
+ * rows are still marked strength or size and nothing else. It is a session
+ * shape that spends one set on each question: the top set is where the
+ * strength target is chased, and the back-offs are where the hard sets come
+ * from.
+ *
+ * The top set is solved against the same e1RM target as everything else, as a
+ * single set, so it earns no set bonus and is the heaviest thing on the card.
+ * The back-offs are a fixed fraction of it rather than a second solve: they are
+ * there for the dose, and a target for them would only invite chasing them too.
+ * Eighty percent for eight leaves two or three in reserve for most people after
+ * a hard top set, which is exactly where a set still counts in full.
+ */
+export const TOPSET = {
+  key: "topset",
+  label: "Both",
+  topReps: 5,
+  backoffReps: 8,
+  backoffFraction: 0.8,
+  minBackoffSets: 2,
+  hint: "One heavy set for strength, then lighter sets for size.",
+};
+
 /* --------------------------------------------------------- the hard set */
 
 // Below the range a set still does something; above it the falloff is slower
@@ -370,6 +396,56 @@ export function ceilToStep(value, step, base = 0) {
   // Guard against binary float error: 82.49999999 must not become 85.
   const rungs = Math.ceil((value - b) / s - 1e-9);
   return Number((b + rungs * s).toFixed(6));
+}
+
+/**
+ * The NEAREST rung on the same ladder, never below the bar.
+ *
+ * For a load that is a fraction of something else rather than a target to
+ * meet. Rounding a back-off set up would make it heavier than it was meant to
+ * be on every lift with a coarse step; rounding to nearest is the honest read.
+ */
+export function nearestStep(value, step, base = 0) {
+  const s = Number(step) > 0 ? Number(step) : 2.5;
+  const b =
+    Number.isFinite(Number(base)) && Number(base) > 0 ? Number(base) : 0;
+  if (!Number.isFinite(value)) return NaN;
+  if (value <= b) return b;
+  const rungs = Math.round((value - b) / s + 1e-9);
+  return Number((b + rungs * s).toFixed(6));
+}
+
+/**
+ * Top set and back-offs for one lift, off one target.
+ *
+ * `topReps` is held inside the strength range — a top set of twelve is not a
+ * top set. Returns null where there is no weight to split —
+ * on a bodyweight lift the only lever is reps, and "a lighter set" means
+ * nothing.
+ */
+export function topSetPlan(target, topReps, backoffSets, settings, step, base = 0) {
+  const asked = Math.round(Number(topReps));
+  const r = Number.isFinite(asked) && asked > 0
+    ? clamp(asked, ZONES.strength.minReps, ZONES.strength.maxReps)
+    : TOPSET.topReps;
+  const top = weightForTarget(target, r, 1, settings, step, base);
+  if (!Number.isFinite(top)) return null;
+  const n = Math.max(
+    TOPSET.minBackoffSets,
+    Number(backoffSets) > 0 ? Math.round(Number(backoffSets)) : 3,
+  );
+  const backWeight = Math.min(
+    nearestStep(top * TOPSET.backoffFraction, step, base),
+    top,
+  );
+  const topScore = top * repFactor(r, settings.formula);
+  return {
+    top: { weight: top, reps: r, sets: 1, score: topScore },
+    backoff: { weight: backWeight, reps: TOPSET.backoffReps, sets: n },
+    score: topScore,
+    hardSets: repCredit(r) + n * repCredit(TOPSET.backoffReps),
+    totalSets: 1 + n,
+  };
 }
 
 /** The lightest loadable weight whose adj e1RM meets `target` at reps x sets. */
@@ -1143,7 +1219,12 @@ export function planFor(stats, settings, override = {}) {
   // Which zone the card is reading itself in. It no longer changes the sum —
   // the weight comes from e1RM whatever you are training for — it only says
   // which of the two picks is the one currently prescribed.
-  const zone = override.zone === "hypertrophy" ? "hypertrophy" : "strength";
+  // 'topset' is the third pick: the card's reps lever then reads as the top
+  // set's reps and its sets lever as the number of back-offs.
+  const zone =
+    override.zone === "hypertrophy" || override.zone === TOPSET.key
+      ? override.zone
+      : "strength";
   const plan = {
     ready: Number.isFinite(target) && target > 0,
     zone,
@@ -1176,10 +1257,16 @@ export function planFor(stats, settings, override = {}) {
     // thirty. A lazy getter, like everything else a collapsed card skips.
     hardSets: 0,
     picks: null,
+    // Set only while the top-set pick is the one being followed: the session
+    // as two blocks. Everything above still describes straight sets, so the
+    // grid and levers keep working unchanged.
+    topset: null,
   };
   if (!plan.ready) return plan;
 
   if (isBodyweight(stats.exercise)) {
+    // No load to drop for back-offs, so the third pick does not exist here.
+    if (plan.zone === TOPSET.key) plan.zone = "strength";
     plan.kind = "bodyweight";
     plan.weight = null;
     plan.atBase = false;
@@ -1300,13 +1387,47 @@ export function planFor(stats, settings, override = {}) {
       if (picks !== undefined) return picks;
       const repsFor = (zone) =>
         inZone(reps, zone) ? snapReps(reps) : zone.pickReps;
+      // Offered at your own reps when they are already strength reps, at five
+      // otherwise; once it is being followed the reps lever drives it.
+      const ts = topSetPlan(
+        target,
+        zone === TOPSET.key || inZone(reps, ZONES.strength) ? reps : TOPSET.topReps,
+        sets, settings, step, base,
+      );
       picks = {
         strength: cell(repsFor(ZONES.strength), sets),
         hypertrophy: cell(repsFor(ZONES.hypertrophy), sets),
+        topset: ts
+          ? {
+              ...ts,
+              reps: ts.top.reps,
+              sets: ts.backoff.sets,
+              weight: ts.top.weight,
+              band: bandOf(ts.score, ts.top.weight),
+            }
+          : null,
       };
       return picks;
     },
   });
+
+  if (zone === TOPSET.key) {
+    const ts = plan.picks.topset;
+    if (ts) {
+      plan.topset = ts;
+      // The headline is the top set: it is what the target is about.
+      plan.reps = ts.top.reps;
+      plan.weight = ts.top.weight;
+      plan.score = ts.score;
+      plan.overshoot = ts.score - target;
+      plan.band = ts.band;
+      plan.hardSets = ts.hardSets;
+      plan.work =
+        work(ts.top.weight, ts.top.reps, 1, stats.exercise.kind) +
+        work(ts.backoff.weight, ts.backoff.reps, ts.backoff.sets, stats.exercise.kind);
+      plan.atBase = base > 0 && Math.abs(ts.top.weight - base) < 1e-9;
+    }
+  }
 
   // Gentlest option at the chosen set count: smallest overshoot of the target.
   // One column, so it solves seven cells rather than forcing the whole grid.
