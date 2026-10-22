@@ -51,6 +51,7 @@ import {
   hardSets,
   repCredit,
   warmupPlan,
+  dayNumber,
 } from "../metrics.js";
 import { bandChip } from "../ui.js";
 import { setTrace } from "../charts.js";
@@ -63,6 +64,7 @@ import {
 import * as ui from "../core/uistate.js";
 import { bind } from "../core/bind.js";
 import { countUp } from "../core/motion.js";
+import { bodyweightOn } from "../measure.js";
 
 const FORM = "log.form";
 const NOTES_OPEN = "log.showNotes";
@@ -112,7 +114,14 @@ export function setPrefill(prefill = {}) {
     // Logging set by set only makes sense for a session happening now; writing
     // up an older one goes straight to the whole-session form.
     mode: prefill.mode ?? modeForDate(date),
+    // A top set + back-offs plan: the form starts on the top set and moves
+    // itself onto the back-offs once that set is in.
+    backoff: prefill.backoff
+      ? { weight: Number(prefill.backoff.weight), reps: Number(prefill.backoff.reps), sets: Number(prefill.backoff.sets) }
+      : null,
   };
+  // All at once, the top set is a row of its own, so the form asks for one.
+  if (next.backoff && next.mode === "bulk") next.sets = 1;
   form = persisted(next);
   ui.set(FORM, { ...next });
   setLastSetId(null);
@@ -490,6 +499,8 @@ function entryForm(st, ctx, settings) {
     ],
     onChange: (v) => {
       form.mode = v;
+      if (form.backoff)
+        form.sets = v === "bulk" ? 1 : 1 + form.backoff.sets;
       ctx.refresh({ transition: true });
     },
   });
@@ -707,6 +718,18 @@ function entryForm(st, ctx, settings) {
 
   const body = el("div", { class: "form-body" }, [
     el("div", { class: "mode-row" }, [modeSwitch]),
+    // While the top set is still to come, say what follows it — otherwise the
+    // form reads as a one-set session.
+    form.backoff && !repsOnly
+      ? el("div", { class: "plan-strip plan-strip-topset" }, [
+          el("span", { class: "plan-strip-label", text: "Top set first" }),
+          el("span", {
+            class: "plan-strip-value",
+            text: `then ${form.backoff.sets} × ${form.backoff.reps} @ ${fmtWeight(form.backoff.weight)} kg`,
+          }),
+        ])
+      : null,
+    bodyweightNote(ex, form.date),
     plan?.ready
       ? el("div", { class: "plan-strip" }, [
           el("span", { class: "plan-strip-label", text: "Planned" }),
@@ -997,12 +1020,41 @@ function summary(doneSoFar, ex, ctx) {
 
 /* --------------------------------------------------------------- saving */
 
+/**
+ * On a bodyweight lift, what you weigh is the load. The reps are still the
+ * score — that is what the plan and the trend are built on — but eight pull-ups
+ * at 90 kg and twelve at 85 kg are different achievements, and only the weigh-in
+ * can say so. Shown, not scored.
+ */
+function bodyweightNote(ex, date) {
+  if (!isBodyweight(ex)) return null;
+  const bw = bodyweightOn(store.getMeasurements(), date);
+  if (!bw)
+    return el("p", {
+      class: "bw-note is-missing",
+      text: "Add your bodyweight in a check-in under Progress → Body and it is shown with every set of this lift.",
+    });
+  const age = dayNumber(date) - dayNumber(bw.date);
+  return el("p", { class: "bw-note" }, [
+    el("span", { class: "bw-note-label", text: "Bodyweight" }),
+    el("span", { class: "bw-note-value", text: `${fmtWeight(bw.value)} kg` }),
+    el("span", {
+      class: "bw-note-sub",
+      text: age <= 0 ? "weighed today" : `weighed ${age} day${age === 1 ? "" : "s"} before`,
+    }),
+  ]);
+}
+
 /** Set-by-set: one tap, one set, rest clock. */
 function logOneSet(st, ctx, settings) {
-  const w = Number(form.weight),
+  // A bodyweight lift has nothing on the bar, so a weight of 0 is the right
+  // answer rather than a missing one. Requiring one here is what stopped these
+  // lifts being logged set by set; the whole-session save already knew better.
+  const repsOnly = isBodyweight(st.exercise);
+  const w = repsOnly ? 0 : Number(form.weight),
     r = Number(form.reps);
-  if (!(w > 0) || !(r > 0)) {
-    toast("Enter a weight and reps first.");
+  if (!(r > 0) || (!repsOnly && !(w > 0))) {
+    toast(repsOnly ? "Enter the reps first." : "Enter a weight and reps first.");
     return;
   }
 
@@ -1027,6 +1079,12 @@ function logOneSet(st, ctx, settings) {
   setLastSetId(created?.id ?? null);
   // A note belongs to the set it was written for, not to every set after it.
   form.notes = "";
+  // The top set is in: the rest of the session is the back-offs.
+  if (form.backoff) {
+    form.weight = form.backoff.weight;
+    form.reps = form.backoff.reps;
+    form.backoff = null;
+  }
 
   const after = store.entriesOn(form.exerciseId, form.date);
   const doneAfter = after.reduce((n, e) => n + setCount(e), 0);
@@ -1132,8 +1190,13 @@ function save(st, ctx) {
     startRest(ctx.settings.restSeconds, {
       label: `Rest · ${st.exercise.name}`,
     });
-  // Keep the lift selected but drop back to plan-based prefill for the next set.
-  setPrefill({ exerciseId: form.exerciseId, date: form.date, mode: form.mode });
+  // Keep the lift selected but drop back to plan-based prefill for the next set
+  // — or, straight after a top set, to the back-offs that follow it.
+  const bo = form.backoff;
+  setPrefill(bo
+    ? { exerciseId: form.exerciseId, date: form.date, mode: form.mode,
+      weight: bo.weight, reps: bo.reps, sets: bo.sets }
+    : { exerciseId: form.exerciseId, date: form.date, mode: form.mode });
   ctx.refresh();
   if (created)
     requestAnimationFrame(() =>
@@ -1236,8 +1299,12 @@ function historyRow(entry, name, isPR, ctx, settings) {
   const setText = repsOnly
     ? `${entry.sets} × ${entry.reps} reps`
     : `${entry.sets} × ${entry.reps} @ ${fmtWeight(entry.weight)} kg`;
+  // What you were carrying when you did them: the last weigh-in on or before
+  // that day. Its own element, apart from the set, because the set itself moves
+  // no load and must never read as though it did.
+  const bw = repsOnly ? bodyweightOn(store.getMeasurements(), entry.date) : null;
   const spoken = repsOnly
-    ? `${entry.sets} sets of ${entry.reps} reps`
+    ? `${entry.sets} sets of ${entry.reps} reps${bw ? `, at ${fmtWeight(bw.value)} kilos bodyweight` : ""}`
     : `${entry.sets} sets of ${entry.reps} at ${fmtWeight(entry.weight)} kilos`;
 
   const btn = el(
@@ -1266,6 +1333,9 @@ function historyRow(entry, name, isPR, ctx, settings) {
       }),
       entry.rir !== null && entry.rir !== undefined
         ? el("span", { class: "row-rir", text: `RIR ${entry.rir}` })
+        : null,
+      bw
+        ? el("span", { class: "bw-tag", text: `at ${fmtWeight(bw.value)} kg bodyweight` })
         : null,
       // Notes have been captured, merged and exported since the first version and
       // shown nowhere. If it was worth typing at the rack it is worth reading back.

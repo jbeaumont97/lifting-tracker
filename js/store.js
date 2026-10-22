@@ -6,6 +6,7 @@
 import { SEED } from './seed.js';
 import { isoToday, setKey, READINESS_DEFAULTS } from './metrics.js';
 import { sessionSets, typicalRest } from './insights.js';
+import { SITE_KEYS, MEASURE_DEFAULTS } from './measure.js';
 
 const KEY = 'liftingTracker.v1';
 const THEME_KEY = 'liftingTracker.theme';
@@ -30,10 +31,14 @@ export const DEFAULT_SETTINGS = {
   // 'off' falls back to the spreadsheet's flat per-session step.
   readiness: 'on',
   ...READINESS_DEFAULTS,
+
+  // Body measurements: how often to prompt for a check-in, and whether to
+  // remind about photos while you are at it. See measure.js.
+  ...MEASURE_DEFAULTS,
 };
 
 const STRING_SETTINGS = new Set(['formula', 'unit', 'readiness']);
-const BOOL_SETTINGS = new Set(['numbersOpen']);
+const BOOL_SETTINGS = new Set(['numbersOpen', 'measurePhotos']);
 
 let doc = null;
 const listeners = new Set();
@@ -48,7 +53,7 @@ export const getVersion = () => version;
 /* ------------------------------------------------------------- lifecycle */
 
 function blank() {
-  return { schema: SCHEMA, exercises: [], entries: [], done: [], settings: { ...DEFAULT_SETTINGS }, seq: 1 };
+  return { schema: SCHEMA, exercises: [], entries: [], done: [], measurements: [], measureSnoozedUntil: null, settings: { ...DEFAULT_SETTINGS }, seq: 1 };
 }
 
 /**
@@ -124,10 +129,39 @@ function normalise(raw) {
   // A document written before lifts could be called done simply arrives with
   // none, which is the truth about it — so there is nothing to migrate.
   d.done = normaliseDone(raw.done, known);
+  // Older documents simply have none; that is the truth about them too.
+  d.measurements = normaliseMeasurements(raw.measurements);
+  d.measureSnoozedUntil = typeof raw.measureSnoozedUntil === 'string' ? raw.measureSnoozedUntil.slice(0, 10) : null;
+  d.settings.measurePhotos = d.settings.measurePhotos !== false && d.settings.measurePhotos !== 'false';
+  d.settings.measureEveryDays = Math.max(0, Math.round(num(d.settings.measureEveryDays, MEASURE_DEFAULTS.measureEveryDays)));
   // A spread over every entry blows the call stack on a long log; fold instead.
   d.seq = d.entries.reduce((m, e) => (e.seq + 1 > m ? e.seq + 1 : m), 1);
   d.schema = SCHEMA;
   return d;
+}
+
+/**
+ * One check-in per record: a date, any of the sites in measure.js, whether
+ * photos were taken, and a note. A site left blank is stored as absent, not 0 —
+ * a skipped calf measurement is not a calf of nothing.
+ */
+function normaliseMeasurements(raw) {
+  const out = [];
+  let i = 0;
+  for (const m of Array.isArray(raw) ? raw : []) {
+    i++;
+    if (!m || !m.date) continue;
+    const row = { id: String(m.id ?? `ms-${i}`), date: String(m.date).slice(0, 10), seq: Number(m.seq) || i };
+    let any = false;
+    for (const k of SITE_KEYS) {
+      const v = Number(m[k]);
+      if (m[k] !== null && m[k] !== '' && Number.isFinite(v) && v > 0) { row[k] = v; any = true; }
+    }
+    row.photos = m.photos === true;
+    row.notes = String(m.notes ?? '');
+    if (any || row.photos) out.push(row);
+  }
+  return out;
 }
 
 function num(v, fallback) {
@@ -625,6 +659,44 @@ export function updateSettings(patch) {
   }, { undoable: true, label: 'settings changed' });
 }
 
+/* ------------------------------------------------------ body measurements */
+
+export const getMeasurements = () => load().measurements;
+export const getMeasureSnooze = () => load().measureSnoozedUntil;
+
+/** Record a check-in. Blank sites are left out; returns the saved record. */
+export function addMeasurement(m) {
+  const [row] = normaliseMeasurements([{ ...m, id: uid('ms') }]);
+  if (!row) return null;
+  commit((d, record) => {
+    row.seq = d.measurements.reduce((n, x) => Math.max(n, x.seq || 0), 0) + 1;
+    d.measurements.push(row);
+    // A check-in answers the prompt, so any snooze on it is over.
+    const snooze = d.measureSnoozedUntil;
+    d.measureSnoozedUntil = null;
+    record((u) => { u.measurements = u.measurements.filter((x) => x.id !== row.id); u.measureSnoozedUntil = snooze; });
+  }, { undoable: true, label: 'measurements saved' });
+  return row;
+}
+
+export function deleteMeasurement(id) {
+  commit((d, record) => {
+    const i = d.measurements.findIndex((x) => x.id === id);
+    if (i < 0) return;
+    const [gone] = d.measurements.splice(i, 1);
+    record((u) => { u.measurements.splice(i, 0, gone); });
+  }, { undoable: true, label: 'measurements deleted' });
+}
+
+/** Hold the check-in prompt off until `until` (ISO date). */
+export function snoozeMeasure(until) {
+  commit((d, record) => {
+    const prev = d.measureSnoozedUntil;
+    d.measureSnoozedUntil = until ? String(until).slice(0, 10) : null;
+    record((u) => { u.measureSnoozedUntil = prev; });
+  }, { undoable: true, label: 'check-in snoozed' });
+}
+
 /* ------------------------------------------------------- backup & restore */
 
 export function exportJSON() {
@@ -675,9 +747,18 @@ export function importJSON(text, { merge = false } = {}) {
       d.exercises = incoming.exercises;
       d.entries = incoming.entries;
       d.done = incoming.done;
+      d.measurements = incoming.measurements;
+      d.measureSnoozedUntil = incoming.measureSnoozedUntil;
       d.settings = incoming.settings;
       d.seq = incoming.seq;
       return;
+    }
+    // Merging: a check-in on a date already measured is the same check-in.
+    const measured = new Set(d.measurements.map((m) => m.date));
+    for (const m of incoming.measurements) {
+      if (measured.has(m.date)) continue;
+      measured.add(m.date);
+      d.measurements.push({ ...m, id: uid('ms') });
     }
     const byName = new Map(d.exercises.map((e) => [e.name.toLowerCase(), e]));
     const remap = new Map();

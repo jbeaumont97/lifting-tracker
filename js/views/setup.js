@@ -153,6 +153,49 @@ export function renderSetup(ctx) {
     ]),
   );
 
+  /* --------------------------------------------------- body measurements */
+  root.append(el("h2", { class: "section-title", text: "Body measurements" }));
+  root.append(
+    el("div", { class: "card card-pad" }, [
+      el("div", { class: "field-block" }, [
+        el("span", { class: "field-label", text: "Ask for a check-in" }),
+        segmented({
+          label: "How often to ask for a body check-in",
+          value: String(settings.measureEveryDays),
+          options: [
+            { value: "0", label: "Never" },
+            { value: "7", label: "Weekly" },
+            { value: "14", label: "2 weeks" },
+            { value: "28", label: "4 weeks" },
+          ],
+          onChange: (v) => {
+            store.updateSettings({ measureEveryDays: Number(v) });
+            ctx.refresh();
+          },
+        }),
+      ]),
+      el("div", { class: "field-block" }, [
+        el("span", { class: "field-label", text: "Progress photos" }),
+        segmented({
+          label: "Remind me to take progress photos",
+          value: settings.measurePhotos ? "on" : "off",
+          options: [
+            { value: "on", label: "Remind me" },
+            { value: "off", label: "Don’t" },
+          ],
+          onChange: (v) => {
+            store.updateSettings({ measurePhotos: v === "on" });
+            ctx.refresh();
+          },
+        }),
+      ]),
+      el("p", {
+        class: "field-hint",
+        text: "When a check-in is due, the Next screen asks for one: bodyweight, shoulders, chest, arms, waist, thighs and calves, under Progress → Body. Photos are never stored by the app — it only notes that you took them. Your latest bodyweight is also shown beside your bodyweight lifts.",
+      }),
+    ]),
+  );
+
   /* ---------------------------------------------------------- exercises */
   root.append(el("h2", { class: "section-title", text: "Your lifts" }));
   root.append(globalLevel(ctx));

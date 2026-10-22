@@ -17,7 +17,7 @@ import * as uistate from './core/uistate.js';
 import { el, toast } from './ui.js';
 import { renderPlan, openCard } from './views/plan.js';
 import { renderLog, setPrefill } from './views/log.js';
-import { renderProgress, openExercise, clearSelection, hasSelection } from './views/progress.js';
+import { renderProgress, openExercise, clearSelection, hasSelection, openMeasurements } from './views/progress.js';
 import { renderSetup } from './views/setup.js';
 import { showWelcome } from './views/welcome.js';
 
@@ -69,6 +69,7 @@ function goTo(next, payload = {}) {
   if (next === 'log') setPrefill(payload);
   if (next === 'progress' && payload.exerciseId) openExercise(payload.exerciseId);
   if (next === 'progress' && !payload.exerciseId && payload.list) clearSelection();
+  if (next === 'progress' && payload.measure) openMeasurements();
   if (next === 'plan' && payload.openExercise) openCard(payload.openExercise);
   render({ restore: true, transition: true });
 }
