@@ -27,6 +27,8 @@ import {
   isBodyweight,
 } from "../metrics.js";
 import { LEVELS, levelOf, levelByKey, suggestLevel } from "../insights.js";
+import { MUSCLES } from "../muscles.js";
+import { exportForAnalysis } from "../export.js";
 
 const SUGGESTED_TAGS = [
   "Legs",
@@ -43,6 +45,41 @@ const SUGGESTED_TAGS = [
  * chips, plus a text box for anything else. Owns its own repaint so toggling
  * or adding a tag never has to touch the rest of the card.
  */
+/**
+ * What a lift trains, in two lists: mainly (a set counts in full towards that
+ * muscle's weekly hard sets) and also (it counts half). A muscle can only be
+ * in one list, so ticking it in one takes it out of the other.
+ */
+function muscleEditor(ex, ctx) {
+  const m = ex.muscles || { primary: [], secondary: [] };
+  const save = (primary, secondary) => {
+    store.updateExercise(ex.id, { muscles: { primary, secondary } });
+    ctx.refresh();
+  };
+  const group = (label, list, other, which) => multiChipGroup({
+    label, className: "chips-wrap muscle-chips",
+    options: MUSCLES.map((x) => ({ value: x.key, label: x.label })),
+    values: list,
+    onToggle: (key, on) => {
+      const next = on ? [...list, key] : list.filter((k) => k !== key);
+      const rest = other.filter((k) => k !== key);
+      if (which === "primary") save(next, rest);
+      else save(rest, next);
+    },
+  });
+  return el("div", { class: "field-block muscle-editor" }, [
+    el("span", { class: "field-label", text: "Mainly works" }),
+    group("Muscles this lift mainly works", m.primary, m.secondary, "primary"),
+    el("span", { class: "field-label", text: "Also works" }),
+    group("Muscles this lift also works", m.secondary, m.primary, "secondary"),
+    el("p", {
+      class: "field-hint",
+      text: (m.guessed ? "Guessed from the name — check it. " : "")
+        + "A hard set counts in full for each muscle it mainly works and half for each it also works. This is what Progress → Everything adds up into hard sets per muscle per week.",
+    }),
+  ]);
+}
+
 function tagEditor({ tags, onChange }) {
   let current = [...tags];
   const chipHost = el("div");
@@ -564,6 +601,20 @@ export function renderSetup(ctx) {
           {
             type: "button",
             class: "btn btn-ghost",
+            onclick: () =>
+              shareFile(
+                `lifting-tracker-analysis-${today()}.zip`,
+                exportForAnalysis(store.getDoc(), ctx.stats),
+                "application/zip",
+              ),
+          },
+          ["Export for analysis (.zip)"],
+        ),
+        el(
+          "button",
+          {
+            type: "button",
+            class: "btn btn-ghost",
             onclick: () => importPicker(ctx),
           },
           ["Restore a backup"],
@@ -834,7 +885,7 @@ function exerciseCard(ex, index, total, ctx) {
       el("p", {
         class: "field-hint",
         text: reps
-          ? "Nothing to load — a press-up, a pull-up, a dip. There is no weight to ask for and no one-rep max to estimate from one, so progress is measured in reps and the planner asks for a rep count. It counts sets but adds no tonnage, because the app does not know what you weigh."
+          ? "Nothing to load — a press-up, a pull-up, a dip. There is no weight to ask for and no one-rep max to estimate from one, so progress is measured in reps and the planner asks for a rep count. It counts sets but adds no tonnage; your latest bodyweight from a check-in is shown beside it instead."
           : "Weight on the bar or the stack. Progress is more of it.",
       }),
     ]),
@@ -846,6 +897,8 @@ function exerciseCard(ex, index, total, ctx) {
         ctx.refresh();
       },
     }),
+
+    muscleEditor(ex, ctx),
 
     // Nothing to load means nothing to say about bars, pins or plate steps.
     reps
@@ -1482,7 +1535,7 @@ async function shareFile(filename, content, type) {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 4000);
-  toast("Backup saved to your downloads.");
+  toast("Saved to your downloads.");
 }
 
 function importPicker(ctx) {

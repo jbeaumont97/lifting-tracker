@@ -119,6 +119,9 @@ export function setPrefill(prefill = {}) {
     backoff: prefill.backoff
       ? { weight: Number(prefill.backoff.weight), reps: Number(prefill.backoff.reps), sets: Number(prefill.backoff.sets) }
       : null,
+    // What the card was prescribing when "Log this" was tapped, recorded with
+    // every set this form logs. See planFor() below for the fallback.
+    plan: prefill.plan ?? null,
   };
   // All at once, the top set is a row of its own, so the form asks for one.
   if (next.backoff && next.mode === "bulk") next.sets = 1;
@@ -200,6 +203,12 @@ export function renderLog(ctx) {
       ]),
     ]),
   );
+
+  // ---- how the day started ----
+  // Asked once per day, before its first set: the context that turns a log
+  // into something you can analyse. A bad session after five hours' sleep is
+  // a different thing from a bad session after eight.
+  root.append(dayCheckIn(form.date, ctx));
 
   // ---- exercise ----
   const picker = el("div", {
@@ -668,19 +677,36 @@ function entryForm(st, ctx, settings) {
     },
   });
 
+  // Required, and never remembered from the last set: every set gets its own
+  // answer. A default would quietly become the answer to all of them, which is
+  // how the log ended up with no RIR at all for weeks.
   const rir = chipGroup({
     label: "Reps in reserve",
     value: form.rir,
-    allowNull: true,
-    nullLabel: "not noted",
     options: [0, 1, 2, 3, 4].map((v) => ({
       value: v,
       label: v === 4 ? "4+" : String(v),
     })),
     onChange: (v) => {
       form.rir = v;
+      rirBlock.classList.remove("needs-answer");
+      ctx.tick();
     },
   });
+
+  const rirBlock = el("div", { class: "field-block rir-block" }, [
+    el("span", {
+      class: "field-label",
+      text: live
+        ? "RIR — how many more you could have done on this set"
+        : "RIR — how many more you could have done",
+    }),
+    rir,
+    el("p", {
+      class: "field-hint rir-hint",
+      text: "0 — nothing left. 1–2 — a grinder you could just about repeat. 3 — clean, could have pushed on. 4+ — comfortable.",
+    }),
+  ]);
 
   const notesArea = el("textarea", {
     class: "notes-input",
@@ -707,6 +733,17 @@ function entryForm(st, ctx, settings) {
       r = Math.round(Number(form.reps)) || "",
       s = Math.round(Number(form.sets)) || "";
     const at = repsOnly ? `${r} reps` : `${r} @ ${w} ${settings.unit}`;
+    const blocked = !store.getDay(form.date) ? "day" : form.rir === null || form.rir === undefined ? "rir" : null;
+    primary.classList.toggle("is-blocked", !!blocked);
+    primary.setAttribute("aria-disabled", blocked ? "true" : "false");
+    if (blocked === "day") {
+      primary.textContent = "Check in for the day first";
+      return;
+    }
+    if (blocked === "rir") {
+      primary.textContent = live ? "Pick RIR for this set" : "Pick RIR first";
+      return;
+    }
     primary.textContent = live
       ? finished || (target && doneSoFar >= target)
         ? `Log another set — ${at}`
@@ -806,15 +843,7 @@ function entryForm(st, ctx, settings) {
           ])
         : null,
     preview,
-    el("div", { class: "field-block" }, [
-      el("span", {
-        class: "field-label",
-        text: live
-          ? "RIR — how many more you could have done on this set"
-          : "RIR — how many more you could have done",
-      }),
-      rir,
-    ]),
+    rirBlock,
     el(
       "button",
       {
@@ -841,7 +870,7 @@ function entryForm(st, ctx, settings) {
   // preview actually depends on, so moving RIR or typing a note writes nothing.
   const levers = () => `${form.weight}|${form.reps}|${form.sets}`;
   bind(preview, levers, paint);
-  bind(primary, levers, relabel);
+  bind(primary, () => `${levers()}|${form.rir}|${store.getDay(form.date) ? 1 : 0}`, relabel);
 
   // Steppers that are typed into rather than nudged still have to be heard.
   for (const s of [weightStep, repsStep, setsStep]) {
@@ -1045,6 +1074,131 @@ function bodyweightNote(ex, date) {
   ]);
 }
 
+/**
+ * Both answers a set needs before it can be logged: how the day started, and
+ * how close to failure this set was. Says which is missing and points at it
+ * rather than greying the button out — a disabled button explains nothing.
+ */
+function readyToLog() {
+  if (!store.getDay(form.date)) {
+    toast("Check in for the day first — sleep and energy, at the top.");
+    document.querySelector(".day-check")?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+    document.querySelector(".day-check")?.classList.add("needs-answer");
+    return false;
+  }
+  if (form.rir === null || form.rir === undefined) {
+    toast("How many more could you have done? Pick an RIR first.");
+    const b = document.querySelector(".rir-block");
+    b?.classList.add("needs-answer");
+    b?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+    return false;
+  }
+  return true;
+}
+
+/**
+ * What this set was meant to be, for the record. In order: the plan the card
+ * handed over; the plan today's first set of this lift was logged against; or,
+ * logging with no hand-off, the card's plan as it stands now — including any
+ * pick taken on it. The middle step matters: once a set is in, the target
+ * moves, and set three must not be recorded against a plan that set one made.
+ */
+function planForSet(st, settings) {
+  let base = form.plan;
+  if (!base) {
+    const first = store.entriesOn(form.exerciseId, form.date).find((e) => e.plan);
+    if (first) base = { ...first.plan };
+  }
+  if (!base && st.entryCount) {
+    const p = planFor(st, settings, ui.forExercise("plan.overrides", st.exercise.id, {}));
+    if (p.ready) {
+      base = p.topset
+        ? { zone: "topset", weight: p.topset.top.weight, reps: p.topset.top.reps, sets: 1, target: p.target, band: p.band?.key,
+          backoff: { ...p.topset.backoff } }
+        : { zone: p.zone, weight: p.weight, reps: p.reps, sets: p.sets, target: p.target, band: p.band?.key };
+    }
+  }
+  if (!base) return null;
+  if (base.zone !== "topset") return { ...base, role: null, backoff: undefined };
+  // A topset session is two prescriptions; record the one this set belongs to.
+  const isTop = !!form.backoff;
+  const bo = base.backoff || form.backoff;
+  return isTop || !bo
+    ? { zone: "topset", role: "top", weight: base.weight, reps: base.reps, sets: 1, target: base.target, band: base.band }
+    : { zone: "topset", role: "backoff", weight: bo.weight, reps: bo.reps, sets: bo.sets, target: base.target, band: base.band };
+}
+
+/**
+ * The once-a-day check-in: hours slept and energy out of five. Required before
+ * the first set of a day. For a day other than today there is also "Can't
+ * remember" — an honest blank, rather than a number made up to get past it.
+ */
+function dayCheckIn(date, ctx) {
+  const day = store.getDay(date);
+  const isToday = date === (ctx.today || isoToday());
+  if (day) {
+    const bits = day.unknown
+      ? ["Sleep and energy not remembered"]
+      : [`Slept ${fmt(day.sleepHours, 1)} h`, `energy ${day.energy}/5`];
+    return el("div", { class: "day-check is-done" }, [
+      el("span", { class: "summary-tick", "aria-hidden": "true", text: "✓" }),
+      el("span", { class: "day-check-facts", text: bits.join(" · ") }),
+      el("button", {
+        type: "button", class: "link-btn",
+        onclick: () => {
+          // Reopen the questions with the old answers filled in.
+          if (!day.unknown) ui.set("log.dayDraft", { date, sleepHours: day.sleepHours, energy: day.energy });
+          store.clearDay(date);
+          ctx.refresh({ transition: true });
+        },
+      }, ["Change"]),
+    ]);
+  }
+  const draft = ui.get("log.dayDraft", null);
+  const mine = draft && draft.date === date ? draft : { date, sleepHours: null, energy: null };
+  const save = (patch) => { Object.assign(mine, patch); ui.set("log.dayDraft", { ...mine }); };
+  const sleep = stepper({
+    label: "Hours slept last night", value: mine.sleepHours ?? "", step: 0.5, min: 0, max: 16, dp: 1,
+    placeholder: "—", suffix: "h", id: "day-sleep", onChange: (v) => save({ sleepHours: v }),
+  });
+  const energy = chipGroup({
+    label: "Energy",
+    value: mine.energy,
+    options: [
+      { value: 1, label: "1", sub: "drained" },
+      { value: 2, label: "2" },
+      { value: 3, label: "3", sub: "normal" },
+      { value: 4, label: "4" },
+      { value: 5, label: "5", sub: "great" },
+    ],
+    onChange: (v) => save({ energy: v }),
+  });
+  const done = () => {
+    const h = sleep.input.value.trim() === "" ? null : sleep.getValue();
+    if (!(h >= 0) || h === null || !(mine.energy >= 1)) {
+      toast("Both, please — hours slept and how your energy is.");
+      return;
+    }
+    store.setDay(date, { sleepHours: h, energy: mine.energy });
+    ui.set("log.dayDraft", undefined);
+    tap();
+    ctx.refresh({ transition: true });
+  };
+  return el("div", { class: "card card-pad day-check" }, [
+    el("h2", { class: "section-title", text: isToday ? "Before your first set today" : `Before logging ${formatDate(date)}` }),
+    el("p", { class: "card-note", text: "Two answers, once a day. Over a few months this is what tells a bad session from a bad night." }),
+    el("div", { class: "lever-row lever-row-half" }, [sleep]),
+    el("div", { class: "field-block" }, [el("span", { class: "field-label", text: "Energy right now" }), energy]),
+    el("div", { class: "card-actions" }, [
+      el("button", { type: "button", class: "btn btn-primary", onclick: done }, ["Save"]),
+      isToday ? null : el("button", {
+        type: "button", class: "btn btn-ghost",
+        onclick: () => { store.setDay(date, { unknown: true }); ctx.refresh({ transition: true }); },
+      }, ["Can’t remember"]),
+    ]),
+  ]);
+}
+
 /** Set-by-set: one tap, one set, rest clock. */
 function logOneSet(st, ctx, settings) {
   // A bodyweight lift has nothing on the bar, so a weight of 0 is the right
@@ -1057,6 +1211,8 @@ function logOneSet(st, ctx, settings) {
     toast(repsOnly ? "Enter the reps first." : "Enter a weight and reps first.");
     return;
   }
+  if (!readyToLog()) return;
+  const plan = planForSet(st, settings);
 
   const bestBefore = st.entries.reduce(
     (m, e) =>
@@ -1075,10 +1231,16 @@ function logOneSet(st, ctx, settings) {
     reps: r,
     rir: form.rir,
     notes: form.notes,
+    plan,
   });
   setLastSetId(created?.id ?? null);
-  // A note belongs to the set it was written for, not to every set after it.
+  // A note belongs to the set it was written for, not to every set after it —
+  // and so does an RIR. The next set has to be answered for itself.
   form.notes = "";
+  form.rir = null;
+  // Keep the session's plan for the sets that follow: once a set is in, the
+  // app's own target moves, and the plan this session set out with must not.
+  form.plan = form.plan ?? (plan ? { ...plan, role: undefined } : null);
   // The top set is in: the rest of the session is the back-offs.
   if (form.backoff) {
     form.weight = form.backoff.weight;
@@ -1152,6 +1314,8 @@ function save(st, ctx) {
     );
     return;
   }
+  if (!readyToLog()) return;
+  const plan = planForSet(st, ctx.settings);
   const bestBefore = st.entries.reduce(
     (m, e) =>
       e.date !== form.date && Number.isFinite(e.adj) && e.adj > m ? e.adj : m,
@@ -1165,6 +1329,7 @@ function save(st, ctx) {
     sets: s,
     rir: form.rir,
     notes: form.notes,
+    plan,
   });
   const adj = adjE1rm(w, r, s, ctx.settings, st.exercise.kind);
   const beatBest = bestBefore > -Infinity && adj > bestBefore + 1e-9;
@@ -1193,10 +1358,11 @@ function save(st, ctx) {
   // Keep the lift selected but drop back to plan-based prefill for the next set
   // — or, straight after a top set, to the back-offs that follow it.
   const bo = form.backoff;
+  const kept = form.plan ?? (plan ? { ...plan, role: undefined } : null);
   setPrefill(bo
     ? { exerciseId: form.exerciseId, date: form.date, mode: form.mode,
-      weight: bo.weight, reps: bo.reps, sets: bo.sets }
-    : { exerciseId: form.exerciseId, date: form.date, mode: form.mode });
+      weight: bo.weight, reps: bo.reps, sets: bo.sets, plan: kept }
+    : { exerciseId: form.exerciseId, date: form.date, mode: form.mode, plan: kept });
   ctx.refresh();
   if (created)
     requestAnimationFrame(() =>
@@ -1249,6 +1415,8 @@ function history(ctx, settings) {
     const meta = [formatDate(date), `${totalSets} sets`];
     if (totalVol > 0) meta.push(`${fmt(totalVol, 0)} kg`);
     if (bodyReps > 0) meta.push(`${bodyReps} reps`);
+    const dayRec = store.getDay(date);
+    if (dayRec && !dayRec.unknown) meta.push(`${fmt(dayRec.sleepHours, 1)} h sleep · energy ${dayRec.energy}/5`);
     wrap.append(
       el("div", { class: "day" }, [
         el("div", { class: "day-head" }, [

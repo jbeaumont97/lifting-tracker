@@ -7,6 +7,7 @@ import { SEED } from './seed.js';
 import { isoToday, setKey, READINESS_DEFAULTS } from './metrics.js';
 import { sessionSets, typicalRest } from './insights.js';
 import { SITE_KEYS, MEASURE_DEFAULTS } from './measure.js';
+import { normaliseMuscles } from './muscles.js';
 
 const KEY = 'liftingTracker.v1';
 const THEME_KEY = 'liftingTracker.theme';
@@ -53,7 +54,7 @@ export const getVersion = () => version;
 /* ------------------------------------------------------------- lifecycle */
 
 function blank() {
-  return { schema: SCHEMA, exercises: [], entries: [], done: [], measurements: [], measureSnoozedUntil: null, settings: { ...DEFAULT_SETTINGS }, seq: 1 };
+  return { schema: SCHEMA, exercises: [], entries: [], done: [], days: [], measurements: [], measureSnoozedUntil: null, settings: { ...DEFAULT_SETTINGS }, seq: 1 };
 }
 
 /**
@@ -109,6 +110,9 @@ function normalise(raw) {
     notes: String(e.notes ?? ''),
     milestone: normaliseMilestone(e.milestone),
     tags: normaliseTags(e.tags),
+    // What it trains. A lift from before muscles existed gets a guess from its
+    // name, marked as one so Setup can say so.
+    muscles: normaliseMuscles(e.muscles, e.name),
   }));
   const known = new Set(d.exercises.map((e) => e.id));
   d.entries = (raw.entries || [])
@@ -124,6 +128,7 @@ function normalise(raw) {
       rir: e.rir === null || e.rir === undefined || e.rir === '' ? null : Number(e.rir),
       notes: String(e.notes ?? ''),
       seq: Number(e.seq) || i + 1,
+      plan: normalisePlan(e.plan),
     }))
     .map((e) => ({ ...e, log: normaliseLog(e.log, e) }));
   // A document written before lifts could be called done simply arrives with
@@ -131,6 +136,7 @@ function normalise(raw) {
   d.done = normaliseDone(raw.done, known);
   // Older documents simply have none; that is the truth about them too.
   d.measurements = normaliseMeasurements(raw.measurements);
+  d.days = normaliseDays(raw.days);
   d.measureSnoozedUntil = typeof raw.measureSnoozedUntil === 'string' ? raw.measureSnoozedUntil.slice(0, 10) : null;
   d.settings.measurePhotos = d.settings.measurePhotos !== false && d.settings.measurePhotos !== 'false';
   d.settings.measureEveryDays = Math.max(0, Math.round(num(d.settings.measureEveryDays, MEASURE_DEFAULTS.measureEveryDays)));
@@ -160,6 +166,61 @@ function normaliseMeasurements(raw) {
     row.photos = m.photos === true;
     row.notes = String(m.notes ?? '');
     if (any || row.photos) out.push(row);
+  }
+  return out;
+}
+
+/**
+ * What the app was prescribing when an entry was logged, so that later you can
+ * ask which kind of training a session was — not just what was lifted.
+ *
+ *   zone    'strength' | 'hypertrophy' | 'topset' — the pick that was followed
+ *   role    'top' | 'backoff' for the two halves of a topset session, else null
+ *   weight, reps, sets   the prescription
+ *   target  the adjusted-e1RM target it was solved against
+ *   band    the band key it was given (ideal, stretch, …)
+ *
+ * Null when nothing was planned — anything logged before this existed, or a
+ * lift with no history to plan from. Never back-filled: a guess at which pick
+ * an old session followed would poison exactly the analysis this is for.
+ */
+function normalisePlan(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const zone = ['strength', 'hypertrophy', 'topset'].includes(raw.zone) ? raw.zone : null;
+  const n = (v) => (Number.isFinite(Number(v)) && v !== null && v !== '' ? Number(v) : null);
+  return {
+    zone,
+    role: raw.role === 'top' || raw.role === 'backoff' ? raw.role : null,
+    weight: n(raw.weight),
+    reps: n(raw.reps),
+    sets: n(raw.sets),
+    target: n(raw.target),
+    band: raw.band ? String(raw.band) : null,
+  };
+}
+
+/**
+ * How the day started: hours slept and energy out of five, one record per
+ * date. `unknown` is an answer too — writing up an old session you cannot
+ * remember the night before is honest, and a made-up number is not.
+ */
+function normaliseDays(raw) {
+  const out = [];
+  const seen = new Set();
+  for (const d of Array.isArray(raw) ? raw : []) {
+    if (!d || !d.date) continue;
+    const date = String(d.date).slice(0, 10);
+    if (seen.has(date)) continue;
+    seen.add(date);
+    const sleep = Number(d.sleepHours);
+    const energy = Math.round(Number(d.energy));
+    const unknown = d.unknown === true;
+    out.push({
+      date,
+      sleepHours: !unknown && Number.isFinite(sleep) && sleep >= 0 && sleep <= 24 && d.sleepHours !== null ? sleep : null,
+      energy: !unknown && energy >= 1 && energy <= 5 ? energy : null,
+      unknown,
+    });
   }
   return out;
 }
@@ -416,6 +477,7 @@ export function addEntry(entry) {
       rir: entry.rir === '' || entry.rir === null || entry.rir === undefined ? null : Number(entry.rir),
       notes: String(entry.notes || ''),
       seq: d.seq++,
+      plan: normalisePlan(entry.plan),
     };
     // Writing up a session that is already over: the sets are real, the times
     // are not known, and guessing them would poison the rest-interval maths.
@@ -455,9 +517,10 @@ export function logSet(set) {
     const key = setKey(candidate);
     const match = d.entries.find((e) => e.exerciseId === set.exerciseId && e.date === date && setKey(e) === key);
     if (match) {
-      const prev = { id: match.id, sets: match.sets, rir: match.rir, notes: match.notes, logLen: match.log.length };
+      const prev = { id: match.id, sets: match.sets, rir: match.rir, notes: match.notes, plan: match.plan, logLen: match.log.length };
       match.sets += 1;
       match.log.push(setRecord({ rir: candidate.rir, note: candidate.notes }));
+      if (!match.plan && set.plan) match.plan = normalisePlan(set.plan);
       // The block keeps the hardest set's RIR — the one closest to failure is
       // what the number is for — and collects any notes rather than losing one.
       if (candidate.rir !== null) match.rir = match.rir === null ? candidate.rir : Math.min(match.rir, candidate.rir);
@@ -468,7 +531,7 @@ export function logSet(set) {
       record((u) => {
         const m = u.entries.find((e) => e.id === prev.id);
         if (m) {
-          m.sets = prev.sets; m.rir = prev.rir; m.notes = prev.notes;
+          m.sets = prev.sets; m.rir = prev.rir; m.notes = prev.notes; m.plan = prev.plan;
           m.log.length = prev.logLen;
         }
       });
@@ -476,6 +539,7 @@ export function logSet(set) {
     }
     created = {
       id: uid('en'), date, exerciseId: set.exerciseId, ...candidate, sets: 1, seq: d.seq++,
+      plan: normalisePlan(set.plan),
       log: [setRecord({ rir: candidate.rir, note: candidate.notes })],
     };
     d.entries.push(created);
@@ -601,6 +665,7 @@ export function addExercise(ex) {
       notes: String(ex.notes || ''),
       milestone: normaliseMilestone(ex.milestone),
       tags: normaliseTags(ex.tags),
+      muscles: normaliseMuscles(ex.muscles, ex.name),
     };
     d.exercises.push(created);
     const id = created.id;
@@ -623,6 +688,8 @@ export function updateExercise(id, patch) {
     if (patch.notes !== undefined) ex.notes = String(patch.notes);
     if (patch.milestone !== undefined) ex.milestone = normaliseMilestone(patch.milestone);
     if (patch.tags !== undefined) ex.tags = normaliseTags(patch.tags);
+    // Set by hand from here on, so it stops being described as a guess.
+    if (patch.muscles !== undefined) ex.muscles = { ...normaliseMuscles({ ...patch.muscles, guessed: false }, ex.name) };
   }, { undoable: true, label: 'exercise edited' });
 }
 
@@ -657,6 +724,37 @@ export function updateSettings(patch) {
     }
     record((u) => { Object.assign(u.settings, prev); });
   }, { undoable: true, label: 'settings changed' });
+}
+
+/* ------------------------------------------------------- daily check-in */
+
+export const getDays = () => load().days;
+export const getDay = (date) => load().days.find((x) => x.date === String(date).slice(0, 10)) || null;
+
+/** Record (or replace) how a day started. */
+export function setDay(date, { sleepHours = null, energy = null, unknown = false } = {}) {
+  const [row] = normaliseDays([{ date, sleepHours, energy, unknown }]);
+  if (!row) return null;
+  commit((d, record) => {
+    const i = d.days.findIndex((x) => x.date === row.date);
+    const prev = i >= 0 ? d.days[i] : null;
+    if (i >= 0) d.days[i] = row; else d.days.push(row);
+    record((u) => {
+      u.days = u.days.filter((x) => x.date !== row.date);
+      if (prev) u.days.push(prev);
+    });
+  }, { undoable: true, label: 'day check-in saved' });
+  return row;
+}
+
+/** Take a day's check-in back, so it can be answered again. */
+export function clearDay(date) {
+  commit((d, record) => {
+    const i = d.days.findIndex((x) => x.date === String(date).slice(0, 10));
+    if (i < 0) return;
+    const [gone] = d.days.splice(i, 1);
+    record((u) => { u.days.push(gone); });
+  }, { undoable: true, label: 'day check-in reopened' });
 }
 
 /* ------------------------------------------------------ body measurements */
@@ -749,10 +847,14 @@ export function importJSON(text, { merge = false } = {}) {
       d.done = incoming.done;
       d.measurements = incoming.measurements;
       d.measureSnoozedUntil = incoming.measureSnoozedUntil;
+      d.days = incoming.days;
       d.settings = incoming.settings;
       d.seq = incoming.seq;
       return;
     }
+    // A day already checked in keeps the answer given on this device.
+    const daysHad = new Set(d.days.map((x) => x.date));
+    for (const x of incoming.days) if (!daysHad.has(x.date)) d.days.push(x);
     // Merging: a check-in on a date already measured is the same check-in.
     const measured = new Set(d.measurements.map((m) => m.date));
     for (const m of incoming.measurements) {
@@ -810,11 +912,11 @@ export function setOnboarded(value = true) {
 
 /** Keep the standard lifts, drop the sample sessions — "this is my log now". */
 export function startFresh() {
-  commit((d) => { d.entries = []; d.done = []; d.onboarded = true; }, { undoable: true, coarse: true, label: 'started fresh' });
+  commit((d) => { d.entries = []; d.done = []; d.days = []; d.onboarded = true; }, { undoable: true, coarse: true, label: 'started fresh' });
 }
 
 export function clearAll() {
-  commit((d) => { d.entries = []; d.done = []; }, { undoable: true, coarse: true, label: 'log cleared' });
+  commit((d) => { d.entries = []; d.done = []; d.days = []; }, { undoable: true, coarse: true, label: 'log cleared' });
 }
 
 /* ----------------------------------------------------------------- theme */

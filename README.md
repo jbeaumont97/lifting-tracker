@@ -167,7 +167,25 @@ ideal band in **Setup** until green means what you want it to mean.
 **Log** — pick the date, tap a lift, and the form arrives pre-filled with the plan.
 Weight has its own row with big `−` / `+` keys that step by that lift's increment;
 hold one down to travel. A live readout shows what the session would score and
-which band it lands in. RIR is one tap.
+which band it lands in.
+
+Two answers are required, so the log is worth analysing later:
+
+- **Before the first set of a day**, a check-in asks for hours slept and energy
+  out of five. It folds to one line once answered (**Change** reopens it). For a
+  day other than today there is also **Can't remember**, which is recorded as
+  exactly that — an honest blank rather than a made-up number.
+- **Every set needs an RIR.** There is no "not noted" and no carry-over from the
+  last set: the button reads _Pick RIR for this set_ until you do. Tapping it
+  anyway says what is missing instead of logging.
+
+Each set also records **the plan it was logged against** — which pick (strength,
+size, or top set + back-offs, and for the last whether it was the top set or a
+back-off), the prescribed weight, reps and sets, the target and its band. "Log
+this" hands the card's plan over; logging without it records the card's current
+pick. Once a lift's first set of the day is in, the rest of its sets keep that
+session's plan, because the app's own target moves after every set. Nothing
+logged before this is back-filled.
 
 There are two ways to log, because there are two situations:
 
@@ -236,9 +254,28 @@ same thing. It is context only: the plan and the trend stay in reps.
 **Setup** — how much detail to show, the rest timer's target (0 turns it off), body measurement reminders, your
 lifts (tap one to edit), the maths dials, the fatigue/recovery/detraining model
 and its six coefficients, light/dark theme, and your backups. The welcome tour can
-lifts (tap one to edit), the maths dials, the fatigue/recovery/detraining model
-and its six coefficients, light/dark theme, and your backups. The welcome tour can
 be replayed from the bottom of the page.
+
+Each lift records **what it trains**: the muscles it mainly works and the ones
+it also works. Existing lifts start with a guess from their name (marked as one
+until you change it). Progress → Everything adds every lift up into **hard sets
+per muscle**, a week's average over the last four, against the usual 10–20 —
+counting a set in full for the muscles a lift mainly works and half for the
+rest. Every muscle has a row, including the ones nothing trains.
+
+**Export for analysis** (in Setup, beside the backup) saves one .zip of plain
+CSV tables, with a README inside describing every column:
+
+| File | One row per | Highlights |
+| --- | --- | --- |
+| `sets.csv` | physical set | time, RIR and where it came from, e1RM, hard-set credit, plan pick and role, bodyweight, sleep/energy |
+| `sessions.csv` | lift per day | best set, session score, PR, tonnage, hard sets, mean/min RIR, plan target and whether it was met |
+| `measurements.csv` | body check-in | every site, photos |
+| `days.csv` | day | sleep, energy, sets, hard sets, lifts trained |
+| `lifts.csv` | lift | setup and muscles |
+| `weekly-muscles.csv` | week × muscle | hard sets and working sets |
+
+The JSON backup still holds everything, and the original CSV export is unchanged.
 
 Each lift has a **starting weight** and a **weight step**, and together they
 describe the loads that actually exist for it. A 20 kg bar with 2.5 kg steps means

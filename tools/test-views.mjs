@@ -102,6 +102,22 @@ function reset() {
   bindings.resetBindings();
 }
 
+/**
+ * Answer the day's check-in, as the person would before their first set.
+ * Most tests are about something after that point; the gate itself has
+ * tests of its own (6s).
+ */
+function checkIn(date = TODAY) {
+  store.setDay(date, { sleepHours: 8, energy: 3 });
+  select.invalidate();
+}
+
+/** Tap an RIR chip in a rendered log form. */
+function pickRir(view, value = 2) {
+  view.querySelector(".rir-block").querySelectorAll(".chip")
+    .find((c) => c.textContent.trim() === String(value)).click();
+}
+
 /* ------------------------------------------------- 1. every view, both modes */
 
 for (const open of [false, true]) {
@@ -389,7 +405,8 @@ for (const open of [false, true]) {
   const ex = store.getExercises()[0];
   const before = store.getEntries().length;
 
-  setPrefill({ exerciseId: ex.id, date: TODAY, weight: 100, reps: 5, sets: 3 });
+  checkIn();
+  setPrefill({ exerciseId: ex.id, date: TODAY, weight: 100, reps: 5, sets: 3, rir: 2 });
   const log = renderLog(ctx({ route: "log" }));
   const save = log
     .querySelectorAll(".btn-primary")
@@ -538,7 +555,8 @@ for (const open of [false, true]) {
 {
   reset();
   const ex = store.getExercises()[0];
-  setPrefill({ exerciseId: ex.id, date: TODAY, weight: 100, reps: 5, sets: 3 });
+  checkIn();
+  setPrefill({ exerciseId: ex.id, date: TODAY, weight: 100, reps: 5, sets: 3, rir: 2 });
   const c = ctx({ route: "log" });
   const view = renderLog(c);
 
@@ -1449,10 +1467,21 @@ const insights = await import("../js/insights.js");
     view.querySelectorAll(".balance-row .status-chip").length ===
       view.querySelectorAll(".balance-row").length,
   );
+  // The per-lift balance used to have to say it could not see muscles. Now
+  // there is a per-muscle view, and every muscle is on it — including the ones
+  // nothing trains, because that is what "what is lacking" means.
   ok(
-    "and the screen says the balance is per lift, not per muscle",
-    /not per muscle/.test(view.textContent),
-    "the missing taxonomy has to be stated",
+    "the screen has hard sets per muscle",
+    /Hard sets per muscle/.test(view.textContent),
+  );
+  ok(
+    "with a row for every muscle, trained or not",
+    view.querySelectorAll(".muscle-bars .balance-row").length === 15,
+    String(view.querySelectorAll(".muscle-bars .balance-row").length),
+  );
+  ok(
+    "and an untrained muscle says so in words",
+    view.querySelectorAll(".muscle-bars .status-chip").some((c) => /None/.test(c.textContent)),
   );
 
   // The switch, and that it is remembered.
@@ -1602,6 +1631,7 @@ const motion2 = await import("../js/core/motion.js");
 {
   reset();
   const ex = store.getExercises()[0];
+  checkIn();
   setPrefill({
     exerciseId: ex.id,
     date: TODAY,
@@ -1609,6 +1639,7 @@ const motion2 = await import("../js/core/motion.js");
     reps: 5,
     sets: 3,
     mode: "sets",
+    rir: 2,
   });
   renderLog(ctx({ route: "log" }));
 
@@ -1839,7 +1870,8 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
   ok("picking a column changes the set count", refreshes > was);
 
   // --- logging ---
-  setPrefill({ exerciseId: ex.id, date: TODAY, mode: "sets" });
+  checkIn();
+  setPrefill({ exerciseId: ex.id, date: TODAY, mode: "sets", rir: 2 });
   const log = renderLog(ctx({ route: "log" }));
   ok("the log asks for no weight", !/Weight \(/.test(log.textContent));
   ok(
@@ -2852,8 +2884,9 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
 {
   reset();
   const ex = store.getExercises()[0];
+  checkIn();
   setPrefill({
-    exerciseId: ex.id, date: TODAY, weight: 100, reps: 5, sets: 4, mode: "sets",
+    exerciseId: ex.id, date: TODAY, weight: 100, reps: 5, sets: 4, mode: "sets", rir: 1,
     backoff: { weight: 80, reps: 8, sets: 3 },
   });
   const first = renderLog(ctx({ route: "log" }));
@@ -2861,6 +2894,8 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
   first.querySelector(".btn-save").click();
   select.invalidate();
   const second = renderLog(ctx({ route: "log" }));
+  pickRir(second, 2);
+  await settle();
   ok(
     "after the top set the form is on the back-offs",
     /Log set 2 of 4 — 8 @ 80 kg/.test(second.querySelector(".btn-save").textContent),
@@ -2875,8 +2910,9 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
 {
   reset();
   const ex = store.getExercises()[0];
+  checkIn();
   setPrefill({
-    exerciseId: ex.id, date: TODAY, weight: 100, reps: 5, sets: 4, mode: "bulk",
+    exerciseId: ex.id, date: TODAY, weight: 100, reps: 5, sets: 4, mode: "bulk", rir: 1,
     backoff: { weight: 80, reps: 8, sets: 3 },
   });
   const v = renderLog(ctx({ route: "log" }));
@@ -2884,6 +2920,8 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
   v.querySelector(".btn-save").click();
   select.invalidate();
   const next = renderLog(ctx({ route: "log" }));
+  pickRir(next, 2);
+  await settle();
   ok("then offers the back-offs as the next row", /Save 3 × 8 @ 80 kg/.test(next.querySelector(".btn-save").textContent), next.querySelector(".btn-save").textContent);
 }
 
@@ -2893,8 +2931,8 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
   reset();
   store.clearAll();
   const ex = store.addExercise({ name: "Pull-ups", kind: "bodyweight" });
-  select.invalidate();
-  setPrefill({ exerciseId: ex.id, date: TODAY, reps: 8, mode: "sets" });
+  checkIn();
+  setPrefill({ exerciseId: ex.id, date: TODAY, reps: 8, mode: "sets", rir: 1 });
   const view = renderLog(ctx({ route: "log" }));
   view.querySelector(".btn-save").click();
   select.invalidate();
@@ -2902,6 +2940,7 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
   ok("a bodyweight set logs from the set-by-set button", rows.length === 1 && rows[0].reps === 8, JSON.stringify(rows));
   ok("with nothing on the bar", rows.length === 1 && rows[0].weight === 0);
   const again = renderLog(ctx({ route: "log" }));
+  pickRir(again, 1);
   again.querySelector(".btn-save").click();
   ok("and a second set counts onto the same row", store.entriesOn(ex.id, TODAY)[0]?.sets === 2);
 }
@@ -3046,6 +3085,225 @@ const measure = await import("../js/measure.js");
   ok("a single reading explains itself instead of drawing", /line starts at your next check-in/.test(f.textContent));
   const two = charts.measureChart([{ date: "2026-08-01", value: 35 }, { date: "2026-08-05", value: 35.2 }], { label: "Arms", unit: "cm" });
   ok("two readings four days apart draw no trend", !two.querySelector(".trend"));
+}
+
+/* ---------------------------- 6s. the two answers every set needs */
+
+// --- no day check-in: nothing logs, and the form says why ---
+{
+  reset();
+  const ex = store.getExercises()[0];
+  setPrefill({ exerciseId: ex.id, date: TODAY, weight: 100, reps: 5, sets: 3, mode: "sets", rir: 2 });
+  const view = renderLog(ctx({ route: "log" }));
+  ok("the day check-in is asked for", /Before your first set today/.test(view.querySelector(".day-check")?.textContent || ""));
+  ok("today has no can't-remember way round it", !/Can’t remember/.test(view.querySelector(".day-check").textContent));
+  ok("the button says what is missing", /Check in for the day first/.test(view.querySelector(".btn-save").textContent));
+  const before = store.getEntries().length;
+  view.querySelector(".btn-save").click();
+  ok("and nothing is logged", store.getEntries().length === before);
+
+  // Half an answer is not an answer.
+  const energy = view.querySelector(".day-check").querySelectorAll(".chip").find((c) => /^4/.test(c.textContent.trim()));
+  energy.click();
+  view.querySelector(".day-check .btn-primary").click();
+  ok("energy alone does not count as a check-in", store.getDay(TODAY) === null);
+
+  const sleep = view.querySelector("#day-sleep");
+  sleep.value = "7.5";
+  sleep.dispatchEvent(new Event("change"));
+  view.querySelector(".day-check .btn-primary").click();
+  const day = store.getDay(TODAY);
+  ok("both answers record the day", day && day.sleepHours === 7.5 && day.energy === 4, JSON.stringify(day));
+
+  select.invalidate();
+  const after = renderLog(ctx({ route: "log" }));
+  ok("once answered it folds to a summary", /Slept 7\.5 h · energy 4\/5/.test(after.querySelector(".day-check").textContent));
+  after.querySelector(".btn-save").click();
+  ok("and sets log", store.entriesOn(ex.id, TODAY).length === 1);
+}
+
+// --- an older day can be honestly unremembered ---
+{
+  reset();
+  const ex = store.getExercises()[0];
+  setPrefill({ exerciseId: ex.id, date: "2026-08-10", weight: 100, reps: 5, sets: 3, mode: "bulk", rir: 2 });
+  const view = renderLog(ctx({ route: "log" }));
+  const cant = view.querySelector(".day-check").querySelectorAll("button").find((b) => /Can’t remember/.test(b.textContent));
+  ok("a past day offers can't remember", !!cant);
+  cant.click();
+  ok("which counts as an answer", store.getDay("2026-08-10")?.unknown === true);
+  select.invalidate();
+  renderLog(ctx({ route: "log" })).querySelector(".btn-save").click();
+  ok("so the old session can be written up", store.entriesOn(ex.id, "2026-08-10").length > 0);
+}
+
+// --- RIR: required, and asked afresh for every set ---
+{
+  reset();
+  checkIn();
+  const ex = store.getExercises()[0];
+  setPrefill({ exerciseId: ex.id, date: TODAY, weight: 100, reps: 5, sets: 3, mode: "sets" });
+  const view = renderLog(ctx({ route: "log" }));
+  ok("there is no 'not noted' option", !/not noted/.test(view.querySelector(".rir-block").textContent));
+  ok("the button asks for RIR", /Pick RIR/.test(view.querySelector(".btn-save").textContent));
+  view.querySelector(".btn-save").click();
+  ok("a set without RIR does not log", store.entriesOn(ex.id, TODAY).length === 0);
+  pickRir(view, 1);
+  view.querySelector(".btn-save").click();
+  const rows = store.entriesOn(ex.id, TODAY);
+  ok("with RIR it does, and keeps it", rows.length === 1 && rows[0].rir === 1);
+  select.invalidate();
+  const next = renderLog(ctx({ route: "log" }));
+  ok("the next set starts with no RIR picked", !next.querySelector(".rir-block .chip.is-selected"));
+  next.querySelector(".btn-save").click();
+  ok("so it cannot be logged on the last set's answer", store.entriesOn(ex.id, TODAY)[0].sets === 1);
+}
+
+/* --------------------------------- 6t. the plan is recorded with the set */
+
+{
+  reset();
+  checkIn();
+  const ex = store.getExercises()[0];
+  uistate.set("plan.openId", ex.id);
+  uistate.setForExercise("plan.overrides", ex.id, { zone: "topset", reps: 5, sets: 3 });
+  select.invalidate();
+  // "Log this" from the card, then two sets.
+  let handed = null;
+  const card = renderPlan(ctx({ route: "plan", goTo: (r, p) => { handed = p; } })).querySelector(".card.is-open");
+  card.querySelectorAll("button").find((b) => /Log this/.test(b.textContent)).click();
+  ok("the card hands its plan to the log", handed?.plan?.zone === "topset", JSON.stringify(handed?.plan));
+  setPrefill({ ...handed, date: TODAY, mode: "sets", rir: 1 });
+  renderLog(ctx({ route: "log" })).querySelector(".btn-save").click();
+  select.invalidate();
+  const v2 = renderLog(ctx({ route: "log" }));
+  pickRir(v2, 2);
+  v2.querySelector(".btn-save").click();
+  const rows = store.entriesOn(ex.id, TODAY);
+  const top = rows.find((r) => r.plan?.role === "top");
+  const back = rows.find((r) => r.plan?.role === "backoff");
+  ok("the top set records the topset plan", top && top.plan.zone === "topset" && top.plan.sets === 1, JSON.stringify(rows.map((r) => r.plan)));
+  ok("the back-off records its own prescription", back && back.plan.reps === 8 && back.plan.weight === handed.backoff.weight);
+  ok("against the same target", top && back && top.plan.target === back.plan.target);
+  ok("and the plan survives a reload", (() => { store.reload(); return store.entriesOn(ex.id, TODAY).every((e) => e.plan?.zone === "topset"); })());
+}
+
+// --- logged with no hand-off, the card's current pick is what is recorded ---
+{
+  reset();
+  checkIn();
+  const ex = store.getExercises()[0];
+  uistate.setForExercise("plan.overrides", ex.id, { zone: "hypertrophy", reps: 12, sets: 3 });
+  select.invalidate();
+  setPrefill({ exerciseId: ex.id, date: TODAY, weight: 60, reps: 12, sets: 3, mode: "bulk", rir: 2 });
+  renderLog(ctx({ route: "log" })).querySelector(".btn-save").click();
+  const e = store.entriesOn(ex.id, TODAY)[0];
+  ok("the size pick is recorded", e?.plan?.zone === "hypertrophy" && e.plan.reps === 12, JSON.stringify(e?.plan));
+}
+
+/* ----------------------------------------------------------- 6u. muscles */
+
+{
+  reset();
+  const lifts = store.getExercises();
+  const bench = lifts.find((x) => /Bench/.test(x.name));
+  ok("existing lifts get muscles guessed from their names", bench.muscles.primary.includes("chest") && bench.muscles.guessed === true);
+  store.updateExercise(bench.id, { muscles: { primary: ["chest", "triceps"], secondary: ["triceps", "front-delts"] } });
+  const b2 = store.getExercise(bench.id);
+  ok("a muscle can only be in one list", !b2.muscles.secondary.includes("triceps") && b2.muscles.primary.includes("triceps"));
+  ok("and once edited it is no longer a guess", b2.muscles.guessed === false);
+
+  const muscles = await import("../js/muscles.js");
+  ok("curls are biceps", muscles.guessMuscles("Bicep curl").primary[0] === "biceps");
+  ok("leg curls are hamstrings", muscles.guessMuscles("Leg curl").primary[0] === "hamstrings");
+  ok("an unknown name is left unset, not guessed wrong", muscles.guessMuscles("Zercher thing").primary.length === 0);
+
+  // A set counts in full for primary muscles and half for secondary.
+  store.clearAll();
+  checkIn();
+  const ex = store.addExercise({ name: "Bench Press", muscles: { primary: ["chest"], secondary: ["triceps"] } });
+  store.addEntry({ exerciseId: ex.id, date: TODAY, weight: 60, reps: 10, sets: 4 });
+  select.invalidate();
+  const rows = muscles.muscleVolume(select.allStats(store.getSettings(), TODAY), { weeks: 1, todayIso: TODAY });
+  const chest = rows.find((r) => r.key === "chest"), tri = rows.find((r) => r.key === "triceps");
+  ok("four hard sets of bench are four for chest", chest.perWeek === 4, String(chest.perWeek));
+  ok("and two for triceps", tri.perWeek === 2, String(tri.perWeek));
+  ok("an untrained muscle is there at zero", rows.find((r) => r.key === "calves").perWeek === 0);
+
+  // The editor in Setup.
+  const { renderSetup } = await import("../js/views/setup.js");
+  uistate.set("setup.openExerciseId", ex.id);
+  const sv = renderSetup(ctx({ route: "setup" }));
+  const editor = sv.querySelector(".muscle-editor");
+  ok("Setup shows what each lift works", !!editor && /Mainly works/.test(editor.textContent));
+  editor.querySelectorAll(".chip").filter((c) => /Front delts/.test(c.textContent))[0].click();
+  ok("and ticking a muscle saves it", store.getExercise(ex.id).muscles.primary.includes("front-delts"), JSON.stringify(store.getExercise(ex.id).muscles));
+}
+
+// --- backups carry all of it ---
+{
+  reset();
+  checkIn();
+  const ex = store.getExercises()[0];
+  store.logSet({ exerciseId: ex.id, date: TODAY, weight: 100, reps: 5, rir: 1, plan: { zone: "strength", weight: 100, reps: 5, sets: 3, target: 120, band: "ideal" } });
+  const back = JSON.parse(store.exportJSON());
+  ok("the backup has the day", back.days.length === 1);
+  ok("and the plan", back.entries.find((e) => e.plan)?.plan.zone === "strength");
+  ok("and the muscles", back.exercises.every((e) => e.muscles && Array.isArray(e.muscles.primary)));
+  store.clearAll();
+  ok("clearing the log clears its days", store.getDays().length === 0);
+  store.importJSON(JSON.stringify(back));
+  ok("and a restore brings them back", store.getDays().length === 1 && store.getEntries().some((e) => e.plan?.zone === "strength"));
+}
+
+/* -------------------------------------------------- 6v. export for analysis */
+
+{
+  reset();
+  checkIn();
+  const ex = store.getExercises().find((x) => /Bench/.test(x.name));
+  store.logSet({ exerciseId: ex.id, date: TODAY, weight: 82.5, reps: 5, rir: 1, plan: { zone: "topset", role: "top", weight: 82.5, reps: 5, sets: 1, target: 95 } });
+  store.logSet({ exerciseId: ex.id, date: TODAY, weight: 65, reps: 8, rir: 2, plan: { zone: "topset", role: "backoff", weight: 65, reps: 8, sets: 3, target: 95 } });
+  store.logSet({ exerciseId: ex.id, date: TODAY, weight: 65, reps: 8, rir: 1, plan: { zone: "topset", role: "backoff", weight: 65, reps: 8, sets: 3, target: 95 } });
+  store.addMeasurement({ date: TODAY, bodyweight: 85, arms: 36 });
+  select.invalidate();
+  const exp = await import("../js/export.js");
+  const t = exp.buildTables(store.getDoc(), select.allStats(store.getSettings(), TODAY));
+  ok("every table is there", ["sets.csv", "sessions.csv", "measurements.csv", "days.csv", "lifts.csv", "weekly-muscles.csv", "README.txt"].every((k) => typeof t[k] === "string"));
+  const parse = (txt) => txt.trim().split("\r\n").map((l) => l.split(","));
+  const sets = parse(t["sets.csv"]);
+  const H = sets[0];
+  const col = (row, name) => row[H.indexOf(name)];
+  const today = sets.slice(1).filter((r) => col(r, "date") === TODAY && col(r, "lift") === "Bench Press");
+  ok("one row per physical set, unrolled from blocks", today.length === 3, String(today.length));
+  ok("each set keeps its own RIR", today.map((r) => col(r, "rir")).join() === "1,2,1", today.map((r) => col(r, "rir")).join());
+  ok("and says it was recorded per set", today.every((r) => col(r, "rir_source") === "set"));
+  ok("the plan role rides on every set", today.map((r) => col(r, "plan_role")).join() === "top,backoff,backoff");
+  ok("with the day's sleep and energy", today.every((r) => col(r, "sleep_hours") === "8" && col(r, "energy") === "3"));
+  ok("and a hard-set credit", col(today[0], "hard_set_credit") === "0.667" && col(today[1], "hard_set_credit") === "1");
+  const old = sets.slice(1).find((r) => col(r, "date") === "2026-08-13");
+  ok("older sets say their RIR was a block's", old && col(old, "rir_source") === "block");
+  ok("and leave the plan empty rather than guessing", old && col(old, "plan_zone") === "");
+
+  const sess = parse(t["sessions.csv"]);
+  const SH = sess[0];
+  const benchToday = sess.find((r) => r[0] === TODAY && r[1] === "Bench Press");
+  ok("sessions say whether the target was met", benchToday && benchToday[SH.indexOf("met_target")] === "yes");
+  ok("and carry the plan zone", benchToday && benchToday[SH.indexOf("plan_zone")] === "topset");
+
+  ok("measurements have a column per site", /^date,bodyweight_kg,shoulders_cm,chest_cm,arms_cm/.test(t["measurements.csv"]));
+  const wk = parse(t["weekly-muscles.csv"]);
+  ok("weekly muscles is long-format with every muscle", wk[0].join() === "week_start,muscle,hard_sets,working_sets" && (wk.length - 1) % 15 === 0);
+  ok("weeks start on a Monday", exp.weekStart("2026-08-13") === "2026-08-10" && exp.weekStart("2026-08-10") === "2026-08-10" && exp.weekStart("2026-08-16") === "2026-08-10");
+  const quoted = exp.buildTables({ ...store.getDoc(), measurements: [{ date: TODAY, arms: 36, notes: "a, b" }] }, []);
+  ok("a note with a comma is quoted", /"a, b"/.test(quoted["measurements.csv"]));
+
+  // The zip itself: signatures in the right places, and the CRC a reader checks.
+  const zip = exp.makeZip({ "a.txt": "hello" }, new Date(2026, 7, 18, 9, 30));
+  const dv = new DataView(zip.buffer);
+  ok("the zip starts with a local header", dv.getUint32(0, true) === 0x04034b50);
+  ok("and ends with the end-of-directory record", dv.getUint32(zip.length - 22, true) === 0x06054b50);
+  ok("with the right CRC-32", dv.getUint32(14, true) === 0x3610a686, dv.getUint32(14, true).toString(16));
 }
 
 // --- nothing anywhere prints a stray "null" ---
