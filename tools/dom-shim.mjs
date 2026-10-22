@@ -181,6 +181,7 @@ class Element_ extends Node_ {
   get clientHeight() { return 220; }
   get offsetHeight() { return 44; }
   getBoundingClientRect() { return { left: 0, top: 0, width: 360, height: 220, right: 360, bottom: 220 }; }
+  scrollIntoView() { /* no layout to scroll */ }
 }
 
 /**
@@ -294,7 +295,8 @@ export function installDom({ reducedMotion = false } = {}) {
   // Only what the shim can actually honour: `'serviceWorker' in navigator` and
   // `navigator.share` are both feature-detected by the app, and declaring the
   // keys as undefined would make those checks lie.
-  globalThis.navigator = win.navigator;
+  // Node 21+ ships a read-only global navigator, so plain assignment throws.
+  Object.defineProperty(globalThis, 'navigator', { value: win.navigator, configurable: true, writable: true });
   globalThis.localStorage = new MemoryStorage();
   globalThis.sessionStorage = new MemoryStorage();
   globalThis.requestAnimationFrame = win.requestAnimationFrame;
