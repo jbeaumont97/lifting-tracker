@@ -1632,3 +1632,14 @@ h1 .accent-dot { width: 11px; height: 11px; margin-right: 9px; vertical-align: m
 .bw-note-sub { font-size: var(--text-xs); color: var(--muted); }
 .bw-note.is-missing { font-size: var(--text-xs); color: var(--muted); }
 .bw-tag { grid-column: 1 / -1; font-size: var(--text-2xs); color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* Body charts: where you started is the line that matters. */
+.chart-svg .ref-start { stroke: var(--axis); stroke-width: 1; stroke-dasharray: 3 3; }
+.key-mark.key-start { background: repeating-linear-gradient(90deg, var(--axis) 0 3px, transparent 3px 6px); }
+.chart-compare .series-line { stroke: var(--series); }
+.chart-compare .series-dot { fill: var(--series); }
+.chart-compare .series-label { fill: var(--series); font: var(--fw-semi) var(--text-3xs) var(--font); font-variant-numeric: tabular-nums; }
+.measure-chart-card { margin-bottom: var(--space-4); }
+.measure-chart-card .chips { margin-bottom: var(--space-1); }
+.measure-tiles .stat.is-pickable { cursor: pointer; }
+.measure-tiles .stat.is-picked { border-color: var(--series-1); box-shadow: 0 0 0 1px var(--series-1) inset; }
