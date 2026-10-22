@@ -489,10 +489,15 @@ function card(stats, ctx, settings) {
   const actions = el('div', { class: 'card-actions' }, [
     el('button', {
       type: 'button', class: 'btn btn-primary',
+      // The plan travels with the hand-off and is recorded on every set it
+      // produces, so the log knows which pick each session followed.
       onclick: () => ctx.goTo('log', ts
         ? { exerciseId: id, weight: ts.top.weight, reps: ts.top.reps, sets: ts.totalSets,
-          backoff: { weight: ts.backoff.weight, reps: ts.backoff.reps, sets: ts.backoff.sets } }
-        : { exerciseId: id, weight: plan.weight, reps: plan.reps, sets: plan.sets }),
+          backoff: { weight: ts.backoff.weight, reps: ts.backoff.reps, sets: ts.backoff.sets },
+          plan: { zone: 'topset', weight: ts.top.weight, reps: ts.top.reps, sets: 1, target: plan.target, band: plan.band?.key,
+            backoff: { weight: ts.backoff.weight, reps: ts.backoff.reps, sets: ts.backoff.sets } } }
+        : { exerciseId: id, weight: plan.weight, reps: plan.reps, sets: plan.sets,
+          plan: { zone: plan.zone, weight: repsOnly ? null : plan.weight, reps: plan.reps, sets: plan.sets, target: plan.target, band: plan.band?.key } }),
     }, ['Log this']),
     el('button', {
       type: 'button', class: 'btn btn-ghost',

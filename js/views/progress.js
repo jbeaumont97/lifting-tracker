@@ -32,7 +32,9 @@ import {
   tonnageChart,
   consistencyGrid,
   balanceBars,
+  muscleBars,
 } from "../charts.js";
+import { muscleVolume, WEEKLY_RANGE } from "../muscles.js";
 import {
   fmt,
   fmtWeight,
@@ -333,6 +335,14 @@ function bodyView(ctx) {
     );
   }
 
+  /* ---- per muscle: what is getting enough, and what is not ---- */
+  root.append(
+    el("div", { class: "chart-card" }, [
+      el("h2", { class: "section-title", text: "Hard sets per muscle" }),
+      muscleBars(muscleVolume(stats, { weeks: 4, ...opts }), { ...WEEKLY_RANGE, weeks: 4 }),
+    ]),
+  );
+
   /* ---- where it went ---- */
   const bars = balanceBars(balance(stats, { weeks: 4, ...opts }), { weeks: 4 });
   if (bars) {
@@ -402,7 +412,7 @@ function bodyView(ctx) {
         text: "Turning up is a plain count of working sets per day. There is no streak here and nothing to break: a rest day is drawn as a rest day, because rest is part of training rather than a failure to train.",
       }),
       el("p", {
-        text: "Where the work went is per lift, and only per lift. Balancing push against pull, or upper against lower, would need to know which muscles each lift trains, and the app does not \u2014 so it does not pretend to.",
+        text: "Hard sets per muscle adds every lift up by what it trains: a set counts in full for the muscles a lift mainly works and half for the ones it also works. That mapping is yours to correct in Setup \u2014 it starts as a guess from each lift's name. Where the work went is the same log per lift instead.",
       }),
     ]),
   );

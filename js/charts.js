@@ -921,7 +921,7 @@ export function balanceBars(rows, { weeks = 4 } = {}) {
   }
   return el('div', { class: 'balance-wrap' }, [
     list,
-    el('p', { class: 'chart-cap', text: `Working sets over the last ${weeks} weeks against what each lift asks for. Per lift, not per muscle — the app does not know which muscles a lift trains.` }),
+    el('p', { class: 'chart-cap', text: `Working sets over the last ${weeks} weeks against what each lift asks for. Per lift — the per-muscle picture is under Hard sets per muscle.` }),
   ]);
 }
 
@@ -1181,4 +1181,37 @@ function isoFromDay(points, day) {
 function fmtSignedLocal(v, dp = 1) {
   const r = Number(v.toFixed(dp));
   return `${r > 0 ? '+' : r < 0 ? '−' : ''}${Math.abs(r).toFixed(dp)}`;
+}
+
+/* ======================================================== per muscle */
+
+/**
+ * Hard sets per muscle per week against the usual 10–20, one row per muscle
+ * including the ones nothing trains: a zero is the most useful row on it.
+ * The shaded stretch of each track is the range; the fill is where you are.
+ */
+export function muscleBars(rows, { low = 10, high = 20, weeks = 4 } = {}) {
+  const max = Math.max(high * 1.25, ...rows.map((r) => r.perWeek));
+  const pct = (v) => `${Math.min(100, (v / max) * 100)}%`;
+  const list = el('ul', { class: 'balance muscle-bars' });
+  for (const r of rows) {
+    const glyph = r.status === 'under' ? '↓' : r.status === 'over' ? '↑' : '✓';
+    const word = r.status === 'under' ? (r.perWeek < 0.05 ? 'None' : 'Under') : r.status === 'over' ? 'Over' : 'In range';
+    list.append(el('li', { class: 'balance-row', title: r.lifts.length ? `From ${r.lifts.join(', ')}` : 'No lift trains this' }, [
+      el('span', { class: 'balance-name' }, [el('span', { text: r.label })]),
+      el('div', { class: 'balance-track' }, [
+        el('i', { class: 'muscle-range', style: `left:${pct(low)};width:calc(${pct(high)} - ${pct(low)})`, 'aria-hidden': 'true' }),
+        el('span', { class: `balance-fill is-${r.status.replace(' ', '-')}`, style: `width:${pct(r.perWeek)}` }),
+      ]),
+      el('span', { class: 'balance-count', text: fmt(r.perWeek, 1) }),
+      el('span', { class: `status-chip is-${r.status.replace(' ', '-')}` }, [
+        el('span', { class: 'status-glyph', 'aria-hidden': 'true', text: glyph }),
+        el('span', { text: word }),
+      ]),
+    ]));
+  }
+  return el('div', { class: 'balance-wrap' }, [
+    list,
+    el('p', { class: 'chart-cap', text: `Hard sets a week, averaged over the last ${weeks} weeks. The shaded stretch is the usual ${low}–${high}. A set counts in full for the muscles a lift mainly works and half for the ones it also works — set those per lift in Setup.` }),
+  ]);
 }

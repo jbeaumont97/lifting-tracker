@@ -1643,3 +1643,27 @@ h1 .accent-dot { width: 11px; height: 11px; margin-right: 9px; vertical-align: m
 .measure-chart-card .chips { margin-bottom: var(--space-1); }
 .measure-tiles .stat.is-pickable { cursor: pointer; }
 .measure-tiles .stat.is-picked { border-color: var(--series-1); box-shadow: 0 0 0 1px var(--series-1) inset; }
+
+/* Hard sets per muscle: the usual range drawn into each track. */
+.muscle-range {
+  position: absolute; top: 0; bottom: 0; border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--good) 22%, transparent);
+}
+.muscle-bars .balance-fill { position: relative; }
+.muscle-chips .chip { min-height: 36px; }
+.muscle-editor .field-label + .chips { margin-bottom: var(--space-2); }
+
+/* The two answers a set needs: highlighted when missing, never greyed out. */
+.btn-save.is-blocked { background: var(--surface-2); color: var(--text-secondary); border-color: var(--border-strong); }
+.needs-answer { outline: 2px solid var(--warning); outline-offset: 4px; border-radius: var(--radius-sm); }
+.rir-hint { margin-top: var(--space-1); }
+.day-check { margin-bottom: var(--space-4); display: flex; flex-direction: column; gap: var(--space-3); }
+.day-check.is-done {
+  flex-direction: row; align-items: center; gap: var(--space-3); flex-wrap: wrap;
+  background: var(--surface-2); border-radius: var(--radius-sm); padding: var(--space-3) var(--space-4);
+  font-size: var(--text-sm); color: var(--text-secondary);
+}
+.day-check.is-done .link-btn { margin-left: auto; }
+/* Fixed trailing columns so every track starts and ends in the same place. */
+.muscle-bars .balance-row { grid-template-columns: minmax(78px, 1fr) 2fr 30px 92px; }
+.muscle-bars .status-chip { justify-content: center; }
