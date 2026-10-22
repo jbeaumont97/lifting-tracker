@@ -3004,6 +3004,50 @@ const measure = await import("../js/measure.js");
   ok("and come back out of it", store.getMeasurements().length === 2);
 }
 
+// --- the body charts ---
+{
+  reset();
+  const { renderProgress: rp, openMeasurements } = await import("../js/views/progress.js");
+  store.addMeasurement({ date: "2026-07-01", arms: 35, chest: 100, calves: 37, waist: 80 });
+  store.addMeasurement({ date: "2026-07-20", arms: 35.5, chest: 100.5, calves: 37, waist: 80.5 });
+  store.addMeasurement({ date: "2026-08-10", arms: 36.5, chest: 102, calves: 37.5, waist: 80.5 });
+  openMeasurements();
+  uistate.set("measure.formOpen", false);
+  select.invalidate();
+  const v = rp(ctx({ route: "progress" }));
+  await settle();
+  const card = v.querySelector(".measure-chart-card");
+  ok("the Body view has a chart", !!card?.querySelector("svg"));
+  ok("it opens on every trained site together", /Growth, all together/.test(card.textContent));
+  const labels = card.querySelectorAll(".series-label").map((n) => n.textContent);
+  ok("one labelled line per trained site", labels.length === 3, labels.join(" | "));
+  ok("each labelled with its percent change", labels.some((l) => /^Arms \+4\.3%$/.test(l)), labels.join(" | "));
+  ok("the waist is not drawn as growth", !labels.some((l) => /Waist/.test(l)));
+
+  // Tapping a tile charts that site on its own.
+  v.querySelectorAll(".measure-tiles .stat").find((t) => /Arms/.test(t.textContent)).click();
+  ok("tapping a tile picks its chart", uistate.get("measure.chart") === "arms");
+  select.invalidate();
+  const one = rp(ctx({ route: "progress" }));
+  await settle();
+  const c1 = one.querySelector(".measure-chart-card");
+  ok("the single-site chart is titled for it", /Arms/.test(c1.querySelector(".section-title").textContent));
+  ok("it marks where you started", !!c1.querySelector(".ref-start"));
+  ok("it draws every check-in", c1.querySelectorAll(".dot").length === 3);
+  ok("and a trend once there are three over a fortnight", !!c1.querySelector(".trend") && /a month/.test(c1.textContent));
+  ok("the picked tile shows it is picked", !!one.querySelector(".measure-tiles .is-picked"));
+  uistate.set("progress.view", "lifts");
+}
+
+// --- one reading is not a line ---
+{
+  const charts = await import("../js/charts.js");
+  const f = charts.measureChart([{ date: "2026-08-01", value: 35 }], { label: "Arms", unit: "cm" });
+  ok("a single reading explains itself instead of drawing", /line starts at your next check-in/.test(f.textContent));
+  const two = charts.measureChart([{ date: "2026-08-01", value: 35 }, { date: "2026-08-05", value: 35.2 }], { label: "Arms", unit: "cm" });
+  ok("two readings four days apart draw no trend", !two.querySelector(".trend"));
+}
+
 // --- nothing anywhere prints a stray "null" ---
 // append(null) writes the text "null" in a real browser; every optional piece
 // of a view has to be skipped, not appended.

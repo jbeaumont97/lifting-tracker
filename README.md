@@ -218,8 +218,12 @@ the last 8 weeks, and every session as a table.
 and size only shows up on a tape. Each check-in takes bodyweight, shoulders,
 chest, arms, waist, thighs and calves (skip any you like), starts from last
 time's numbers, and can note that you took progress photos — the photos stay in
-your camera roll. Tiles show each site's change since your first check-in, with
-a sparkline, and a note appears if your waist has grown faster than every site
+your camera roll. The chart opens on **Growth, all together**: every site you
+are training as percent change since its own first reading, so a centimetre of
+calf and a centimetre of chest are compared fairly. Pick a site (or tap its
+tile) for that site in its own units, with the line you started from, a trend
+in cm a month once there are three check-ins across a fortnight, and drag to
+read any check-in. Tiles show each site's change since your first check-in, and a note appears if your waist has grown faster than every site
 you are training for over four weeks or more. When a check-in is due (every two
 weeks by default; Setup changes it or turns it off) the Next screen asks for
 one, and **Not today** holds it off for two days.
