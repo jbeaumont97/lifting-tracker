@@ -931,3 +931,254 @@ function accentDotFor(id) {
   for (const ch of String(id)) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
   return el('span', { class: `accent-dot accent-${h % 8}`, 'aria-hidden': 'true' });
 }
+
+/* ======================================================= body measurements */
+
+/** Least-squares slope and intercept of value on day; null if undefined. */
+function fitLine(pts) {
+  const n = pts.length;
+  if (n < 2) return null;
+  let sx = 0, sy = 0, sxy = 0, sxx = 0;
+  for (const p of pts) { sx += p.day; sy += p.value; sxy += p.day * p.value; sxx += p.day * p.day; }
+  const d = n * sxx - sx * sx;
+  if (Math.abs(d) < 1e-12) return null;
+  const slope = (n * sxy - sx * sy) / d;
+  return { slope, intercept: (sy - slope * sx) / n };
+}
+
+/** The scrub layer shared by the body charts: crosshair, dot, tip. */
+function scrubLayer(svg, { pad, plotW, plotH, w, points, x, y, describe }) {
+  const hover = svgEl('g', { class: 'hover-layer', visibility: 'hidden' });
+  const crosshair = svgEl('line', { y1: pad.t, y2: pad.t + plotH, class: 'crosshair' });
+  const focusDot = svgEl('circle', { r: 6, class: 'focus-dot' });
+  hover.append(crosshair, focusDot);
+  svg.append(hover);
+  const tip = el('div', { class: 'chart-tip', hidden: true, 'aria-hidden': 'true' });
+  const capture = svgEl('rect', {
+    x: pad.l, y: pad.t, width: plotW, height: plotH, fill: 'transparent',
+    class: 'capture', tabindex: '0', role: 'application',
+    'aria-label': 'Check-in details — drag or use arrow keys',
+  });
+  svg.append(capture);
+  let idx = points.length - 1;
+  const showAt = (i) => {
+    idx = Math.max(0, Math.min(points.length - 1, i));
+    const p = points[idx];
+    const px = x(p.day), py = y(p.plot ?? p.value);
+    crosshair.setAttribute('x1', px); crosshair.setAttribute('x2', px);
+    focusDot.setAttribute('cx', px); focusDot.setAttribute('cy', py);
+    hover.setAttribute('visibility', 'visible');
+    tip.replaceChildren(...describe(p, idx));
+    tip.hidden = false;
+    tip.style.left = `${(Math.max(4, Math.min(w - 136, px - 68)) / w) * 100}%`;
+    tip.style.top = `${Math.max(0, py - 74)}px`;
+  };
+  const hide = () => { hover.setAttribute('visibility', 'hidden'); tip.hidden = true; };
+  const nearest = (clientX) => {
+    const box = svg.getBoundingClientRect();
+    const px = ((clientX - box.left) / box.width) * w;
+    let best = 0, bestD = Infinity;
+    for (const [i, p] of points.entries()) {
+      const d = Math.abs(x(p.day) - px);
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    return best;
+  };
+  capture.addEventListener('pointerdown', (e) => { capture.setPointerCapture?.(e.pointerId); showAt(nearest(e.clientX)); });
+  capture.addEventListener('pointermove', (e) => { if (e.buttons || e.pointerType === 'touch') showAt(nearest(e.clientX)); });
+  capture.addEventListener('pointerup', hide);
+  capture.addEventListener('pointercancel', hide);
+  capture.addEventListener('pointerleave', hide);
+  capture.addEventListener('focus', () => showAt(idx));
+  capture.addEventListener('blur', hide);
+  capture.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowLeft') { showAt(idx - 1); e.preventDefault(); }
+    if (e.key === 'ArrowRight') { showAt(idx + 1); e.preventDefault(); }
+    if (e.key === 'Escape') hide();
+  });
+  return tip;
+}
+
+/**
+ * One body site over time: every check-in, where you started, and the trend.
+ *
+ * The start line is the point of the chart. Strength charts climb by kilos a
+ * week; a tape measure moves by millimetres, and the only way to see that it
+ * is moving at all is against where it began. The trend needs three check-ins
+ * across a fortnight before it is drawn — two readings of a tape are noise.
+ *
+ * `points` is [{ date, value }], oldest first. `site` is a SITES entry.
+ */
+export function measureChart(points, site, { width = 340, height = 200, animate = true } = {}) {
+  const fig = el('figure', { class: `chart${animate ? '' : ' no-anim'}` });
+  if (points.length < 2) {
+    fig.append(el('p', { class: 'chart-empty', text: points.length
+      ? `One ${site.label.toLowerCase()} reading so far (${fmt(points[0].value, 1)} ${site.unit}). The line starts at your next check-in.`
+      : `No ${site.label.toLowerCase()} readings yet.` }));
+    return fig;
+  }
+  const pts = points.map((p) => ({ ...p, day: dayNumber(p.date) }));
+  const start = pts[0].value;
+  const last = pts[pts.length - 1];
+  const span = last.day - pts[0].day;
+  const fit = pts.length >= 3 && span >= 14 ? fitLine(pts) : null;
+
+  const pad = { t: 20, r: 40, b: 26, l: 38 };
+  const w = Math.max(260, width);
+  const plotW = w - pad.l - pad.r;
+  const plotH = height - pad.t - pad.b;
+  const vals = pts.map((p) => p.value);
+  // Never less than a centimetre (or a kilo) of axis: a few millimetres of tape
+  // drawn full height would look like a growth spurt.
+  const lo0 = Math.min(...vals), hi0 = Math.max(...vals);
+  const mid = (lo0 + hi0) / 2;
+  const half = Math.max((hi0 - lo0) / 2 * 1.25, site.unit === 'kg' ? 1 : 0.75);
+  const { ticks, lo, hi, step } = niceTicks(mid - half, mid + half, 4);
+  const tickDp = step >= 1 ? 0 : 1;
+  const xMin = pts[0].day, xSpan = Math.max(1, span);
+  const x = (day) => pad.l + ((day - xMin) / xSpan) * plotW;
+  const y = (v) => pad.t + plotH - ((v - lo) / (hi - lo || 1)) * plotH;
+
+  const svg = svgEl('svg', {
+    viewBox: `0 0 ${w} ${height}`, width: '100%', height,
+    role: 'img', 'aria-label': `${site.label} over time, ${site.unit}`,
+    class: 'chart-svg', preserveAspectRatio: 'xMidYMid meet',
+  });
+  for (const t of ticks) {
+    if (t < lo - 1e-9 || t > hi + 1e-9) continue;
+    svg.append(svgEl('line', { x1: pad.l, x2: pad.l + plotW, y1: y(t), y2: y(t), class: 'grid' }));
+    svg.append(text(fmt(t, tickDp), { x: pad.l - 6, y: y(t) + 3.5, class: 'tick', 'text-anchor': 'end' }));
+  }
+  svg.append(svgEl('line', { x1: pad.l, x2: pad.l + plotW, y1: pad.t + plotH, y2: pad.t + plotH, class: 'axis' }));
+  svg.append(text(formatDateShort(pts[0].date), { x: x(pts[0].day), y: height - 8, class: 'tick', 'text-anchor': 'start' }));
+  svg.append(text(formatDateShort(last.date), { x: x(last.day), y: height - 8, class: 'tick', 'text-anchor': 'end' }));
+
+  // Where you started, the line everything is measured against.
+  svg.append(svgEl('line', { x1: pad.l, x2: pad.l + plotW, y1: y(start), y2: y(start), class: 'ref-start' }));
+  svg.append(text('start', { x: pad.l + plotW + 4, y: y(start) + 3.5, class: 'tick' }));
+
+  if (fit) {
+    const at = (d) => fit.intercept + fit.slope * d;
+    svg.append(svgEl('line', { x1: x(pts[0].day), y1: y(at(pts[0].day)), x2: x(last.day), y2: y(at(last.day)), class: 'trend' }));
+  }
+
+  const coords = pts.map((p) => [x(p.day), y(p.value)]);
+  const linePath = coords.map(([px, py], i) => `${i ? 'L' : 'M'}${px.toFixed(1)} ${py.toFixed(1)}`).join(' ');
+  svg.append(svgEl('path', {
+    d: `${linePath} L${coords[coords.length - 1][0].toFixed(1)} ${pad.t + plotH} L${coords[0][0].toFixed(1)} ${pad.t + plotH} Z`,
+    class: 'area',
+  }));
+  svg.append(svgEl('path', { d: linePath, class: 'line', fill: 'none', pathLength: 1 }));
+  const stagger = Math.min(40, 420 / pts.length);
+  for (const [i, p] of pts.entries()) {
+    const isLast = i === pts.length - 1;
+    svg.append(svgEl('circle', {
+      cx: x(p.day), cy: y(p.value), r: isLast ? 5 : 3.6,
+      class: isLast ? 'dot dot-last' : 'dot', style: `animation-delay:${Math.round(220 + i * stagger)}ms`,
+    }));
+  }
+  const lp = coords[coords.length - 1];
+  svg.append(text(fmt(last.value, 1), {
+    x: lp[0], y: Math.max(pad.t + 8, lp[1] - 13), class: 'label-last', 'text-anchor': 'end',
+  }));
+
+  const tip = scrubLayer(svg, {
+    pad, plotW, plotH, w, points: pts, x, y,
+    describe: (p, i) => [
+      el('strong', { text: `${fmt(p.value, 1)} ${site.unit}` }),
+      el('span', { class: 'tip-sub', text: formatDate(p.date) }),
+      el('span', { class: 'tip-sub', text: i === 0 ? 'your first check-in'
+        : `${fmtSignedLocal(p.value - start)} ${site.unit} since you started` }),
+    ],
+  });
+  fig.append(el('div', { class: 'chart-plot' }, [svg, tip]));
+
+  const perMonth = fit ? fit.slope * 30.44 : null;
+  fig.append(el('div', { class: 'chart-key' }, [
+    keyItem('line', `${site.label} at each check-in`),
+    keyItem('start', `Start, ${fmt(start, 1)} ${site.unit}`),
+    perMonth !== null ? keyItem('trend', `Trend ${fmtSignedLocal(perMonth)} ${site.unit} a month`) : null,
+  ]));
+  return fig;
+}
+
+/**
+ * Every site you are training, as percent change since its own first reading,
+ * on one chart. Centimetres of calf and centimetres of chest are not the same
+ * size of achievement, so they are put on one scale before being compared.
+ *
+ * `series` is [{ key, label, points: [{ date, value }] }]; each needs two
+ * readings to be drawn. Colours are the app's accent set, and every line is
+ * labelled at its end, so identity never rests on colour alone.
+ */
+export function measureCompareChart(series, { width = 340, height = 220, animate = true } = {}) {
+  const fig = el('figure', { class: `chart${animate ? '' : ' no-anim'}` });
+  const drawn = series
+    .filter((s) => s.points.length >= 2)
+    .map((s, i) => {
+      const base = s.points[0].value;
+      return {
+        ...s, color: i,
+        pts: s.points.map((p) => ({ ...p, day: dayNumber(p.date), plot: ((p.value - base) / base) * 100 })),
+      };
+    });
+  if (!drawn.length) {
+    fig.append(el('p', { class: 'chart-empty', text: 'Two check-ins and every site you are training shows up here, side by side.' }));
+    return fig;
+  }
+  const all = drawn.flatMap((s) => s.pts);
+  const xMin = Math.min(...all.map((p) => p.day));
+  const xMax = Math.max(...all.map((p) => p.day));
+  const pad = { t: 18, r: 96, b: 26, l: 38 };
+  const w = Math.max(280, width);
+  const plotW = w - pad.l - pad.r;
+  const plotH = height - pad.t - pad.b;
+  const ys = all.map((p) => p.plot);
+  const { ticks, lo, hi, step } = niceTicks(Math.min(0, ...ys) - 0.5, Math.max(1, ...ys) + 0.5, 4);
+  const x = (day) => pad.l + ((day - xMin) / Math.max(1, xMax - xMin)) * plotW;
+  const y = (v) => pad.t + plotH - ((v - lo) / (hi - lo || 1)) * plotH;
+
+  const svg = svgEl('svg', {
+    viewBox: `0 0 ${w} ${height}`, width: '100%', height,
+    role: 'img', 'aria-label': 'Percent change since your first check-in, by site',
+    class: 'chart-svg chart-compare', preserveAspectRatio: 'xMidYMid meet',
+  });
+  for (const t of ticks) {
+    if (t < lo - 1e-9 || t > hi + 1e-9) continue;
+    svg.append(svgEl('line', { x1: pad.l, x2: pad.l + plotW, y1: y(t), y2: y(t), class: Math.abs(t) < 1e-9 ? 'ref-start' : 'grid' }));
+    svg.append(text(`${t > 0 ? '+' : ''}${fmt(t, step >= 1 ? 0 : 1)}%`, { x: pad.l - 6, y: y(t) + 3.5, class: 'tick', 'text-anchor': 'end' }));
+  }
+  svg.append(text(formatDateShort(isoFromDay(all, xMin)), { x: pad.l, y: height - 8, class: 'tick', 'text-anchor': 'start' }));
+  svg.append(text(formatDateShort(isoFromDay(all, xMax)), { x: pad.l + plotW, y: height - 8, class: 'tick', 'text-anchor': 'end' }));
+
+  // End labels, nudged apart so two sites on the same percentage stay legible.
+  const ends = drawn
+    .map((s) => ({ s, ly: y(s.pts[s.pts.length - 1].plot) }))
+    .sort((a, b) => a.ly - b.ly);
+  for (let i = 1; i < ends.length; i++) if (ends[i].ly - ends[i - 1].ly < 12) ends[i].ly = ends[i - 1].ly + 12;
+
+  for (const s of drawn) {
+    const d = s.pts.map((p, i) => `${i ? 'L' : 'M'}${x(p.day).toFixed(1)} ${y(p.plot).toFixed(1)}`).join(' ');
+    const g = svgEl('g', { class: 'series', style: `--series: var(--accent-${s.color})` });
+    g.append(svgEl('path', { d, class: 'line series-line', fill: 'none', pathLength: 1 }));
+    const lastP = s.pts[s.pts.length - 1];
+    g.append(svgEl('circle', { cx: x(lastP.day), cy: y(lastP.plot), r: 3.6, class: 'dot series-dot' }));
+    const end = ends.find((e) => e.s === s);
+    g.append(text(`${s.label} ${lastP.plot >= 0 ? '+' : ''}${fmt(lastP.plot, 1)}%`, {
+      x: pad.l + plotW + 8, y: end.ly + 3.5, class: 'series-label',
+    }));
+    svg.append(g);
+  }
+  fig.append(el('div', { class: 'chart-plot' }, [svg]));
+  fig.append(el('p', { class: 'chart-cap', text: 'Each line is a site’s change since its own first check-in, so a centimetre on your calves and a centimetre on your chest are compared fairly. Waist and bodyweight are left out: they are not what the training is aiming to grow.' }));
+  return fig;
+}
+
+function isoFromDay(points, day) {
+  return (points.find((p) => p.day === day) || points[0]).date;
+}
+
+function fmtSignedLocal(v, dp = 1) {
+  const r = Number(v.toFixed(dp));
+  return `${r > 0 ? '+' : r < 0 ? '−' : ''}${Math.abs(r).toFixed(dp)}`;
+}

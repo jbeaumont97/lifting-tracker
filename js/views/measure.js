@@ -4,8 +4,8 @@
 // you that you are bigger, and it does it the boring way that works: a tape,
 // the same conditions, every couple of weeks, and the change since you started.
 
-import { el, stepper, statTile, details, toast, confirmSheet, tap } from '../ui.js';
-import { sparkline } from '../charts.js';
+import { el, stepper, statTile, details, toast, confirmSheet, tap, chipGroup } from '../ui.js';
+import { sparkline, measureChart, measureCompareChart } from '../charts.js';
 import * as store from '../store.js';
 import * as ui from '../core/uistate.js';
 import { fmt, fmtSigned, formatDate, relativeDate } from '../metrics.js';
@@ -13,6 +13,7 @@ import { SITES, measureDue, siteChange, waistFlag, sortedMeasurements } from '..
 
 const DRAFT = 'measure.draft';   // the half-filled check-in, so a reload keeps it
 const FORM_OPEN = 'measure.formOpen';
+const CHART = 'measure.chart';     // 'all' or a site key
 
 /** "Today" reads as "today" mid-sentence; "Thu, Nov 5" stays as it is. */
 function inSentence(rel) {
@@ -47,8 +48,10 @@ export function renderMeasure(ctx, header) {
   }
 
   if (list.length) {
+    root.append(chartCard(ctx, list));
     root.append(el('h2', { class: 'section-title', text: 'Since you started' }));
     const tiles = [];
+    const picked = ui.get(CHART, 'all');
     for (const site of SITES) {
       const c = siteChange(list, site.key);
       if (!c) continue;
@@ -56,7 +59,7 @@ export function renderMeasure(ctx, header) {
       // Growth sites are good going up; bodyweight and waist are neither good
       // nor bad on their own, so they get no colour at all.
       const good = d === null || Math.abs(d) < 1e-9 || !site.growth ? undefined : d > 0;
-      tiles.push(statTile({
+      const tile = statTile({
         label: site.label,
         value: fmt(c.latest, 1),
         unit: site.unit,
@@ -64,7 +67,23 @@ export function renderMeasure(ctx, header) {
         deltaLabel: d === null ? null : `since ${formatDate(c.firstDate)}`,
         good,
         spark: c.points.length > 1 ? sparkline(c.points.map((p) => p.value)) : null,
-      }));
+      });
+      // A tile is a way into its own chart: tap it and the chart above shows
+      // that site in full.
+      tile.classList.add('is-pickable');
+      if (picked === site.key) tile.classList.add('is-picked');
+      tile.setAttribute('role', 'button');
+      tile.setAttribute('tabindex', '0');
+      tile.setAttribute('aria-label', `Chart ${site.label.toLowerCase()}`);
+      const pick = () => {
+        tap();
+        ui.set(CHART, site.key);
+        ctx.refresh();
+        requestAnimationFrame(() => document.querySelector('.measure-chart-card')?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }));
+      };
+      tile.addEventListener('click', pick);
+      tile.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } });
+      tiles.push(tile);
     }
     root.append(el('div', { class: 'kpi-row measure-tiles' }, tiles));
 
@@ -85,6 +104,47 @@ export function renderMeasure(ctx, header) {
     el('p', { text: 'Expect small numbers. Around 0.5–1 cm a month on the arms is good going for someone newer to lifting, and a single check-in can move a centimetre either way on water alone. The trend over two or three months is what means something.' }),
   ]));
   return root;
+}
+
+/**
+ * The chart: every trained site on one percent scale, or one site in its own
+ * units. "All" is the default because it is the motivating view — everything
+ * you are training, going up together — and one site is a tap away.
+ */
+function chartCard(ctx, list) {
+  const withData = SITES.filter((s) => siteChange(list, s.key));
+  let chosen = ui.get(CHART, 'all');
+  if (chosen !== 'all' && !withData.some((s) => s.key === chosen)) chosen = 'all';
+  const host = el('div', { class: 'chart-card measure-chart-card' });
+  let drawn = false;
+  let paintedAt = null;
+  const paint = () => {
+    const width = host.clientWidth || 340;
+    paintedAt = width;
+    const chart = chosen === 'all'
+      ? measureCompareChart(
+        SITES.filter((s) => s.growth).map((s) => ({ key: s.key, label: s.label, points: siteChange(list, s.key)?.points || [] })),
+        { width, height: 220, animate: !drawn },
+      )
+      : measureChart(siteChange(list, chosen).points, SITES.find((s) => s.key === chosen), { width, height: 210, animate: !drawn });
+    host.replaceChildren(
+      el('h2', { class: 'section-title', text: chosen === 'all' ? 'Growth, all together' : SITES.find((s) => s.key === chosen).label }),
+      chipGroup({
+        label: 'Which measurement to chart',
+        value: chosen,
+        options: [{ value: 'all', label: 'All' }, ...withData.map((s) => ({ value: s.key, label: s.label }))],
+        onChange: (v) => { ui.set(CHART, v); ctx.refresh(); },
+      }),
+      chart,
+    );
+    drawn = true;
+  };
+  // Painted on the next frame, once the card is on the page and has a real
+  // width — the same as the lift charts, since the viewBox has to match it for
+  // one unit to be one pixel. Resizes repaint without replaying the draw-in.
+  requestAnimationFrame(paint);
+  ctx.onResize(() => { if (host.clientWidth !== paintedAt) paint(); });
+  return host;
 }
 
 function checkInForm(ctx, list) {
