@@ -3201,6 +3201,78 @@ const measure = await import("../js/measure.js");
   ok("the size pick is recorded", e?.plan?.zone === "hypertrophy" && e.plan.reps === 12, JSON.stringify(e?.plan));
 }
 
+// --- logged from the Log tab, with no hand-off: the first set is still the top ---
+// The bug: the role was decided by whether the form came from "Log this", so
+// this path saved the top set as a back-off and every back-off as a top set.
+{
+  reset();
+  checkIn();
+  const ex = store.getExercises().find((x) => /Bench/.test(x.name));
+  uistate.setForExercise("plan.overrides", ex.id, { zone: "topset", reps: 3, sets: 3 });
+  select.invalidate();
+  setPrefill({ exerciseId: ex.id, date: TODAY, weight: 90, reps: 2, sets: 4, mode: "sets", rir: 0 });
+  renderLog(ctx({ route: "log" })).querySelector(".btn-save").click();
+  for (const reps of [8, 7]) {
+    select.invalidate();
+    // the back-offs, at their own load
+    setPrefill({ exerciseId: ex.id, date: TODAY, weight: 70, reps, sets: 4, mode: "sets", rir: 1 });
+    renderLog(ctx({ route: "log" })).querySelector(".btn-save").click();
+  }
+  const rows = store.entriesOn(ex.id, TODAY);
+  const top = rows.find((r) => r.weight === 90);
+  const backs = rows.filter((r) => r.weight === 70);
+  ok("the first set is the top set", top?.plan?.role === "top", JSON.stringify(top?.plan));
+  ok("and every set after it is a back-off", backs.length === 2 && backs.every((r) => r.plan?.role === "backoff"), JSON.stringify(backs.map((r) => r.plan)));
+  ok("back-offs carry the back-off prescription", backs.every((r) => r.plan.reps === 8 && r.plan.weight !== null));
+  ok("against the same target as the top", backs.every((r) => r.plan.target === top.plan.target));
+
+  // Picked up again after a reload: the form forgets the session, the log does not.
+  clearForm();
+  store.reload();
+  select.invalidate();
+  setPrefill({ exerciseId: ex.id, date: TODAY, weight: 70, reps: 6, sets: 4, mode: "sets", rir: 0 });
+  renderLog(ctx({ route: "log" })).querySelector(".btn-save").click();
+  const later = store.entriesOn(ex.id, TODAY).find((r) => r.reps === 6);
+  ok("after a reload the next set is still a back-off", later?.plan?.role === "backoff" && later.plan.reps === 8, JSON.stringify(later?.plan));
+}
+
+// --- a top set and a back-off at the same load stay two rows ---
+{
+  reset();
+  checkIn();
+  const ex = store.getExercises()[0];
+  const plan = { zone: "topset", weight: 100, reps: 5, sets: 1, target: 115, backoff: { weight: 100, reps: 5, sets: 3 } };
+  store.logSet({ exerciseId: ex.id, date: TODAY, weight: 100, reps: 5, rir: 1, plan: { ...plan, role: "top" } });
+  store.logSet({ exerciseId: ex.id, date: TODAY, weight: 100, reps: 5, rir: 1, plan: { ...plan, role: "backoff" } });
+  store.logSet({ exerciseId: ex.id, date: TODAY, weight: 100, reps: 5, rir: 1, plan: { ...plan, role: "backoff" } });
+  const rows = store.entriesOn(ex.id, TODAY);
+  ok("identical top and back-off sets are not merged", rows.length === 2, String(rows.length));
+  ok("but back-offs still count onto one row", rows.find((r) => r.plan.role === "backoff")?.sets === 2);
+}
+
+// --- sessions saved backwards by the old version are put right on load ---
+{
+  reset();
+  const ex = store.getExercises()[0];
+  const plan = (role, weight, reps, sets) => ({ zone: "topset", role, weight, reps, sets, target: 110, band: "ideal" });
+  const doc = JSON.parse(store.exportJSON());
+  doc.entries.push(
+    { id: "w1", date: TODAY, exerciseId: ex.id, weight: 90, reps: 2, sets: 1, rir: 0, seq: 900, plan: plan("backoff", 70, 8, 3) },
+    { id: "w2", date: TODAY, exerciseId: ex.id, weight: 70, reps: 8, sets: 2, rir: 1, seq: 901, plan: plan("top", 70, 8, 1) },
+    { id: "w3", date: TODAY, exerciseId: ex.id, weight: 70, reps: 6, sets: 1, rir: 0, seq: 902, plan: plan("top", 70, 8, 1) },
+  );
+  store.importJSON(JSON.stringify(doc));
+  const got = Object.fromEntries(store.entriesOn(ex.id, TODAY).map((e) => [e.id, e.plan]));
+  ok("the first set becomes the top set", got.w1.role === "top");
+  ok("its prescription, which was the back-offs', is cleared", got.w1.weight === null && got.w1.reps === null);
+  ok("the rest become back-offs", got.w2.role === "backoff" && got.w3.role === "backoff");
+  ok("with the back-off prescription the session recorded", got.w2.weight === 70 && got.w2.reps === 8 && got.w2.sets === 3);
+  ok("and every set knows the back-offs", got.w1.backoff?.weight === 70 && got.w3.backoff?.sets === 3);
+  const once = JSON.stringify(store.getEntries().map((e) => e.plan));
+  store.reload();
+  ok("loading again changes nothing", JSON.stringify(store.getEntries().map((e) => e.plan)) === once);
+}
+
 /* ----------------------------------------------------------- 6u. muscles */
 
 {

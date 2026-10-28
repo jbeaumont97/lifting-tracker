@@ -184,8 +184,12 @@ size, or top set + back-offs, and for the last whether it was the top set or a
 back-off), the prescribed weight, reps and sets, the target and its band. "Log
 this" hands the card's plan over; logging without it records the card's current
 pick. Once a lift's first set of the day is in, the rest of its sets keep that
-session's plan, because the app's own target moves after every set. Nothing
-logged before this is back-filled.
+session's plan, because the app's own target moves after every set. In a top
+set + back-offs session, the first set of the lift that day is the top set and
+every set after it is a back-off, however the form was opened; a top set and a
+back-off are never merged into one row. Nothing logged before this is
+back-filled — except that sessions an earlier version saved with the roles
+backwards are put right on load.
 
 There are two ways to log, because there are two situations:
 

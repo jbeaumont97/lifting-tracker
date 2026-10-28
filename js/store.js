@@ -131,6 +131,7 @@ function normalise(raw) {
       plan: normalisePlan(e.plan),
     }))
     .map((e) => ({ ...e, log: normaliseLog(e.log, e) }));
+  fixTopsetRoles(d.entries);
   // A document written before lifts could be called done simply arrives with
   // none, which is the truth about it — so there is nothing to migrate.
   d.done = normaliseDone(raw.done, known);
@@ -196,7 +197,55 @@ function normalisePlan(raw) {
     sets: n(raw.sets),
     target: n(raw.target),
     band: raw.band ? String(raw.band) : null,
+    // A topset session is two prescriptions. Every set of one carries the
+    // back-off half, so a session picked up again after a reload still knows
+    // what its back-offs were meant to be.
+    backoff: zone === 'topset' && raw.backoff && typeof raw.backoff === 'object'
+      ? { weight: n(raw.backoff.weight), reps: n(raw.backoff.reps), sets: n(raw.backoff.sets) }
+      : null,
   };
+}
+
+/**
+ * In a topset session the first set of the lift that day is the top set and
+ * every set after it is a back-off. The log form now records it that way, but
+ * an earlier version decided the role by whether the plan came from "Log
+ * this" — so a session logged from the Log tab had its top set saved as a
+ * back-off and its back-offs saved as top sets.
+ *
+ * This puts the roles right on load. Where a role changes, the prescription
+ * recorded with it was the other half's, so it is corrected rather than kept:
+ * a back-off takes the back-off prescription the session recorded, and a top
+ * set whose own prescription was never recorded is left blank. Idempotent:
+ * once the roles agree with the order, nothing here changes anything.
+ */
+function fixTopsetRoles(entries) {
+  const groups = new Map();
+  for (const e of entries) {
+    if (e.plan?.zone !== 'topset') continue;
+    const k = `${e.exerciseId}|${e.date}`;
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(e);
+  }
+  for (const group of groups.values()) {
+    group.sort((a, b) => a.seq - b.seq);
+    // The back-off prescription, from whichever set recorded one honestly:
+    // a set already labelled as a back-off, else any set that carries it.
+    const labelled = group.find((e) => e.plan.role === 'backoff' && e.plan.weight !== null);
+    const known = group.find((e) => e.plan.backoff)?.plan.backoff
+      ?? (labelled ? { weight: labelled.plan.weight, reps: labelled.plan.reps, sets: labelled.plan.sets } : null);
+    group.forEach((e, i) => {
+      const want = i === 0 ? 'top' : 'backoff';
+      if (known && !e.plan.backoff) e.plan.backoff = { ...known };
+      if (e.plan.role === want) return;
+      e.plan.role = want;
+      if (want === 'backoff' && known) {
+        e.plan.weight = known.weight; e.plan.reps = known.reps; e.plan.sets = known.sets;
+      } else {
+        e.plan.weight = null; e.plan.reps = null; e.plan.sets = null;
+      }
+    });
+  }
 }
 
 /**
@@ -515,7 +564,11 @@ export function logSet(set) {
       notes: String(set.notes || ''),
     };
     const key = setKey(candidate);
-    const match = d.entries.find((e) => e.exerciseId === set.exerciseId && e.date === date && setKey(e) === key);
+    // A top set and a back-off are never one row, even at the same load:
+    // they are different halves of the session and are analysed as such.
+    const role = set.plan?.role ?? null;
+    const match = d.entries.find((e) => e.exerciseId === set.exerciseId && e.date === date && setKey(e) === key
+      && (e.plan?.role ?? null) === role);
     if (match) {
       const prev = { id: match.id, sets: match.sets, rir: match.rir, notes: match.notes, plan: match.plan, logLen: match.log.length };
       match.sets += 1;

@@ -1097,35 +1097,50 @@ function readyToLog() {
 }
 
 /**
- * What this set was meant to be, for the record. In order: the plan the card
- * handed over; the plan today's first set of this lift was logged against; or,
- * logging with no hand-off, the card's plan as it stands now — including any
- * pick taken on it. The middle step matters: once a set is in, the target
- * moves, and set three must not be recorded against a plan that set one made.
+ * The plan this lift's session is following today, as one whole: for a topset
+ * session, the top set's prescription AND the back-offs'. In order: the plan
+ * the card handed over; the plan today's first set of this lift was logged
+ * against; or, logging with no hand-off, the card's plan as it stands now —
+ * including any pick taken on it. The middle step matters: once a set is in,
+ * the target moves, and set three must not be recorded against a plan that
+ * set one made.
  */
-function planForSet(st, settings) {
-  let base = form.plan;
-  if (!base) {
-    const first = store.entriesOn(form.exerciseId, form.date).find((e) => e.plan);
-    if (first) base = { ...first.plan };
+function sessionPlan(st, settings) {
+  if (form.plan) return form.plan;
+  const first = store.entriesOn(form.exerciseId, form.date).find((e) => e.plan);
+  if (first) {
+    const p = first.plan;
+    // A session logged before roles were fixed may open on a back-off; its
+    // top prescription is then unknown, but its back-offs are not.
+    return p.zone === "topset" && p.role !== "top"
+      ? { ...p, weight: null, reps: null, sets: 1, backoff: p.backoff ?? { weight: p.weight, reps: p.reps, sets: p.sets } }
+      : { ...p };
   }
-  if (!base && st.entryCount) {
-    const p = planFor(st, settings, ui.forExercise("plan.overrides", st.exercise.id, {}));
-    if (p.ready) {
-      base = p.topset
-        ? { zone: "topset", weight: p.topset.top.weight, reps: p.topset.top.reps, sets: 1, target: p.target, band: p.band?.key,
-          backoff: { ...p.topset.backoff } }
-        : { zone: p.zone, weight: p.weight, reps: p.reps, sets: p.sets, target: p.target, band: p.band?.key };
-    }
-  }
-  if (!base) return null;
-  if (base.zone !== "topset") return { ...base, role: null, backoff: undefined };
-  // A topset session is two prescriptions; record the one this set belongs to.
-  const isTop = !!form.backoff;
-  const bo = base.backoff || form.backoff;
-  return isTop || !bo
-    ? { zone: "topset", role: "top", weight: base.weight, reps: base.reps, sets: 1, target: base.target, band: base.band }
-    : { zone: "topset", role: "backoff", weight: bo.weight, reps: bo.reps, sets: bo.sets, target: base.target, band: base.band };
+  if (!st.entryCount) return null;
+  const p = planFor(st, settings, ui.forExercise("plan.overrides", st.exercise.id, {}));
+  if (!p.ready) return null;
+  return p.topset
+    ? { zone: "topset", weight: p.topset.top.weight, reps: p.topset.top.reps, sets: 1, target: p.target, band: p.band?.key,
+      backoff: { ...p.topset.backoff } }
+    : { zone: p.zone, weight: p.weight, reps: p.reps, sets: p.sets, target: p.target, band: p.band?.key };
+}
+
+/**
+ * What THIS set was meant to be. Outside a topset session that is simply the
+ * session's plan. Inside one, the first set of the lift today is the top set
+ * and everything after it is a back-off — decided by what is already in the
+ * log, not by how the form was opened, which is what got it backwards before.
+ */
+function planForSet(session) {
+  if (!session) return null;
+  if (session.zone !== "topset") return { ...session, role: null, backoff: null };
+  const isTop = store.entriesOn(form.exerciseId, form.date).length === 0;
+  const bo = session.backoff ?? null;
+  return isTop
+    ? { zone: "topset", role: "top", weight: session.weight, reps: session.reps, sets: 1,
+      target: session.target, band: session.band, backoff: bo }
+    : { zone: "topset", role: "backoff", weight: bo?.weight ?? null, reps: bo?.reps ?? null, sets: bo?.sets ?? null,
+      target: session.target, band: session.band, backoff: bo };
 }
 
 /**
@@ -1212,7 +1227,8 @@ function logOneSet(st, ctx, settings) {
     return;
   }
   if (!readyToLog()) return;
-  const plan = planForSet(st, settings);
+  const session = sessionPlan(st, settings);
+  const plan = planForSet(session);
 
   const bestBefore = st.entries.reduce(
     (m, e) =>
@@ -1240,7 +1256,7 @@ function logOneSet(st, ctx, settings) {
   form.rir = null;
   // Keep the session's plan for the sets that follow: once a set is in, the
   // app's own target moves, and the plan this session set out with must not.
-  form.plan = form.plan ?? (plan ? { ...plan, role: undefined } : null);
+  form.plan = session;
   // The top set is in: the rest of the session is the back-offs.
   if (form.backoff) {
     form.weight = form.backoff.weight;
@@ -1315,7 +1331,8 @@ function save(st, ctx) {
     return;
   }
   if (!readyToLog()) return;
-  const plan = planForSet(st, ctx.settings);
+  const session = sessionPlan(st, ctx.settings);
+  const plan = planForSet(session);
   const bestBefore = st.entries.reduce(
     (m, e) =>
       e.date !== form.date && Number.isFinite(e.adj) && e.adj > m ? e.adj : m,
@@ -1358,7 +1375,7 @@ function save(st, ctx) {
   // Keep the lift selected but drop back to plan-based prefill for the next set
   // — or, straight after a top set, to the back-offs that follow it.
   const bo = form.backoff;
-  const kept = form.plan ?? (plan ? { ...plan, role: undefined } : null);
+  const kept = session;
   setPrefill(bo
     ? { exerciseId: form.exerciseId, date: form.date, mode: form.mode,
       weight: bo.weight, reps: bo.reps, sets: bo.sets, plan: kept }
