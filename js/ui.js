@@ -342,7 +342,7 @@ export function celebrate({ count = 18 } = {}) {
   if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
   const host = el('div', { class: 'confetti-host', 'aria-hidden': 'true' });
   for (let i = 0; i < count; i++) {
-    const piece = el('i', { class: `confetti confetti-${i % 4}` });
+    const piece = el('i', { class: `confetti confetti-${i % 6}` });
     piece.style.left = `${6 + Math.random() * 88}%`;
     piece.style.animationDelay = `${Math.round(Math.random() * 220)}ms`;
     piece.style.setProperty('--drift', `${Math.round((Math.random() * 2 - 1) * 70)}px`);
@@ -351,6 +351,37 @@ export function celebrate({ count = 18 } = {}) {
   }
   document.body.append(host);
   setTimeout(() => host.remove(), 2400);
+}
+
+/**
+ * The moment the app exists for: a new personal best.
+ *
+ * A toast was saying it in a line at the bottom of the screen. This takes the
+ * whole screen for a couple of seconds — the lift, the new number, how far past
+ * the old one — with confetti behind it, then gets out of the way on its own.
+ * A tap dismisses it sooner. It is announced politely, so a screen reader hears
+ * it too, and under reduced motion it simply appears and goes.
+ */
+export function prBurst({ lift, value, sub } = {}) {
+  document.querySelector?.('.pr-burst')?.remove();
+  const wrap = el('div', { class: 'pr-burst', role: 'status', 'aria-live': 'polite' }, [
+    el('div', { class: 'pr-burst-card' }, [
+      el('span', { class: 'pr-burst-trophy', 'aria-hidden': 'true', text: '🏆' }),
+      el('span', { class: 'pr-burst-kicker', text: 'New PR' }),
+      lift ? el('span', { class: 'pr-burst-lift', text: lift }) : null,
+      value ? el('span', { class: 'pr-burst-value', text: value }) : null,
+      sub ? el('span', { class: 'pr-burst-sub', text: sub }) : null,
+      el('span', { class: 'pr-burst-hint', text: 'Tap to carry on' }),
+    ]),
+  ]);
+  let gone = false;
+  const close = () => { if (gone) return; gone = true; wrap.remove(); };
+  wrap.addEventListener('click', close);
+  document.body.append(wrap);
+  celebrate({ count: 60 });
+  tap([30, 60, 30, 60, 80]);
+  setTimeout(close, 2600);
+  return wrap;
 }
 
 /* ------------------------------------------------------------------ sheet */

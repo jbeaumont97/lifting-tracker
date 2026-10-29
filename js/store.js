@@ -11,6 +11,22 @@ import { normaliseMuscles } from './muscles.js';
 
 const KEY = 'liftingTracker.v1';
 const THEME_KEY = 'liftingTracker.theme';
+// How the app looks, beside light/dark: device preferences like the theme, so
+// they live outside the document and stay out of backups.
+const ACCENT_KEY = 'liftingTracker.accent';
+const STYLE_KEY = 'liftingTracker.style';
+export const ACCENTS = [
+  { key: 'blue', label: 'Blue' },
+  { key: 'violet', label: 'Violet' },
+  { key: 'pink', label: 'Pink' },
+  { key: 'orange', label: 'Orange' },
+  { key: 'teal', label: 'Teal' },
+  { key: 'graphite', label: 'Graphite' },
+];
+export const STYLES = [
+  { key: 'bold', label: 'Bold' },
+  { key: 'clean', label: 'Clean' },
+];
 const SCHEMA = 2;   // v2 hangs a per-set log off each entry; see normaliseLog()
 
 export const DEFAULT_SETTINGS = {
@@ -984,10 +1000,37 @@ export function setTheme(theme) {
   notify({ type: 'theme' });
 }
 
+export function getAccent() {
+  let v = null;
+  try { v = localStorage.getItem(ACCENT_KEY); } catch { /* private mode */ }
+  return ACCENTS.some((a) => a.key === v) ? v : 'blue';
+}
+
+export function setAccent(accent) {
+  try { localStorage.setItem(ACCENT_KEY, accent); } catch { /* private mode */ }
+  applyTheme();
+  notify({ type: 'theme' });
+}
+
+/** Bold is the default: the app is meant to feel like training, not admin. */
+export function getStyle() {
+  let v = null;
+  try { v = localStorage.getItem(STYLE_KEY); } catch { /* private mode */ }
+  return STYLES.some((x) => x.key === v) ? v : 'bold';
+}
+
+export function setStyle(style) {
+  try { localStorage.setItem(STYLE_KEY, style); } catch { /* private mode */ }
+  applyTheme();
+  notify({ type: 'theme' });
+}
+
 export function applyTheme(theme = getTheme()) {
   const root = document.documentElement;
   if (theme === 'system') root.removeAttribute('data-theme');
   else root.setAttribute('data-theme', theme);
+  root.setAttribute('data-accent', getAccent());
+  root.setAttribute('data-style', getStyle());
   paintThemeColor(theme);
 }
 

@@ -553,21 +553,8 @@ export function renderSetup(ctx) {
   root.append(details("Fatigue, recovery and detraining", [readinessCard]));
   root.append(details("Tune the formulas", [mathsCard]));
 
-  root.append(
-    el("div", { class: "field-block" }, [
-      el("span", { class: "field-label", text: "Appearance" }),
-      segmented({
-        label: "Theme",
-        value: store.getTheme(),
-        options: [
-          { value: "system", label: "System" },
-          { value: "light", label: "Light" },
-          { value: "dark", label: "Dark" },
-        ],
-        onChange: (v) => store.setTheme(v),
-      }),
-    ]),
-  );
+  root.append(el("h2", { class: "section-title", text: "Appearance" }));
+  root.append(appearance(ctx));
 
   /* --------------------------------------------------------- your data */
   root.append(el("h2", { class: "section-title", text: "Your data" }));
@@ -735,6 +722,83 @@ export function renderSetup(ctx) {
     }),
   );
   return root;
+}
+
+/**
+ * How the app looks: light or dark, an accent colour, and Bold or Clean.
+ * Device preferences, like the theme always was — they apply straight away
+ * and are not part of a backup. The swatches show the accent's own gradient,
+ * read off the stylesheet for that accent, so what you tap is what you get.
+ */
+const SWATCHES = {
+  blue: ["#2a78d6", "#7c4ddb"],
+  violet: ["#7444d6", "#d63384"],
+  pink: ["#d02f7d", "#e0661b"],
+  orange: ["#d4580f", "#d02f7d"],
+  teal: ["#0e857f", "#2a78d6"],
+  graphite: ["#2f3238", "#6b7280"],
+};
+
+function appearance(ctx) {
+  const accent = store.getAccent();
+  return el("div", { class: "card card-pad" }, [
+    el("div", { class: "field-block" }, [
+      el("span", { class: "field-label", text: "Light or dark" }),
+      segmented({
+        label: "Theme",
+        value: store.getTheme(),
+        options: [
+          { value: "system", label: "System" },
+          { value: "light", label: "Light" },
+          { value: "dark", label: "Dark" },
+        ],
+        onChange: (v) => store.setTheme(v),
+      }),
+    ]),
+    el("div", { class: "field-block" }, [
+      el("span", { class: "field-label", text: "Accent colour" }),
+      el(
+        "div",
+        { class: "swatches", role: "radiogroup", "aria-label": "Accent colour" },
+        store.ACCENTS.map((a) => {
+          const on = a.key === accent;
+          const [c1, c2] = SWATCHES[a.key] || SWATCHES.blue;
+          return el(
+            "button",
+            {
+              type: "button",
+              role: "radio",
+              class: `swatch${on ? " is-selected" : ""}`,
+              "aria-checked": on ? "true" : "false",
+              style: `--sw-1: ${c1}; --sw-2: ${c2}`,
+              dataset: { accent: a.key },
+              onclick: () => {
+                store.setAccent(a.key);
+                ctx.refresh({ transition: true });
+              },
+            },
+            [el("span", { class: "swatch-dot", "aria-hidden": "true" }), el("span", { text: a.label })],
+          );
+        }),
+      ),
+    ]),
+    el("div", { class: "field-block" }, [
+      el("span", { class: "field-label", text: "Style" }),
+      segmented({
+        label: "Style",
+        value: store.getStyle(),
+        options: store.STYLES.map((x) => ({ value: x.key, label: x.label })),
+        onChange: (v) => {
+          store.setStyle(v);
+          ctx.refresh({ transition: true });
+        },
+      }),
+      el("p", {
+        class: "field-hint",
+        text: "Bold runs the accent as a gradient and makes things spring. Clean is quieter.",
+      }),
+    ]),
+  ]);
 }
 
 /** "20, 22.5, 25 …" — the first few loads this lift can actually be set to. */

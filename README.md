@@ -235,7 +235,10 @@ splitting the row on them instead would split the set count with it, and five se
 would score as five separate single sets.
 
 The first time a session passes your best from before today, that one set is
-marked as a personal best — once, not once per set from there on. Swipe a row in
+marked as a personal best — once, not once per set from there on — and it takes
+the screen for a moment: the lift, the new score and how far past the old best it
+went, with confetti. Tap to carry on, or it clears itself. Finishing a lift earns a
+little confetti too, and finishing the whole session more. Swipe a row in
 the history left to delete it; a toast offers **Undo**.
 
 **Progress** — the Dashboard, with charts. The list gives each lift's current
@@ -273,7 +276,7 @@ same thing. It is context only: the plan and the trend stay in reps.
 so renaming is a matter of typing — it saves when you leave the field, and the
 toast offers **Undo**), then how much detail to show, the rest timer's target
 (0 turns it off), body measurement reminders, the maths dials, the fatigue/recovery/detraining model
-and its six coefficients, light/dark theme, and your backups. **How this works**
+and its six coefficients, **Appearance** (light or dark, an accent colour — Blue, Violet, Pink, Orange, Teal or Graphite — and a style: **Bold**, the default, runs the accent as a gradient and makes things spring; **Clean** is the quieter original), and your backups. **How this works**
 at the foot of the page holds the explainers, including how the planner decides
 and strength against size, which used to sit under the cards on Next. The
 welcome tour can be replayed from the bottom of the page.
