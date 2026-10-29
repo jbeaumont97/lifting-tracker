@@ -126,6 +126,10 @@ for (const open of [false, true]) {
   const c = ctx();
   const label = open ? "[numbers open]" : "[numbers folded]";
 
+  // Closed rows carry the plan on one line; the verdict and the numbers are
+  // in the open card, so open the top one as a tap would.
+  const top = c.stats.find((s) => s.entryCount > 0);
+  openCard(top.exercise.id);
   const plan = render(`${label} Next`, () => renderPlan(c));
   ok(
     `${label} Next is a view section`,
@@ -133,7 +137,8 @@ for (const open of [false, true]) {
   );
   ok(
     `${label} Next shows a prescription`,
-    plan && plan.querySelectorAll(".presc").length > 0,
+    plan && plan.querySelectorAll(".presc").length === 1 &&
+      plan.querySelectorAll(".card-plan").length > 0,
   );
   ok(
     `${label} Next names every lift`,
@@ -151,7 +156,7 @@ for (const open of [false, true]) {
   );
   ok(
     `${label} Log asks you to pick a lift first`,
-    bare && bare.textContent.includes("Pick a lift to log"),
+    bare && bare.textContent.includes("Pick a lift"),
   );
 
   setPrefill({ exerciseId: store.getExercises()[0].id, date: TODAY });
@@ -254,7 +259,7 @@ for (const open of [false, true]) {
     const c = ctx();
     const trained = c.stats.find((s) => s.entryCount > 0);
 
-    openCard(trained.exercise.id);
+    openCard(trained.exercise.id, { adjust: true });
     const plan = renderPlan(ctx());
     ok(
       `${label} the trade-off grid is always there`,
@@ -311,6 +316,15 @@ for (const open of [false, true]) {
   const [squat, bench] = store.getExercises();
   store.updateExercise(squat.id, { tags: ["Legs"] });
   store.updateExercise(bench.id, { tags: ["Push", "Chest"] });
+  select.invalidate();
+
+  ok(
+    "a short list has no search box — it is quicker to read than to search",
+    !renderPlan(ctx()).querySelector('input[type="search"]'),
+  );
+  // Past eight lifts, finding one by eye stops being quick.
+  store.addExercise({ name: "Leg press" });
+  store.addExercise({ name: "Hip thrust" });
   select.invalidate();
 
   const c = ctx();
@@ -430,7 +444,7 @@ for (const open of [false, true]) {
   select.invalidate();
   const c = ctx();
   const trained = c.stats.find((s) => s.entryCount > 0);
-  openCard(trained.exercise.id);
+  openCard(trained.exercise.id, { adjust: true });
   const plan = renderPlan(ctx());
   const cells = plan.querySelectorAll(".cell-btn");
   ok(
@@ -1085,7 +1099,7 @@ function giveHistory(
   );
   clearSelection();
 
-  openCard(ex.id);
+  openCard(ex.id, { adjust: true });
   const plan = renderPlan(ctx());
   const compact = plan.querySelectorAll(".milestone.is-compact");
   ok(
@@ -1824,7 +1838,7 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
   const ex = givePressUps();
 
   // --- the planner ---
-  openCard(ex.id);
+  openCard(ex.id, { adjust: true });
   const plan = renderPlan(ctx());
   const presc = plan.querySelector(".presc");
   ok(
@@ -1972,7 +1986,7 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
     }
   };
 
-  openCard(ex.id);
+  openCard(ex.id, { adjust: true });
   sweep("[plan]", renderPlan(ctx()));
 
   setPrefill({ exerciseId: ex.id, date: TODAY, mode: "sets" });
@@ -1987,7 +2001,7 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
 
   // And with the numbers disclosed, which is where the score and target live.
   store.updateSettings({ numbersOpen: true });
-  openCard(ex.id);
+  openCard(ex.id, { adjust: true });
   sweep("[plan, numbers open]", renderPlan(ctx()));
   store.updateSettings({ numbersOpen: false });
 }
@@ -2033,7 +2047,7 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
     ) === false,
   );
 
-  openCard(ex.id);
+  openCard(ex.id, { adjust: true });
   const card = renderPlan(ctx()).querySelector(".card");
   ok(
     "the card explains what is actually wrong",
@@ -2376,7 +2390,7 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
   );
   ok(
     "and it remembers which lift it was for",
-    back.querySelectorAll(".chip-lift.is-selected").length === 1,
+    back.querySelectorAll(".rail-seg.is-current").length === 1,
   );
 }
 
@@ -2393,7 +2407,7 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
   );
   ok(
     "a deleted lift drops back to the picker",
-    after && after.textContent.includes("Pick a lift to log"),
+    after && after.textContent.includes("Pick a lift"),
   );
 }
 
@@ -2402,7 +2416,7 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
   reset();
   const c = ctx();
   const trained = c.stats.find((s) => s.entryCount > 0);
-  openCard(trained.exercise.id);
+  openCard(trained.exercise.id, { adjust: true });
   ok(
     "the open card is remembered",
     uistate.get("plan.openId", undefined) === trained.exercise.id,
@@ -2456,9 +2470,12 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
         .querySelectorAll(".tab")
         .filter((t) => t.getAttribute("aria-current") === "page").length === 1,
     );
+    // Every row on Next has its own Log button, so the floating one stays
+    // off that screen rather than covering them.
     ok(
-      "the action button is offered",
-      doc.body.querySelectorAll(".fab").length === 1,
+      "every ready lift offers a one-tap Log",
+      main.querySelectorAll(".card-quick").length > 0 &&
+        doc.body.querySelectorAll(".fab").length === 0,
     );
 
     // Switching tabs must actually swap the view.
@@ -2524,7 +2541,7 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
   select.invalidate();
   const c = ctx();
   const trained = c.stats.find((s) => s.entryCount > 0);
-  openCard(trained.exercise.id);
+  openCard(trained.exercise.id, { adjust: true });
   const plan = renderPlan(ctx());
 
   const cells = plan.querySelectorAll(".cell");
@@ -2637,7 +2654,7 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
     "reopening puts it back in the order",
     !/Done today/.test(reopened.textContent),
   );
-  ok("and the prescription comes back", !!reopened.querySelector(".presc"));
+  ok("and the prescription comes back", !!reopened.querySelector(".card-plan"));
 }
 
 // --- a lift with nothing logged at all can still be called done ---
@@ -2669,7 +2686,7 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
     "logging alone never calls a lift done",
     !/Done today/.test(view.textContent),
   );
-  ok("and it still carries a prescription", !!view.querySelector(".presc"));
+  ok("and it still carries a prescription", !!view.querySelector(".card-plan"));
 }
 
 /* ----------------------------------- 6o. strength and size, side by side */
@@ -2679,6 +2696,7 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
   reset();
   const ex = store.getExercises()[0];
   uistate.set("plan.openId", ex.id);
+  uistate.set("plan.adjustId", ex.id);
   select.invalidate();
   const card = renderPlan(ctx({ route: "plan" })).querySelector(
     ".card.is-open",
@@ -2712,6 +2730,7 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
   reset();
   const ex = store.getExercises()[0];
   uistate.set("plan.openId", ex.id);
+  uistate.set("plan.adjustId", ex.id);
   select.invalidate();
 
   const before = renderPlan(ctx({ route: "plan" })).querySelector(
@@ -2773,6 +2792,7 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
   reset();
   const ex = store.getExercises()[0];
   uistate.set("plan.openId", ex.id);
+  uistate.set("plan.adjustId", ex.id);
   select.invalidate();
   const view = renderPlan(ctx({ route: "plan" })).querySelector(
     ".card.is-open",
@@ -2816,6 +2836,7 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
   reset();
   const ex = store.getExercises()[0];
   uistate.set("plan.openId", ex.id);
+  uistate.set("plan.adjustId", ex.id);
   uistate.setForExercise("plan.overrides", ex.id, {
     reps: 12,
     sets: 3,
@@ -2845,6 +2866,7 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
   reset();
   const ex = store.getExercises()[0];
   uistate.set("plan.openId", ex.id);
+  uistate.set("plan.adjustId", ex.id);
   select.invalidate();
   const before = renderPlan(ctx({ route: "plan" })).querySelector(".card.is-open");
   const row = before.querySelectorAll(".pick").find((r) => r.dataset.zone === "topset");
@@ -2878,6 +2900,63 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
   ok("a top set never strays out of strength reps", metrics.topSetPlan(95, 12, 3, s, 2.5, 20).top.reps === 6);
   ok("and there are always at least two back-offs", metrics.topSetPlan(95, 5, 1, s, 2.5, 20).backoff.sets === 2);
   ok("the bar is the floor", metrics.nearestStep(10, 2.5, 20) === 20);
+}
+
+// --- the back-offs can be moved, inside bounds, and default to 8 at 80% ---
+{
+  const metrics = await import("../js/metrics.js");
+  const s = { formula: "epley", setBonusK: 0.05 };
+  const p = metrics.topSetPlan(95, 5, 3, s, 2.5, 20, { backoffReps: 10, backoffFraction: 0.7 });
+  ok("back-off reps follow the lever", p.backoff.reps === 10);
+  ok("back-off load follows the percentage", p.backoff.weight === metrics.nearestStep(82.5 * 0.7, 2.5, 20), String(p.backoff.weight));
+  ok("hard sets count the reps actually asked for", Math.abs(p.hardSets - (metrics.repCredit(5) + 3 * metrics.repCredit(10))) < 1e-9);
+  ok("the top set does not move with the back-offs", p.top.weight === 82.5);
+  const wild = metrics.topSetPlan(95, 5, 3, s, 2.5, 20, { backoffReps: 40, backoffFraction: 0.99 });
+  ok("back-off reps stay inside their range", wild.backoff.reps === metrics.TOPSET.backoffRepRange.max);
+  ok("and the load can never become a second top set", wild.backoff.fraction === 0.85);
+  const plain = metrics.topSetPlan(95, 5, 3, s, 2.5, 20, {});
+  ok("left alone it is still eight at 80%", plain.backoff.reps === 8 && plain.backoff.fraction === 0.8);
+}
+
+// --- Adjust on a top set + back-offs card speaks in those terms ---
+{
+  reset();
+  const ex = store.getExercises()[0];
+  uistate.setForExercise("plan.overrides", ex.id, { zone: "topset" });
+  uistate.set("plan.openId", ex.id);
+  uistate.set("plan.adjustId", ex.id);
+  const view = renderPlan(ctx({ route: "plan" }));
+  const panel = view.querySelector(".topset-detail");
+  ok("it gets its own panel", !!panel);
+  ok("with no straight-sets grid in it", view.querySelectorAll(".cell-btn").length === 0);
+  ok("and no straight-sets 'smallest jump' hint", !/Smallest jump/.test(view.textContent));
+  const opts = panel.querySelectorAll(".topset-option");
+  ok("the top set is offered at every strength rep count", opts.length === 4, String(opts.length));
+  ok("one of them is today's", panel.querySelectorAll(".topset-option.is-pick").length === 1);
+  opts.find((b) => /1 × 3/.test(b.textContent)).click();
+  ok("tapping one sets the top set's reps", uistate.forExercise("plan.overrides", ex.id, {}).reps === 3);
+
+  const c2 = ctx({ route: "plan" });
+  const v2 = renderPlan(c2);
+  ok("the hero follows", /Top set · 1 × 3/.test(v2.querySelector(".presc").textContent));
+  v2.querySelector(".topset-pcts").querySelectorAll(".chip").find((b) => b.textContent === "70%").click();
+  const reps = renderPlan(ctx({ route: "plan" })).querySelector(`#bo-reps-${ex.id}`);
+  reps.value = "10";
+  reps.dispatchEvent("change");
+  const o = uistate.forExercise("plan.overrides", ex.id, {});
+  ok("the back-off load and reps are levers of their own", o.backoffPct === 0.7 && o.backoffReps === 10, JSON.stringify(o));
+
+  let went = null;
+  const v3 = renderPlan(ctx({ route: "plan", goTo: (route, payload) => { went = payload; } }));
+  ok("the back-offs read as set", /× 10 @/.test(v3.querySelector(".topset-backoff-now").textContent));
+  v3.querySelector(".card-actions .btn-primary").click();
+  ok("and Log this hands them over", went && went.backoff.reps === 10 && went.plan.backoff.reps === 10, JSON.stringify(went?.backoff));
+
+  const reset_ = renderPlan(ctx({ route: "plan" })).querySelectorAll("button").find((b) => b.textContent === "Reset to automatic");
+  ok("Reset to automatic is offered", !!reset_);
+  reset_.click();
+  const cleared = uistate.forExercise("plan.overrides", ex.id, {});
+  ok("and clears the back-off levers too", cleared.backoffPct == null && cleared.backoffReps == null, JSON.stringify(cleared));
 }
 
 // --- logging it: the form starts on the top set and moves to the back-offs ---
@@ -3032,7 +3111,7 @@ const measure = await import("../js/measure.js");
   for (const n of log.querySelectorAll(".row-set"))
     ok("the set itself still says nothing about kilos", !/\bkg\b/.test(n.textContent), n.textContent);
 
-  openCard(ex.id);
+  openCard(ex.id, { adjust: true });
   const card = renderPlan(ctx({ route: "plan" }));
   ok("the card compares then and now", /90 kg bodyweight — you are 85 kg now/.test(card.querySelector(".bw-note")?.textContent || ""), card.querySelector(".bw-note")?.textContent);
 
@@ -3095,7 +3174,7 @@ const measure = await import("../js/measure.js");
   const ex = store.getExercises()[0];
   setPrefill({ exerciseId: ex.id, date: TODAY, weight: 100, reps: 5, sets: 3, mode: "sets", rir: 2 });
   const view = renderLog(ctx({ route: "log" }));
-  ok("the day check-in is asked for", /Before your first set today/.test(view.querySelector(".day-check")?.textContent || ""));
+  ok("the day check-in is asked for", /Check in for today/.test(view.querySelector(".day-check")?.textContent || ""));
   ok("today has no can't-remember way round it", !/Can’t remember/.test(view.querySelector(".day-check").textContent));
   ok("the button says what is missing", /Check in for the day first/.test(view.querySelector(".btn-save").textContent));
   const before = store.getEntries().length;
@@ -3166,6 +3245,7 @@ const measure = await import("../js/measure.js");
   checkIn();
   const ex = store.getExercises()[0];
   uistate.set("plan.openId", ex.id);
+  uistate.set("plan.adjustId", ex.id);
   uistate.setForExercise("plan.overrides", ex.id, { zone: "topset", reps: 5, sets: 3 });
   select.invalidate();
   // "Log this" from the card, then two sets.
@@ -3378,6 +3458,140 @@ const measure = await import("../js/measure.js");
   ok("with the right CRC-32", dv.getUint32(14, true) === 0x3610a686, dv.getUint32(14, true).toString(16));
 }
 
+/* ------------------------------------------- 7. fewer taps to a finished session */
+
+// --- Next: a closed row is the plan and a button that logs it ---
+{
+  reset();
+  const c = ctx();
+  uistate.set("plan.openId", null);
+  const view = renderPlan(c);
+  ok("closed cards carry no body", view.querySelectorAll(".card-body").length === 0);
+  const quick = view.querySelectorAll(".card-quick");
+  ok("every ready lift has a Log button on its row", quick.length > 0);
+  let went = null;
+  const v2 = renderPlan(ctx({ goTo: (route, payload) => { went = { route, payload }; } }));
+  v2.querySelectorAll(".card-quick")[0].click();
+  ok(
+    "one tap hands the plan to the log",
+    went && went.route === "log" && went.payload.plan && went.payload.weight > 0,
+    JSON.stringify(went?.payload?.plan),
+  );
+  ok(
+    "the long explainers are gone from Next",
+    !view.textContent.includes("How the planner decides"),
+  );
+  const setup = renderSetup(ctx({ route: "setup" }));
+  ok(
+    "and live in Setup instead",
+    setup.textContent.includes("How the planner decides") &&
+      setup.textContent.includes("Strength and size"),
+  );
+}
+
+// --- the check-in saves itself on the last answer ---
+{
+  reset();
+  setPrefill({ date: TODAY });
+  const view = renderLog(ctx({ route: "log" }));
+  const sleep = view.querySelector("#day-sleep");
+  sleep.value = "7.5";
+  sleep.dispatchEvent("change");
+  ok("sleep alone saves nothing", !store.getDay(TODAY));
+  view.querySelector(".day-check").querySelectorAll(".chip")
+    .find((n) => n.textContent.trim().startsWith("4")).click();
+  const day = store.getDay(TODAY);
+  ok("tapping energy with sleep in saves the day", !!day && day.energy === 4 && day.sleepHours === 7.5, JSON.stringify(day));
+}
+{
+  reset();
+  setPrefill({ date: TODAY });
+  const view = renderLog(ctx({ route: "log" }));
+  view.querySelector(".day-check").querySelectorAll(".chip")
+    .find((n) => n.textContent.trim().startsWith("4")).click();
+  ok("energy before sleep waits for sleep", !store.getDay(TODAY));
+}
+
+// --- the picker: readiness order, folded once a lift is chosen ---
+{
+  reset();
+  checkIn();
+  setPrefill({});
+  const c = ctx({ route: "log" });
+  const view = renderLog(c);
+  const names = view.querySelectorAll(".chip-lift").map((n) => n.textContent);
+  const { liftOrder } = await import("../js/views/plan.js");
+  const o = liftOrder(c.stats);
+  const want = [...o.ready, ...o.resting, ...o.unlogged, ...o.finished].map((s) => s.exercise.name);
+  ok("lifts are offered in the order Next uses", names.join("|") === want.join("|"), names.join("|"));
+
+  view.querySelectorAll(".chip-lift")[0].click();
+  const chosen = renderLog(ctx({ route: "log" }));
+  ok("choosing a lift folds the picker away", chosen.querySelectorAll(".chip-lift").length === 0);
+  const add = chosen.querySelector(".rail-add");
+  ok("and the rail offers the way back to it", !!add);
+  add.click();
+  ok("which unfolds it again", renderLog(ctx({ route: "log" })).querySelectorAll(".chip-lift").length > 0);
+}
+{
+  reset();
+  for (const name of ["Leg press", "Hip thrust"]) store.addExercise({ name });
+  select.invalidate();
+  setPrefill({});
+  const view = renderLog(ctx({ route: "log" }));
+  const search = view.querySelector('.lift-picker input[type="search"]');
+  ok("a long list grows a search box", !!search);
+  const before = refreshes;
+  search.value = "press";
+  search.dispatchEvent("input");
+  const left = view.querySelectorAll(".chip-lift").map((n) => n.textContent);
+  ok(
+    "typing narrows it in place",
+    left.length > 0 && left.every((t) => /press/i.test(t)) && refreshes === before,
+    left.join(","),
+  );
+}
+
+// --- done with a lift: the next one is a tap away ---
+{
+  reset();
+  checkIn();
+  const c = ctx({ route: "log" });
+  const ex = c.stats.find((s) => s.entryCount > 0).exercise;
+  setPrefill({ exerciseId: ex.id, date: TODAY, weight: 60, reps: 5, sets: 3 });
+  const view = renderLog(c);
+  pickRir(view);
+  view.querySelector(".btn-save").click();
+  store.markDone(ex.id, TODAY);
+  select.invalidate();
+  const after = renderLog(ctx({ route: "log" }));
+  const next = after.querySelectorAll(".next-up-btn");
+  ok("finishing offers the next lifts", next.length > 0 && next.length <= 3);
+  ok("none of them is the lift just done", next.every((b) => !b.textContent.includes(ex.name)));
+  ok("the rail marks the finished lift", !!after.querySelector(".rail-seg.is-complete"));
+  next[0].click();
+  const moved = renderLog(ctx({ route: "log" }));
+  ok("one tap moves the form onto it", moved.querySelector(".card-form .card-title").textContent === next[0].textContent);
+}
+
+// --- Setup: a lift is renamed where you are looking ---
+{
+  reset();
+  const ex = store.getExercises()[0];
+  uistate.set("setup.openExerciseId", ex.id);
+  const view = renderSetup(ctx({ route: "setup" }));
+  const input = view.querySelector(".name-input");
+  ok("an open lift leads with its name, editable", !!input && input.value === ex.name);
+  input.value = "  Back squat  ";
+  input.dispatchEvent("change");
+  ok("leaving the field saves the new name, trimmed", store.getExercise(ex.id).name === "Back squat");
+  input.value = "   ";
+  input.dispatchEvent("change");
+  ok("an empty name is refused", store.getExercise(ex.id).name === "Back squat" && input.value === "Back squat");
+  store.undo();
+  ok("and the rename can be undone", store.getExercise(ex.id).name === ex.name);
+}
+
 // --- nothing anywhere prints a stray "null" ---
 // append(null) writes the text "null" in a real browser; every optional piece
 // of a view has to be skipped, not appended.
@@ -3387,7 +3601,7 @@ const measure = await import("../js/measure.js");
   const ex = givePressUps();
   store.addMeasurement({ date: TODAY, bodyweight: 85 });
   select.invalidate();
-  openCard(ex.id);
+  openCard(ex.id, { adjust: true });
   const strays = (node) => node.textContent.includes("null");
   ok("the Next screen prints no stray null", !strays(renderPlan(ctx({ route: "plan" }))));
   setPrefill({ exerciseId: ex.id, date: TODAY, mode: "sets" });

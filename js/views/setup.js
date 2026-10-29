@@ -16,6 +16,7 @@ import {
 } from "../ui.js";
 import * as store from "../store.js";
 import { showWelcome } from "./welcome.js";
+import { plannerExplainers } from "./plan.js";
 import * as ui from "../core/uistate.js";
 import {
   fmt,
@@ -133,17 +134,72 @@ export function renderSetup(ctx) {
   const { settings } = ctx;
   const root = el("section", { class: "view view-setup" });
   root.append(
-    el("header", { class: "view-head" }, [
-      el("h1", { text: "Setup" }),
+    el("header", { class: "view-head" }, [el("h1", { text: "Setup" })]),
+  );
+
+  /* ---------------------------------------------------------- exercises */
+  root.append(el("h2", { class: "section-title", text: "Your lifts" }));
+  const list = el("div", { class: "card-list" });
+  const exercises = store.getExercises();
+  const paintList = () => {
+    const q = String(ui.get(LIFT_SEARCH, "") || "").trim().toLowerCase();
+    const shown = exercises
+      .map((ex, i) => [ex, i])
+      .filter(([ex]) => !q || ex.name.toLowerCase().includes(q));
+    list.replaceChildren(
+      ...shown.map(([ex, i]) => exerciseCard(ex, i, exercises.length, ctx)),
+    );
+    if (!shown.length) list.append(el("p", { class: "card-note", text: "No lifts match." }));
+  };
+  // A long list is quicker to search than to scroll. Filters in place, so the
+  // keyboard stays up while you type.
+  if (exercises.length > 8) {
+    const search = el("input", {
+      type: "search",
+      class: "text-input",
+      placeholder: "Find a lift…",
+      "aria-label": "Find a lift",
+      value: ui.get(LIFT_SEARCH, "") || "",
+    });
+    search.addEventListener("input", () => {
+      ui.set(LIFT_SEARCH, search.value);
+      paintList();
+    });
+    root.append(search);
+  }
+  paintList();
+  root.append(list);
+  root.append(
+    el(
+      "button",
+      {
+        type: "button",
+        class: "btn btn-primary btn-block",
+        onclick: () => addSheet(ctx),
+      },
+      ["Add a lift"],
+    ),
+  );
+  root.append(globalLevel(ctx));
+  root.append(
+    details("How to set these up", [
       el("p", {
-        class: "view-sub",
-        text: "Your lifts, the maths behind the numbers, and your backups. All of it stays on this iPhone.",
+        text: "Starting weight is the lightest this lift can be: the empty bar, or the lowest pin on a stack. Weight step is the smallest increment on top of that. Together they define the loads that exist — a 20 kg bar with 2.5 kg steps means 20, 22.5, 25 and so on, and nothing in between. Leave the starting weight at 0 for dumbbells or anything where the step alone describes it.",
+      }),
+      el("p", {
+        text: "Weight step is the smallest increment you can actually load — every suggestion is rounded up to the next rung. Gain per week is the one number the whole planner turns on, which is why it comes with three presets: pick the level that fits and tune it after, per lift, if you want to.",
+      }),
+      el("p", {
+        text: "A bodyweight lift has nothing to load. There is no weight to record and no one-rep max to estimate, so the planner asks for a rep count instead, progress means more reps, and it adds sets but no tonnage to your totals — the app does not know what you weigh, and a press-up is not all of you anyway.",
+      }),
+      el("p", {
+        text: "Sets per session is the set count the planner assumes when it recommends a weight. Sets per week is your working-set budget for that lift; Progress flags you under, on, or over it. Roughly 10–20 hard sets per muscle per week is the common recommendation, spread across every lift that trains it — so these per-lift numbers should add up to that, not each hit it. What counts against it is hard sets: sets in the 6–20 rep range taken within a couple of reps of failure. A set of three counts for nothing here, however heavy.",
       }),
     ]),
   );
 
   /* ------------------------------------------------------- how much detail */
-  root.append(el("h2", { class: "section-title", text: "How much to show" }));
+  root.append(el("h2", { class: "section-title", text: "Preferences" }));
   root.append(
     el("div", { class: "card card-pad" }, [
       el("div", { class: "field-block" }, [
@@ -165,7 +221,7 @@ export function renderSetup(ctx) {
         }),
         el("p", {
           class: "field-hint",
-          text: "Every screen leads with the plain-English verdict and keeps the arithmetic — the e1RM maths, the target each suggestion is measured against, the projections — one tap underneath it. This decides whether that tap has already been made for you. Nothing is hidden either way, and nothing is calculated differently.",
+          text: "Whether the arithmetic under each verdict starts open.",
         }),
       ]),
       el("div", { class: "lever-row lever-row-half" }, [
@@ -185,7 +241,7 @@ export function renderSetup(ctx) {
       ]),
       el("p", {
         class: "field-hint",
-        text: "Saving a set dated today starts a rest clock above the tab bar; it keeps counting past the target rather than stopping. Set it to 0 to turn the timer off.",
+        text: "Starts when you log a set today. 0 turns it off.",
       }),
     ]),
   );
@@ -228,49 +284,7 @@ export function renderSetup(ctx) {
       ]),
       el("p", {
         class: "field-hint",
-        text: "When a check-in is due, the Next screen asks for one: bodyweight, shoulders, chest, arms, waist, thighs and calves, under Progress → Body. Photos are never stored by the app — it only notes that you took them. Your latest bodyweight is also shown beside your bodyweight lifts.",
-      }),
-    ]),
-  );
-
-  /* ---------------------------------------------------------- exercises */
-  root.append(el("h2", { class: "section-title", text: "Your lifts" }));
-  root.append(globalLevel(ctx));
-  const list = el("div", { class: "card-list" });
-  const exercises = store.getExercises();
-  for (const [i, ex] of exercises.entries())
-    list.append(exerciseCard(ex, i, exercises.length, ctx));
-  root.append(list);
-  root.append(
-    el("p", {
-      class: "field-hint",
-      text: "Tap a lift to change its step, weekly gain and set targets.",
-    }),
-  );
-  root.append(
-    el(
-      "button",
-      {
-        type: "button",
-        class: "btn btn-primary btn-block",
-        onclick: () => addSheet(ctx),
-      },
-      ["Add a lift"],
-    ),
-  );
-  root.append(
-    details("How to set these up", [
-      el("p", {
-        text: "Starting weight is the lightest this lift can be: the empty bar, or the lowest pin on a stack. Weight step is the smallest increment on top of that. Together they define the loads that exist — a 20 kg bar with 2.5 kg steps means 20, 22.5, 25 and so on, and nothing in between. Leave the starting weight at 0 for dumbbells or anything where the step alone describes it.",
-      }),
-      el("p", {
-        text: "Weight step is the smallest increment you can actually load — every suggestion is rounded up to the next rung. Gain per week is the one number the whole planner turns on, which is why it comes with three presets: pick the level that fits and tune it after, per lift, if you want to.",
-      }),
-      el("p", {
-        text: "A bodyweight lift has nothing to load. There is no weight to record and no one-rep max to estimate, so the planner asks for a rep count instead, progress means more reps, and it adds sets but no tonnage to your totals — the app does not know what you weigh, and a press-up is not all of you anyway.",
-      }),
-      el("p", {
-        text: "Sets per session is the set count the planner assumes when it recommends a weight. Sets per week is your working-set budget for that lift; Progress flags you under, on, or over it. Roughly 10–20 hard sets per muscle per week is the common recommendation, spread across every lift that trains it — so these per-lift numbers should add up to that, not each hit it. What counts against it is hard sets: sets in the 6–20 rep range taken within a couple of reps of failure. A set of three counts for nothing here, however heavy.",
+        text: "Next asks when one is due. Photos are never stored — the app only notes that you took them.",
       }),
     ]),
   );
@@ -648,8 +662,15 @@ export function renderSetup(ctx) {
       el("p", {
         text: "For a ramping or pyramid session, just log each set: the different loads become their own rows on their own.",
       }),
+      el("p", {
+        text: "RIR is reps in reserve — how many more you could have done. 0: nothing left. 1–2: a grinder you could just about repeat. 3: clean, could have pushed on. 4+: comfortable.",
+      }),
+      el("p", {
+        text: "The daily check-in saves itself as soon as both answers are in: put in your sleep, then tap your energy.",
+      }),
     ]),
   );
+  root.append(...plannerExplainers(ctx));
   root.append(
     details("Reading the plan", [
       el("p", {
@@ -768,6 +789,7 @@ function today() {
 }
 
 const OPEN_EX = "setup.openExerciseId";
+const LIFT_SEARCH = "setup.liftSearch";
 
 /**
  * The training level every new lift starts from.
@@ -865,6 +887,8 @@ function exerciseCard(ex, index, total, ctx) {
   const st = ctx.stats.find((x) => x.exercise.id === ex.id);
 
   const body = el("div", { class: "card-body" }, [
+    nameField(ex, ctx),
+
     el("div", { class: "field-block" }, [
       el("span", {
         class: "field-label",
@@ -1020,15 +1044,6 @@ function exerciseCard(ex, index, total, ctx) {
         "button",
         {
           type: "button",
-          class: "btn btn-ghost btn-sm",
-          onclick: () => renameSheet(ex, ctx),
-        },
-        ["Rename"],
-      ),
-      el(
-        "button",
-        {
-          type: "button",
           class: "btn btn-danger btn-sm",
           onclick: () => {
             const n = store
@@ -1077,15 +1092,9 @@ function exerciseCard(ex, index, total, ctx) {
           el("p", {
             class: "card-meta",
             text: [
-              reps
-                ? "bodyweight"
-                : ex.base > 0
-                  ? `from ${fmt(ex.base, 1).replace(".0", "")} kg`
-                  : null,
-              reps ? null : `${fmt(ex.step, 1).replace(".0", "")} kg steps`,
-              (levelOf(ex) || { label: "Custom" }).label.toLowerCase() +
-                ` · ${(ex.gainPerWeek * 100).toFixed(2)}%/wk`,
-              `${ex.setsPerSession} sets/session · ${ex.setsPerWeek}/week`,
+              reps ? "bodyweight" : `${fmt(ex.step, 1).replace(".0", "")} kg steps`,
+              `${ex.setsPerSession} sets`,
+              (levelOf(ex) || { label: "Custom" }).label.toLowerCase(),
             ]
               .filter(Boolean)
               .join(" · "),
@@ -1275,33 +1284,46 @@ function applyLevel(id, key) {
   });
 }
 
-function renameSheet(ex, ctx) {
+/**
+ * The name, edited where you are already looking. It saves when you leave
+ * the field or press return, and an empty name is put back rather than saved.
+ */
+function nameField(ex, ctx) {
   const input = el("input", {
     type: "text",
-    class: "text-input",
+    class: "text-input name-input",
     value: ex.name,
-    "aria-label": "Exercise name",
+    autocapitalize: "words",
+    enterkeyhint: "done",
+    "aria-label": "Lift name",
+    id: `nm-${ex.id}`,
   });
-  sheet({
-    title: "Rename lift",
-    body: [
-      el("div", { class: "field-block" }, [
-        el("span", { class: "field-label", text: "Name" }),
-        input,
-      ]),
-    ],
-    actions: [
-      { label: "Cancel", className: "btn-ghost" },
-      {
-        label: "Save",
-        className: "btn-primary",
-        onClick: () => {
-          store.updateExercise(ex.id, { name: input.value });
-          ctx.refresh();
-        },
+  const commit = () => {
+    const next = input.value.trim();
+    if (!next) {
+      input.value = ex.name;
+      return;
+    }
+    if (next === ex.name) return;
+    const before = ex.name;
+    store.updateExercise(ex.id, { name: next });
+    ctx.refresh();
+    toast(`Renamed ${before} to ${next}`, {
+      action: () => {
+        store.undo();
+        ctx.refresh();
       },
-    ],
+      actionLabel: "Undo",
+    });
+  };
+  input.addEventListener("change", commit);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") input.blur();
   });
+  return el("label", { class: "field-block", for: `nm-${ex.id}` }, [
+    el("span", { class: "field-label", text: "Name" }),
+    input,
+  ]);
 }
 
 function addSheet(ctx) {

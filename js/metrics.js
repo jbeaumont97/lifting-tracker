@@ -73,6 +73,11 @@ export const TOPSET = {
   backoffReps: 8,
   backoffFraction: 0.8,
   minBackoffSets: 2,
+  // What the back-offs may be moved to by hand. The defaults above stay the
+  // defaults; these only bound the card's levers so a back-off cannot become
+  // a second top set (too heavy) or warm-up work (too light).
+  backoffRepRange: { min: 5, max: 15 },
+  backoffFractions: [0.7, 0.75, 0.8, 0.85],
   hint: "One heavy set for strength, then lighter sets for size.",
 };
 
@@ -423,7 +428,7 @@ export function nearestStep(value, step, base = 0) {
  * on a bodyweight lift the only lever is reps, and "a lighter set" means
  * nothing.
  */
-export function topSetPlan(target, topReps, backoffSets, settings, step, base = 0) {
+export function topSetPlan(target, topReps, backoffSets, settings, step, base = 0, opts = {}) {
   const asked = Math.round(Number(topReps));
   const r = Number.isFinite(asked) && asked > 0
     ? clamp(asked, ZONES.strength.minReps, ZONES.strength.maxReps)
@@ -434,16 +439,24 @@ export function topSetPlan(target, topReps, backoffSets, settings, step, base = 
     TOPSET.minBackoffSets,
     Number(backoffSets) > 0 ? Math.round(Number(backoffSets)) : 3,
   );
+  const askedReps = Math.round(Number(opts.backoffReps));
+  const backReps = Number.isFinite(askedReps) && askedReps > 0
+    ? clamp(askedReps, TOPSET.backoffRepRange.min, TOPSET.backoffRepRange.max)
+    : TOPSET.backoffReps;
+  const askedFrac = Number(opts.backoffFraction);
+  const fraction = Number.isFinite(askedFrac) && askedFrac > 0
+    ? clamp(askedFrac, TOPSET.backoffFractions[0], TOPSET.backoffFractions[TOPSET.backoffFractions.length - 1])
+    : TOPSET.backoffFraction;
   const backWeight = Math.min(
-    nearestStep(top * TOPSET.backoffFraction, step, base),
+    nearestStep(top * fraction, step, base),
     top,
   );
   const topScore = top * repFactor(r, settings.formula);
   return {
     top: { weight: top, reps: r, sets: 1, score: topScore },
-    backoff: { weight: backWeight, reps: TOPSET.backoffReps, sets: n },
+    backoff: { weight: backWeight, reps: backReps, sets: n, fraction },
     score: topScore,
-    hardSets: repCredit(r) + n * repCredit(TOPSET.backoffReps),
+    hardSets: repCredit(r) + n * repCredit(backReps),
     totalSets: 1 + n,
   };
 }
@@ -1380,6 +1393,7 @@ export function planFor(stats, settings, override = {}) {
    * not need telling that five is the canonical strength scheme.
    */
   let picks;
+  const backoffOpts = { backoffReps: override.backoffReps, backoffFraction: override.backoffPct };
   Object.defineProperty(plan, "picks", {
     enumerable: true,
     configurable: true,
@@ -1392,7 +1406,7 @@ export function planFor(stats, settings, override = {}) {
       const ts = topSetPlan(
         target,
         zone === TOPSET.key || inZone(reps, ZONES.strength) ? reps : TOPSET.topReps,
-        sets, settings, step, base,
+        sets, settings, step, base, backoffOpts,
       );
       picks = {
         strength: cell(repsFor(ZONES.strength), sets),
@@ -1408,6 +1422,37 @@ export function planFor(stats, settings, override = {}) {
           : null,
       };
       return picks;
+    },
+  });
+
+  /**
+   * The top set's own trade-off: one option per strength rep count, each with
+   * the same back-offs behind it. This is what a top set + back-offs session
+   * actually chooses between — the reps × sets grid is about straight sets,
+   * and reading a top set off it gives the wrong weight.
+   */
+  let topsetOptions;
+  Object.defineProperty(plan, "topsetOptions", {
+    enumerable: true,
+    configurable: true,
+    get() {
+      if (topsetOptions !== undefined) return topsetOptions;
+      const current = plan.topset ? plan.topset.top.reps : null;
+      topsetOptions = [];
+      for (let r = ZONES.strength.minReps; r <= ZONES.strength.maxReps; r++) {
+        const ts = topSetPlan(target, r, sets, settings, step, base, backoffOpts);
+        if (!ts) continue;
+        topsetOptions.push({
+          reps: r,
+          weight: ts.top.weight,
+          score: ts.score,
+          band: bandOf(ts.score, ts.top.weight),
+          hardSets: ts.hardSets,
+          backoff: ts.backoff,
+          isPick: r === current,
+        });
+      }
+      return topsetOptions;
     },
   });
 

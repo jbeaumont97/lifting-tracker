@@ -112,16 +112,18 @@ given in plain words, with the arithmetic behind it one tap away under **Show
 the numbers**. The only setting is whether those disclosures start open or
 folded, in **Setup**.
 
-**Next** — one card per lift, each with a single concrete prescription:
-`5 × 5 @ 82.5 kg`, plus how big a jump that is. Lifts are grouped by whether they
-are ready — recovered from the last session, stalest first — and the top card
-opens itself, so the screen answers "what do I do today?" rather than listing
-rows. A chip on each card carries its readiness: _ready in 1d_ while a lift is
-still recovering, a plain day count once rest has stopped adding anything, and
-`24 days · −4%` once a layoff has started costing you strength. Open a card and a
-line under the prescription says why today's number is what it is. Tap **Log
-this** and the log form opens pre-filled.
-Tap a card to open it and you get the reps/sets levers, the target and the full
+**Next** — one row per lift, each carrying a single concrete prescription
+(`5×5 @ 82.5 kg`), its colour band and a **Log** button: one tap opens the log
+form pre-filled with that plan. Lifts are grouped by whether they are ready —
+recovered from the last session, stalest first — so the whole session fits on
+one screen. A chip on each row carries its readiness: _ready in 1d_ while a lift
+is still recovering, a plain day count once rest has stopped adding anything, and
+`24 days · −4%` once a layoff has started costing you strength. Past eight lifts
+a search box appears above the list.
+
+Tap a row to open it: the prescription in large type, **Log this**, the three
+ways to do it, the verdict in words and a line on why today's number is what it
+is. **Adjust** unfolds the reps/sets levers, the target override and the full
 trade-off grid.
 
 Under every prescription are **three ways to do it** — the option for strength,
@@ -133,10 +135,14 @@ it, and **Reset to automatic** puts it back.
 
 **Both** solves the top set against your target as a single set of 3–6 reps, so
 it is the heaviest thing on the card and the number the colour judges. The
-back-offs are sets of eight at 80% of it, rounded to the nearest loadable weight
-— there for the hard sets, not chased. While Both is the pick, the reps lever
-sets the top set and the sets lever sets how many back-offs (never fewer than
-two). **Log this** opens the form on the top set and moves it onto the back-off
+back-offs are, by default, sets of eight at 80% of it, rounded to the nearest
+loadable weight — there for the hard sets, not chased. While Both is the pick,
+**Adjust** speaks in those terms rather than in straight sets: a **Top set** row
+offers 1 × 3, 4, 5 and 6, each with its weight and colour band, one tap to take;
+and **Back-offs** sets their count (never fewer than two), their reps (5–15) and
+their load (70, 75, 80 or 85% of the top set) directly, with the result and the
+session's hard sets shown as you go. **Reset to automatic** clears all of it.
+**Log this** opens the form on the top set and moves it onto the back-off
 weight and reps as soon as the top set is in, set by set or all at once.
 
 A lift you have finished for the day drops out of the readiness order into a
@@ -164,7 +170,13 @@ Aim for green most sessions, take amber when you feel strong. If nearly everythi
 reads amber, your weight step is simply large relative to the lift — widen the
 ideal band in **Setup** until green means what you want it to mean.
 
-**Log** — pick the date, tap a lift, and the form arrives pre-filled with the plan.
+**Log** — the date sits beside the title (Today, Yesterday or any day). Pick a
+lift and the form arrives pre-filled with the plan. Lifts are offered in the
+same order as Next, grouped Ready / Recovering / Not logged yet / Done today,
+with a search box past eight lifts. Once a lift is chosen the list folds away
+into the session rail; **+ Lift** on the rail unfolds it again. RIR and the log
+button stay pinned to the bottom of the screen while the rest of the form
+scrolls, so a set is two taps wherever you are.
 Weight has its own row with big `−` / `+` keys that step by that lift's increment;
 hold one down to travel. A live readout shows what the session would score and
 which band it lands in.
@@ -172,7 +184,9 @@ which band it lands in.
 Two answers are required, so the log is worth analysing later:
 
 - **Before the first set of a day**, a check-in asks for hours slept and energy
-  out of five. It folds to one line once answered (**Change** reopens it). For a
+  out of five. Put in your sleep and tapping your energy saves it — no separate
+  Save (the button is still there for answering in the other order). It folds to
+  one line once answered (**Change** reopens it). For a
   day other than today there is also **Can't remember**, which is recorded as
   exactly that — an honest blank rather than a made-up number.
 - **Every set needs an RIR.** There is no "not noted" and no carry-over from the
@@ -204,9 +218,9 @@ There are two ways to log, because there are two situations:
 reaching a plan — four of a planned five can be the session you meant to have,
 and a sixth can be the one that mattered — so it is a button, and it stops the
 rest clock. Reaching the count you planned offers the same button in a toast
-rather than deciding for you. The session rail above the form turns each lift
-green as you finish it and counts them off: _2 of 3 lifts done_, then _Session
-done_.
+rather than deciding for you. Once a lift is done, the next three in readiness
+order appear as buttons, so moving on is one tap. The session rail above the
+form turns each lift green as you finish it.
 
 Both store the same thing. Sets that match on **weight and reps** are counted onto
 one entry, so `3 × 5 @ 100 kg` is a single row however you typed it, and logging
@@ -255,10 +269,14 @@ the history and on the card — _last session at 88 kg bodyweight, you are 85 kg
 now_ — so ten pull-ups at 90 kg and twelve at 85 kg are not mistaken for the
 same thing. It is context only: the plan and the trend stay in reps.
 
-**Setup** — how much detail to show, the rest timer's target (0 turns it off), body measurement reminders, your
-lifts (tap one to edit), the maths dials, the fatigue/recovery/detraining model
-and its six coefficients, light/dark theme, and your backups. The welcome tour can
-be replayed from the bottom of the page.
+**Setup** — your lifts first (tap one to edit; its **Name** is the first field,
+so renaming is a matter of typing — it saves when you leave the field, and the
+toast offers **Undo**), then how much detail to show, the rest timer's target
+(0 turns it off), body measurement reminders, the maths dials, the fatigue/recovery/detraining model
+and its six coefficients, light/dark theme, and your backups. **How this works**
+at the foot of the page holds the explainers, including how the planner decides
+and strength against size, which used to sit under the cards on Next. The
+welcome tour can be replayed from the bottom of the page.
 
 Each lift records **what it trains**: the muscles it mainly works and the ones
 it also works. Existing lifts start with a guess from their name (marked as one

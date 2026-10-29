@@ -42,6 +42,8 @@ const OV = 'plan.overrides';   // exerciseId -> { target, reps, sets }
 const GRID = 'plan.gridMode';  // exerciseId -> { mode: 'weights'|'scores'|'table' }
 const OPEN = 'plan.openId';
 const SEARCH = 'plan.search';  // string
+const ADJUST = 'plan.adjustId'; // the open card whose levers and grid are showing
+const SEARCH_FROM = 8;          // lifts before a search box earns its place
 const TAGFILT = 'plan.tags';   // string[] — a lift matches if it carries any of these
 // undefined = nothing decided yet, so the view may open the top card itself.
 // null = every card is deliberately closed.
@@ -62,7 +64,7 @@ function isReady(s) {
 
 /** The card's manual overrides. A read-only copy — write through setOv(). */
 function ov(id) {
-  return ui.forExercise(OV, id, { target: null, reps: null, sets: null, zone: null });
+  return ui.forExercise(OV, id, { target: null, reps: null, sets: null, zone: null, backoffReps: null, backoffPct: null });
 }
 
 function setOv(id, patch) { ui.setForExercise(OV, id, patch); }
@@ -71,15 +73,8 @@ export function renderPlan(ctx) {
   const { settings, stats } = ctx;
   const root = el('section', { class: 'view view-plan' });
 
-  root.append(
-    el('header', { class: 'view-head' }, [
-      el('h1', { text: 'Next session' }),
-      el('p', {
-        class: 'view-sub',
-        text: 'One prescription per lift, sized to be a small step up on your last session.',
-      }),
-    ]),
-  );
+  const head = el('header', { class: 'view-head' }, [el('h1', { text: 'Next session' })]);
+  root.append(head);
 
   const trained = stats.filter((s) => s.entryCount > 0);
   if (!trained.length) {
@@ -96,7 +91,7 @@ export function renderPlan(ctx) {
     return root;
   }
 
-  root.append(sessionStrip(ctx, trained));
+  head.append(sessionStrip(ctx, trained));
   const prompt = measurePrompt(ctx);
   if (prompt) root.append(prompt);
 
@@ -106,20 +101,7 @@ export function renderPlan(ctx) {
   // looking like something you have yet to get to.
   // Every lift, not just the trained ones: a lift with nothing logged can still
   // be called done, and it has to land in a group or it leaves the screen.
-  const finishedToday = stats.filter((s) => s.doneToday);
-  const outstanding = trained.filter((s) => !s.doneToday);
-  const ready = outstanding
-    .filter(isReady)
-    .sort((a, b) => (b.daysSince ?? 0) - (a.daysSince ?? 0));
-  const resting = outstanding
-    .filter((s) => !isReady(s))
-    .sort((a, b) => (a.daysSince ?? 0) - (b.daysSince ?? 0));
-  const unlogged = stats.filter((s) => !s.entryCount && !s.doneToday);
-
-  // The top of the readiness order opens itself: a home screen should show you
-  // a weight, not four collapsed rows. Driven off the unfiltered order, so
-  // typing in the search box never changes which card opened on first load.
-  if (openId() === undefined) setOpenId((ready[0] || resting[0])?.exercise.id ?? null);
+  const { ready, resting, unlogged, finished: finishedToday } = liftOrder(stats);
 
 
   const allTags = [...new Set(stats.flatMap((s) => s.exercise.tags || []))].sort((a, b) => a.localeCompare(b));
@@ -135,11 +117,12 @@ export function renderPlan(ctx) {
     const match = (s) => (!q || s.exercise.name.toLowerCase().includes(q))
       && (!activeTags.length || (s.exercise.tags || []).some((t) => activeTags.includes(t)));
 
+    // Every row already shows its plan, so the groups need no explaining.
     const groups = [
-      { title: 'Ready now', rows: ready.filter(match), hint: 'Recovered from the last session — stalest first.' },
-      { title: 'Still recovering', rows: resting.filter(match), hint: 'Trained recently enough that a hard session would be uphill. The plans below are held back to match.' },
-      { title: 'Not logged yet', rows: unlogged.filter(match), hint: null },
-      { title: 'Done today', rows: finishedToday.filter(match), hint: 'Finished. Nothing here needs doing again today.' },
+      { title: 'Ready now', rows: ready.filter(match) },
+      { title: 'Still recovering', rows: resting.filter(match) },
+      { title: 'Not logged yet', rows: unlogged.filter(match) },
+      { title: 'Done today', rows: finishedToday.filter(match) },
     ];
     const nodes = [];
     for (const group of groups) {
@@ -148,7 +131,6 @@ export function renderPlan(ctx) {
         el('h2', { class: 'section-title', text: group.title }),
         el('span', { class: 'group-count', text: String(group.rows.length) }),
       ]));
-      if (group.hint) nodes.push(el('p', { class: 'group-hint', text: group.hint }));
       const list = el('div', { class: 'card-list' });
       for (const s of group.rows) list.append(card(s, ctx, settings));
       nodes.push(list);
@@ -170,7 +152,9 @@ export function renderPlan(ctx) {
     'aria-label': 'Search lifts by name', value: ui.get(SEARCH, ''),
   });
   searchInput.addEventListener('input', () => { ui.set(SEARCH, searchInput.value); paintResults(); });
-  root.append(el('div', { class: 'field-block' }, [searchInput]));
+  // A handful of rows is quicker to read than to search.
+  const longList = stats.length > SEARCH_FROM || ui.get(SEARCH, '') !== '';
+  if (longList) root.append(el('div', { class: 'field-block' }, [searchInput]));
 
   if (allTags.length) {
     const tagHost = el('div');
@@ -192,32 +176,6 @@ export function renderPlan(ctx) {
   paintResults();
   root.append(resultsHost);
 
-  root.append(
-    details('How the planner decides', [
-      el('p', { text: 'Each plan starts from your last session for that lift and adds a small step — the weekly gain you set per lift in Setup, earned by the week rather than by the session, so a lift you train twice a week is not asked to gain twice as fast as one you train once.' }),
-      el('p', { text: 'Then it takes the gap into account. Train again a day later and the step is held back, because you are still carrying the last session. Come back after a month and the suggestion drops below what you last did, because some of it will have gone. Both of those settle back to nothing in between: a few days of rest is simply rest.' }),
-      el('p', { text: 'The colour tells you how big the jump is: green is the smallest honest step forward, amber is ambitious but usually doable, red will probably cost you reps.' }),
-      disclose('Show the maths', [
-        el('p', { text: 'Your target is last session’s adjusted e1RM, moved by three things and then multiplied together: fitness earned in the gap (this lift’s weekly gain, pro-rated over the days since, and only while the rest is still productive); strength lost to a layoff (nothing for the first fortnight, then a half-life decay toward a floor you keep indefinitely); and fatigue still owed to the last session (a deficit that decays over roughly three days, scaled by how many sets you did and how close to failure you took them). The planner holds your rep scheme and set count steady and adds weight; the grid is there for when you would rather trade sets against load.' }),
-        el('p', { text: 'Detraining discounts your recorded best as well as your target — a comeback session should not be marked down for failing to be a PR against a number you no longer own. Fatigue does not: being tired today has not taken a kilo off what you can do. All six coefficients are yours to change in Setup, and the whole model can be switched off there, which puts the flat per-session step back.' }),
-        el('p', { text: 'Weights always round UP to a loadable step, so no suggestion can undershoot the target.' }),
-        el('p', { text: 'If nearly everything reads amber, your weight step is simply large relative to the lift — one plate on a 40 kg press is a bigger percentage than on a 140 kg deadlift. Widen the ideal band in Setup until green means what you want it to mean.' }),
-      ], { open: ctx.numbersOpen }),
-      legend(),
-    ]),
-    details('Strength and size', [
-      el('p', { text: 'Every lift is read two ways, because "how heavy" and "how much of the right kind" are different questions. A heavy triple answers the first and barely touches the second; four sets of twelve answer the second and barely touch the first. Both are training; they are not the same training.' }),
-      el('p', { text: `The weight is worked out the same way either way — your adjusted e1RM tells the app what you can do for three reps or for twelve, and it rounds up to a loadable step. What changes is the rep range: ${ZONES.strength.minReps}–${ZONES.strength.maxReps} for strength, ${ZONES.hypertrophy.minReps}–${ZONES.hypertrophy.maxReps} for size, marked down the side of the grid. They overlap at six on purpose. Six reps is genuinely both, and a clean line between them would be a precision that does not exist.` }),
-      el('p', { text: 'Size is then measured in hard sets, not in tonnage. Tonnage cannot tell a single at 300 kg from thirty reps at 10 kg — the two multiply out the same — so it is a poor judge of something that depends almost entirely on how many reps you did and how close to failure you took them. A set counts fully inside the rep range and taken within a couple of reps of failure, and counts for less the further outside that it falls. Your weekly budget in Setup is what it counts against.' }),
-      el('p', { text: `The third pick, Both, splits the session instead of choosing: one top set of ${ZONES.strength.minReps}–${ZONES.strength.maxReps} reps solved against your target as a single set, then back-off sets of ${TOPSET.backoffReps} at ${Math.round(TOPSET.backoffFraction * 100)}% of it. The top set is where strength is chased, so it is the number the colour judges; the back-offs are where the hard sets come from. While it is the pick, the reps lever sets the top set and the sets lever sets how many back-offs.` }),
-      el('p', { text: 'None of the picks is the app’s recommendation. All are on every card, and taking one is a tap; nothing is stored against the lift and nothing is hidden behind a setting.' }),
-      disclose('Show the maths', [
-        el('p', { text: `A set is worth its rep credit times its failure credit. Rep credit is 1 from ${ZONES.hypertrophy.minReps} to ${ZONES.hypertrophy.maxReps} reps, ramping up from zero over the three reps below that and tapering back to zero over the ten above — so a triple is worth nothing, five reps about two thirds, and a set of twenty-five about half. Failure credit is 1 at nought to two reps in reserve and falls away past that.` }),
-        el('p', { text: 'A set logged with no RIR is assumed to have been a normal hard one, so not recording it costs you nothing. Where the per-set log has RIR, each set is credited on its own: a block keeps the lowest RIR of the sets counted onto it, and using that for all of them would credit five sets as though they had all started at the hardest one.' }),
-        el('p', { text: 'Both numbers are heuristics, like the set bonus. The edges of the rep range are genuinely fuzzy and the falloff past two reps in reserve is a judgement, not a measurement. What is not a judgement is that a heavy single is not hypertrophy work, and tonnage said it was.' }),
-      ], { open: ctx.numbersOpen }),
-    ]),
-  );
   return root;
 }
 
@@ -230,19 +188,17 @@ function measurePrompt(ctx) {
   const { settings, today } = ctx;
   const due = measureDue(store.getMeasurements(), settings, today, store.getMeasureSnooze());
   if (!due.due) return null;
-  const photos = settings.measurePhotos ? ' and take your progress photos' : '';
+  const photos = !!settings.measurePhotos;
   return el('div', { class: 'measure-prompt', role: 'status' }, [
     el('div', { class: 'measure-prompt-text' }, [
       el('strong', { text: due.never ? 'Start tracking size' : 'Body check-in due' }),
-      el('span', { text: due.never
-        ? `Measure arms, chest, waist and the rest${photos} so there is something to compare against. Every ${due.interval} days after that.`
-        : `It has been ${due.days} days. Measure${photos} — two minutes, ideally before you train.` }),
+      el('span', { text: due.never ? `Every ${due.interval} days${photos ? ', with photos' : ''}` : `${due.days} days since the last${photos ? ' · photos too' : ''}` }),
     ]),
     el('div', { class: 'measure-prompt-actions' }, [
       el('button', {
         type: 'button', class: 'btn btn-primary btn-sm',
         onclick: () => { tap(); ctx.goTo('progress', { measure: true }); },
-      }, ['Measure now']),
+      }, ['Measure']),
       el('button', {
         type: 'button', class: 'btn btn-ghost btn-sm',
         onclick: () => {
@@ -297,33 +253,30 @@ function card(stats, ctx, settings) {
   const o = ov(id);
   const isOpen = openId() === id;
   const plan = stats.entryCount ? planFor(stats, settings, o) : null;
+  const ready = !!(plan && plan.ready);
+  const repsOnly = isBodyweight(stats.exercise);
+  const ts = ready ? plan.topset : null;
+  const toggle = () => { tap(); setOpenId(isOpen ? null : id); ctx.refresh({ transition: true }); };
 
-  const head = el('button', {
-    type: 'button', class: 'card-head', 'aria-expanded': isOpen ? 'true' : 'false',
-    onclick: () => { tap(); setOpenId(isOpen ? null : id); ctx.refresh({ transition: true }); },
-  }, [
-    accentDot(id),
-    el('div', { class: 'card-head-main' }, [
-      el('div', { class: 'card-title-row' }, [
-        el('h2', { class: 'card-title', text: stats.exercise.name }),
-        readinessChip(stats),
-      ]),
-      el('p', {
-        class: 'card-meta',
-        text: stats.lastDate
-          ? `${relativeDate(stats.lastDate)} · ${fmtNum(stats.lastSets)}×${fmtNum(stats.lastReps)}`
-            + (isBodyweight(stats.exercise) ? ' reps' : ` @ ${fmtWeight(lastWeight(stats))} kg`)
-          : 'Never logged',
-      }),
-    ]),
-    chevron(),
-  ]);
+  // The plan travels with the hand-off and is recorded on every set it
+  // produces, so the log knows which pick each session followed.
+  const handoff = !ready ? { exerciseId: id }
+    : ts
+      ? { exerciseId: id, weight: ts.top.weight, reps: ts.top.reps, sets: ts.totalSets,
+        backoff: { weight: ts.backoff.weight, reps: ts.backoff.reps, sets: ts.backoff.sets },
+        plan: { zone: 'topset', weight: ts.top.weight, reps: ts.top.reps, sets: 1, target: plan.target, band: plan.band?.key,
+          backoff: { weight: ts.backoff.weight, reps: ts.backoff.reps, sets: ts.backoff.sets } } }
+      : { exerciseId: id, weight: plan.weight, reps: plan.reps, sets: plan.sets,
+        plan: { zone: plan.zone, weight: repsOnly ? null : plan.weight, reps: plan.reps, sets: plan.sets, target: plan.target, band: plan.band?.key } };
+  const logIt = () => { tap(); ctx.goTo('log', handoff); };
 
-  const body = el('div', { class: 'card-body' });
+  const lastText = stats.lastDate
+    ? `${relativeDate(stats.lastDate)} · ${fmtNum(stats.lastSets)}×${fmtNum(stats.lastReps)}`
+      + (repsOnly ? ' reps' : ` @ ${fmtWeight(lastWeight(stats))} kg`)
+    : 'Never logged';
 
-  // A lift you have finished is answering a different question: not "what do I
-  // do today" but "what did I do". The plan is still there, one disclosure
-  // away, for when today turns out not to be over after all.
+  // What you did today, for a lift called done.
+  let doneText = null;
   if (stats.doneToday) {
     const todays = stats.sessions.find((x) => x.date === ctx.today);
     const bits = [];
@@ -332,31 +285,72 @@ function card(stats, ctx, settings) {
       bits.push(describeSet(stats.exercise, todays.sets, todays.best.reps, todays.best.weight));
       if (todays.volume > 0) bits.push(`${fmt(todays.volume, 0)} kg of work`);
     }
-    body.append(el('p', { class: 'presc-explain done-line' }, [
-      el('span', { class: 'summary-tick', 'aria-hidden': 'true', text: '✓' }),
-      el('span', { text: bits.length ? bits.join(' · ') : 'Called done for today.' }),
-    ]));
-    if (isOpen) {
-      body.append(disclose(plan && plan.ready ? 'Today’s plan, if you go back to it' : 'Changed your mind?', [
-        plan && plan.ready
-          ? el('p', { class: 'card-note', text: describeSet(stats.exercise, plan.sets, plan.reps, plan.weight) })
-          : null,
-        el('button', {
-          type: 'button', class: 'btn btn-ghost btn-block btn-sm',
-          onclick: () => {
-            store.clearDone(id, ctx.today);
-            ctx.refresh({ transition: true });
-            toast(`${stats.exercise.name} is open again.`, {
-              action: () => { store.undo(); ctx.refresh(); }, actionLabel: 'Undo',
-            });
-          },
-        }, ['Not done after all']),
-      ], { open: false }));
-    }
-    return el('article', { class: `card is-finished${isOpen ? ' is-open' : ''}`, style: `view-transition-name: card-${cssName(id)}` }, [head, body]);
+    doneText = bits.length ? bits.join(' · ') : 'Called done for today.';
   }
 
-  if (!plan || !plan.ready) {
+  // Closed, a row is the answer and nothing else: the plan, how big a jump it
+  // is, and a button that logs it. Everything that explains it is one tap in.
+  const meta = stats.doneToday
+    ? el('p', { class: 'card-meta done-line' }, [
+      el('span', { class: 'summary-tick', 'aria-hidden': 'true', text: '✓' }),
+      el('span', { text: doneText }),
+    ])
+    : ready && !isOpen
+      ? el('p', { class: 'card-meta card-plan' }, [
+        el('span', { class: 'card-plan-value', text: shortPlan(plan, repsOnly) }),
+        bandChip(plan.band, { compact: true }),
+      ])
+      : el('p', { class: 'card-meta', text: lastText });
+
+  const head = el('div', { class: 'card-head-row' }, [
+    el('button', {
+      type: 'button', class: 'card-head', 'aria-expanded': isOpen ? 'true' : 'false',
+      onclick: toggle,
+    }, [
+      accentDot(id),
+      el('div', { class: 'card-head-main' }, [
+        el('div', { class: 'card-title-row' }, [
+          el('h2', { class: 'card-title', text: stats.exercise.name }),
+          readinessChip(stats),
+        ]),
+        meta,
+      ]),
+      chevron(),
+    ]),
+    stats.doneToday || isOpen ? null : el('button', {
+      type: 'button', class: 'btn btn-primary btn-sm card-quick',
+      'aria-label': `Log ${stats.exercise.name}`, onclick: logIt,
+    }, ['Log']),
+  ]);
+
+  const article = (cls, kids) => el('article', {
+    class: `card${cls}${isOpen ? ' is-open' : ''}`,
+    style: `view-transition-name: card-${cssName(id)}`,
+  }, kids);
+
+  if (!isOpen) return article(stats.doneToday ? ' is-finished' : '', [head]);
+
+  const body = el('div', { class: 'card-body' });
+
+  // A lift you have finished is answering a different question: not "what do I
+  // do today" but "what did I do". The plan is still there for when today
+  // turns out not to be over after all.
+  if (stats.doneToday) {
+    if (ready) body.append(el('p', { class: 'card-note', text: `Today’s plan, if you go back to it: ${describeSet(stats.exercise, plan.sets, plan.reps, plan.weight)}` }));
+    body.append(el('button', {
+      type: 'button', class: 'btn btn-ghost btn-block btn-sm',
+      onclick: () => {
+        store.clearDone(id, ctx.today);
+        ctx.refresh({ transition: true });
+        toast(`${stats.exercise.name} is open again.`, {
+          action: () => { store.undo(); ctx.refresh(); }, actionLabel: 'Undo',
+        });
+      },
+    }, ['Not done after all']));
+    return article(' is-finished', [head, body]);
+  }
+
+  if (!ready) {
     // A lift whose every session was logged with no weight has no score to
     // plan from. Saying "log a session" to somebody who has logged nine is the
     // least helpful thing the card could do.
@@ -375,20 +369,19 @@ function card(stats, ctx, settings) {
           });
         },
       }, ['Mark as bodyweight']));
-      return el('article', { class: 'card', style: `view-transition-name: card-${cssName(id)}` }, [head, body]);
+      return article('', [head, body]);
     }
     body.append(el('p', { class: 'card-note', text: 'Log a session for this lift and its plan appears here.' }));
     body.append(el('button', {
       type: 'button', class: 'btn btn-primary btn-block',
       onclick: () => ctx.goTo('log', { exerciseId: id }),
     }, ['Log a set']));
-    return el('article', { class: 'card', style: `view-transition-name: card-${cssName(id)}` }, [head, body]);
+    return article('', [head, body]);
   }
 
   // --- the prescription, the one thing to read ---
   // On a reps lift the rep count IS the prescription, so it takes the big type
   // that the weight has on every other card.
-  const repsOnly = isBodyweight(stats.exercise);
   const lw = repsOnly ? Number(stats.lastReps) : lastWeight(stats);
   const now = repsOnly ? plan.reps : plan.weight;
   const delta = Number.isFinite(lw) && lw != null ? now - lw : null;
@@ -396,7 +389,6 @@ function card(stats, ctx, settings) {
   // The prescription is laid out in pieces with the spacing done by flex, which
   // means its text content runs together — "5 reps@102.5 kg". Say it once,
   // properly, and hide the pieces from anything reading rather than looking.
-  const ts = plan.topset;
   const spoken = repsOnly
     ? `${plan.sets} sets of ${plan.reps} reps`
     : ts
@@ -404,7 +396,7 @@ function card(stats, ctx, settings) {
       : `${plan.sets} sets of ${plan.reps} reps at ${fmtWeight(plan.weight)} kilos`;
   body.append(
     el('div', { class: 'presc' }, [
-      el('div', { class: isOpen ? 'presc-hero' : 'presc-line' }, [
+      el('div', { class: 'presc-hero' }, [
         el('span', { class: 'visually-hidden', text: spoken }),
         ...(repsOnly ? [
           el('span', { class: 'presc-scheme', 'aria-hidden': 'true', text: `${plan.sets} sets ×` }),
@@ -427,8 +419,29 @@ function card(stats, ctx, settings) {
     ]),
   );
 
+  // The one action the card exists for sits straight under the number.
+  const adjusting = ui.get(ADJUST, null) === id;
+  body.append(el('div', { class: 'card-actions' }, [
+    el('button', { type: 'button', class: 'btn btn-primary', onclick: logIt }, ['Log this']),
+    el('button', {
+      type: 'button', class: 'btn btn-ghost', 'aria-expanded': adjusting ? 'true' : 'false',
+      onclick: () => { tap(); ui.set(ADJUST, adjusting ? null : id); ctx.refresh({ transition: true }); },
+    }, [adjusting ? 'Done adjusting' : 'Adjust']),
+  ]));
+
   const picksNode = zonePicks(stats, plan, ctx, settings);
   if (picksNode) body.append(picksNode);
+  if (o.reps !== null || o.sets !== null || o.target !== null || o.zone !== null
+    || o.backoffReps != null || o.backoffPct != null) {
+    body.append(el('button', {
+      type: 'button', class: 'btn btn-ghost btn-block btn-sm',
+      onclick: () => {
+        ui.clearForExercise(OV, id);
+        ctx.refresh();
+        toast('Back to automatic');
+      },
+    }, ['Reset to automatic']));
+  }
   const bwLine = repsOnly ? bodyweightLine(stats, ctx) : null;
   if (bwLine) body.append(bwLine);
 
@@ -440,30 +453,14 @@ function card(stats, ctx, settings) {
   }));
 
   // Why today's number is what it is: fatigue still owed, or strength lost to a
-  // layoff. Only worth the line when it is actually saying something, or when
-  // the card is open and there is room for the detail.
+  // layoff.
   const rNote = readinessNote(stats.readiness);
-  if (rNote && (isOpen || stats.readiness.phase.key !== 'ready')) {
+  if (rNote) {
     body.append(el('p', { class: `presc-readiness is-${stats.readiness.phase.key}` }, [
       el('span', { class: 'presc-readiness-glyph', 'aria-hidden': 'true', text: stats.readiness.phase.glyph }),
       el('span', { text: rNote }),
     ]));
   }
-
-  body.append(disclose('Show the numbers', [
-    el('p', { text: `Scores ${fmt(plan.score, 1)} against a target of ${fmt(plan.target, 1)} `
-      + `(${fmtSigned(plan.overshoot, 1)}${repsOnly ? '' : ' kg'} over). ${plan.band.hint}.`
-      + (plan.atBase ? ` That is the lightest this lift loads — ${fmtWeight(plan.base)} kg is the bar.` : '') }),
-    readinessMaths(stats.readiness) ? el('p', { text: readinessMaths(stats.readiness) }) : null,
-    el('div', { class: 'target-facts' }, [
-      factLine(repsOnly ? 'Target score' : 'Target adj e1RM', `${fmt(plan.target, 1)}${repsOnly ? '' : ' kg'}`,
-        plan.usingManualTarget ? 'your override' : targetSub(stats, plan)),
-      factLine('Current best', `${fmt(plan.bestNow, 1)}${repsOnly ? '' : ' kg'}`,
-        plan.bestNow < stats.bestAdj - 0.05
-          ? `${fmt(stats.bestAdj, 1)} less ${((1 - stats.readiness.retention) * 100).toFixed(1)}% detraining`
-          : stats.bestAdj > stats.lastAdj + 1e-9 ? 'beat this to set a PR' : 'set last session'),
-    ]),
-  ], { open: ctx.numbersOpen }));
 
   if (plan.band.key === 'beaten' && Number.isFinite(plan.bestNow)) {
     body.append(el('button', {
@@ -480,38 +477,38 @@ function card(stats, ctx, settings) {
     ]));
   }
 
+  if (adjusting) body.append(detail(stats, plan, ctx, settings));
+
+  body.append(disclose('Show the numbers', [
+    el('p', { text: `Scores ${fmt(plan.score, 1)} against a target of ${fmt(plan.target, 1)} `
+      + `(${fmtSigned(plan.overshoot, 1)}${repsOnly ? '' : ' kg'} over). ${plan.band.hint}.`
+      + (plan.atBase ? ` That is the lightest this lift loads — ${fmtWeight(plan.base)} kg is the bar.` : '') }),
+    readinessMaths(stats.readiness) ? el('p', { text: readinessMaths(stats.readiness) }) : null,
+    el('div', { class: 'target-facts' }, [
+      factLine(repsOnly ? 'Target score' : 'Target adj e1RM', `${fmt(plan.target, 1)}${repsOnly ? '' : ' kg'}`,
+        plan.usingManualTarget ? 'your override' : targetSub(stats, plan)),
+      factLine('Current best', `${fmt(plan.bestNow, 1)}${repsOnly ? '' : ' kg'}`,
+        plan.bestNow < stats.bestAdj - 0.05
+          ? `${fmt(stats.bestAdj, 1)} less ${((1 - stats.readiness.retention) * 100).toFixed(1)}% detraining`
+          : stats.bestAdj > stats.lastAdj + 1e-9 ? 'beat this to set a PR' : 'set last session'),
+    ]),
+  ], { open: ctx.numbersOpen }));
+
   // Where this lift is heading, with somewhere to be heading to. Only when the
   // fit is good enough to date — a milestone with "cannot say yet" under it on
   // all seven cards is noise, and the Progress screen carries that case.
   const run = runway(stats, settings, { todayIso: ctx.today });
   if (run && run.eta && !run.eta.tooFar) body.append(milestoneTrack(run, { compact: true }));
 
-  const actions = el('div', { class: 'card-actions' }, [
-    el('button', {
-      type: 'button', class: 'btn btn-primary',
-      // The plan travels with the hand-off and is recorded on every set it
-      // produces, so the log knows which pick each session followed.
-      onclick: () => ctx.goTo('log', ts
-        ? { exerciseId: id, weight: ts.top.weight, reps: ts.top.reps, sets: ts.totalSets,
-          backoff: { weight: ts.backoff.weight, reps: ts.backoff.reps, sets: ts.backoff.sets },
-          plan: { zone: 'topset', weight: ts.top.weight, reps: ts.top.reps, sets: 1, target: plan.target, band: plan.band?.key,
-            backoff: { weight: ts.backoff.weight, reps: ts.backoff.reps, sets: ts.backoff.sets } } }
-        : { exerciseId: id, weight: plan.weight, reps: plan.reps, sets: plan.sets,
-          plan: { zone: plan.zone, weight: repsOnly ? null : plan.weight, reps: plan.reps, sets: plan.sets, target: plan.target, band: plan.band?.key } }),
-    }, ['Log this']),
-    el('button', {
-      type: 'button', class: 'btn btn-ghost',
-      onclick: () => { tap(); setOpenId(isOpen ? null : id); ctx.refresh({ transition: true }); },
-    }, [isOpen ? 'Close' : 'Adjust']),
-  ]);
-  body.append(actions);
+  return article('', [head, body]);
+}
 
-  if (isOpen) body.append(detail(stats, plan, ctx, settings));
-
-  return el('article', {
-    class: `card${isOpen ? ' is-open' : ''}`,
-    style: `view-transition-name: card-${cssName(id)}`,
-  }, [head, body]);
+/** "5×5 @ 70 kg", "1×5 @ 75 → 5×8 @ 60 kg", "3×12 reps" — a plan on one line. */
+function shortPlan(plan, repsOnly) {
+  if (repsOnly) return `${plan.sets}×${plan.reps} reps`;
+  const ts = plan.topset;
+  if (ts) return `1×${ts.top.reps} @ ${fmtWeight(ts.top.weight)} → ${ts.backoff.sets}×${ts.backoff.reps} @ ${fmtWeight(ts.backoff.weight)} kg`;
+  return `${plan.sets}×${plan.reps} @ ${fmtWeight(plan.weight)} kg`;
 }
 
 /**
@@ -577,6 +574,7 @@ function zonePicks(stats, plan, ctx, settings) {
 }
 
 function detail(stats, plan, ctx, settings) {
+  if (plan.topset) return topsetDetail(stats, plan, ctx);
   const id = stats.exercise.id;
   const o = ov(id);
   const wrap = el('div', { class: 'card-detail' });
@@ -680,16 +678,89 @@ function detail(stats, plan, ctx, settings) {
     ]));
   }
 
-  if (o.reps !== null || o.sets !== null || o.target !== null || o.zone !== null) {
-    wrap.append(el('button', {
-      type: 'button', class: 'btn btn-ghost btn-block',
-      onclick: () => {
-        ui.clearForExercise(OV, id);
-        ctx.refresh();
-        toast('Back to automatic');
-      },
-    }, ['Reset to automatic']));
-  }
+  return wrap;
+}
+
+/**
+ * Adjusting a top set + back-offs session.
+ *
+ * The straight-sets levers and grid do not describe this session: "sets" would
+ * silently mean back-offs, and every cell in the grid is a weight for straight
+ * sets that the top set never uses. So it gets its own two halves, named for
+ * what they are. The top set trades reps against weight, one row, judged
+ * against the target like everything else. The back-offs are a dose rather
+ * than a target, so they are set directly — how many, how many reps, and how
+ * far below the top set.
+ */
+function topsetDetail(stats, plan, ctx) {
+  const id = stats.exercise.id;
+  const o = ov(id);
+  const ts = plan.topset;
+  const wrap = el('div', { class: 'card-detail topset-detail' });
+  const set = (patch) => { setOv(id, { zone: TOPSET.key, ...patch }); ctx.refresh(); };
+
+  // --- the top set: reps against weight ---
+  wrap.append(el('div', { class: 'grid-block' }, [
+    el('div', { class: 'grid-head' }, [el('h3', { text: 'Top set' })]),
+    el('div', { class: 'topset-options', role: 'radiogroup', 'aria-label': 'Top set reps' },
+      plan.topsetOptions.map((opt) => el('button', {
+        type: 'button', role: 'radio',
+        class: `topset-option${opt.isPick ? ' is-pick' : ''}`,
+        dataset: { band: opt.band.key },
+        'aria-checked': opt.isPick ? 'true' : 'false',
+        'aria-label': `Top set of ${opt.reps} at ${fmtWeight(opt.weight)} kilos, ${opt.band.label}`,
+        onclick: () => { tap(); set({ reps: opt.reps }); },
+      }, [
+        el('span', { class: 'topset-option-reps', text: `1 × ${opt.reps}` }),
+        el('span', { class: 'topset-option-weight', text: `${fmtWeight(opt.weight)} kg` }),
+        el('span', { class: 'cell-glyph', 'aria-hidden': 'true', text: opt.band.glyph }),
+      ]))),
+    el('p', { class: 'grid-note', text: 'Each one meets the same target as a single set. The colour judges the top set; the back-offs are not chased.' }),
+  ]));
+
+  // --- the back-offs: a dose, set directly ---
+  const pct = ts.backoff.fraction ?? TOPSET.backoffFraction;
+  wrap.append(el('div', { class: 'grid-block' }, [
+    el('div', { class: 'grid-head' }, [
+      el('h3', { text: 'Back-offs' }),
+      el('span', { class: 'topset-backoff-now', text: `${ts.backoff.sets} × ${ts.backoff.reps} @ ${fmtWeight(ts.backoff.weight)} kg` }),
+    ]),
+    el('div', { class: 'lever-row' }, [
+      stepper({
+        label: 'Sets', value: ts.backoff.sets, step: 1, min: TOPSET.minBackoffSets, max: 10, dp: 0, id: `bo-sets-${id}`,
+        onChange: (v) => set({ sets: v }),
+      }),
+      stepper({
+        label: 'Reps', value: ts.backoff.reps, step: 1,
+        min: TOPSET.backoffRepRange.min, max: TOPSET.backoffRepRange.max, dp: 0, id: `bo-reps-${id}`,
+        onChange: (v) => set({ backoffReps: v }),
+      }),
+    ]),
+    el('div', { class: 'field-block' }, [
+      el('span', { class: 'stepper-label', text: 'Load, % of the top set' }),
+      el('div', { class: 'chips topset-pcts', role: 'radiogroup', 'aria-label': 'Back-off load' },
+        TOPSET.backoffFractions.map((f) => {
+          const on = Math.abs(f - pct) < 1e-9;
+          return el('button', {
+            type: 'button', role: 'radio', class: `chip${on ? ' is-selected' : ''}`,
+            'aria-checked': on ? 'true' : 'false',
+            onclick: () => { tap(); set({ backoffPct: f }); },
+          }, [`${Math.round(f * 100)}%`]);
+        })),
+    ]),
+    el('p', { class: 'grid-note', text: `${fmt(ts.hardSets, 1)} hard sets across the session.` }),
+  ]));
+
+  wrap.append(disclose('Set the target myself', [
+    el('p', { text: 'The planner works this out from your last session. Put a number in to '
+      + 'override it — the top set re-solves against whatever you set.' }),
+    stepper({
+      label: 'Override target (kg)', value: o.target ?? '', step: 0.5, min: 0, max: 999, dp: 1,
+      id: `tgt-${id}`, placeholder: fmt(plan.autoTarget, 1) + ' auto',
+      onChange: (v) => { setOv(id, { target: v > 0 ? v : null }); ctx.refresh(); },
+    }),
+  ], { open: plan.usingManualTarget }));
+  wrap.append(legend());
   return wrap;
 }
 
@@ -852,4 +923,58 @@ function fmtNum(n) {
 
 export function clearOverrides() { ui.set(OV, {}); }
 
-export function openCard(id) { setOpenId(id); }
+/** Open a lift's card; `adjust` also unfolds its levers and grid. */
+export function openCard(id, { adjust = false } = {}) {
+  setOpenId(id);
+  ui.set(ADJUST, adjust ? id : null);
+}
+
+/**
+ * How the planner decides, and strength against size. These used to sit at the
+ * foot of Next, under every card; they are reference, not something you read
+ * mid-session, so they live in Setup → How this works now.
+ */
+export function plannerExplainers(ctx) {
+  return [
+    details('How the planner decides', [
+      el('p', { text: 'Each plan starts from your last session for that lift and adds a small step — the weekly gain you set per lift in Setup, earned by the week rather than by the session, so a lift you train twice a week is not asked to gain twice as fast as one you train once.' }),
+      el('p', { text: 'Then it takes the gap into account. Train again a day later and the step is held back, because you are still carrying the last session. Come back after a month and the suggestion drops below what you last did, because some of it will have gone. Both of those settle back to nothing in between: a few days of rest is simply rest.' }),
+      el('p', { text: 'The colour tells you how big the jump is: green is the smallest honest step forward, amber is ambitious but usually doable, red will probably cost you reps.' }),
+      disclose('Show the maths', [
+        el('p', { text: 'Your target is last session’s adjusted e1RM, moved by three things and then multiplied together: fitness earned in the gap (this lift’s weekly gain, pro-rated over the days since, and only while the rest is still productive); strength lost to a layoff (nothing for the first fortnight, then a half-life decay toward a floor you keep indefinitely); and fatigue still owed to the last session (a deficit that decays over roughly three days, scaled by how many sets you did and how close to failure you took them). The planner holds your rep scheme and set count steady and adds weight; the grid is there for when you would rather trade sets against load.' }),
+        el('p', { text: 'Detraining discounts your recorded best as well as your target — a comeback session should not be marked down for failing to be a PR against a number you no longer own. Fatigue does not: being tired today has not taken a kilo off what you can do. All six coefficients are yours to change in Setup, and the whole model can be switched off there, which puts the flat per-session step back.' }),
+        el('p', { text: 'Weights always round UP to a loadable step, so no suggestion can undershoot the target.' }),
+        el('p', { text: 'If nearly everything reads amber, your weight step is simply large relative to the lift — one plate on a 40 kg press is a bigger percentage than on a 140 kg deadlift. Widen the ideal band in Setup until green means what you want it to mean.' }),
+      ], { open: ctx.numbersOpen }),
+      legend(),
+    ]),
+    details('Strength and size', [
+      el('p', { text: 'Every lift is read two ways, because "how heavy" and "how much of the right kind" are different questions. A heavy triple answers the first and barely touches the second; four sets of twelve answer the second and barely touch the first. Both are training; they are not the same training.' }),
+      el('p', { text: `The weight is worked out the same way either way — your adjusted e1RM tells the app what you can do for three reps or for twelve, and it rounds up to a loadable step. What changes is the rep range: ${ZONES.strength.minReps}–${ZONES.strength.maxReps} for strength, ${ZONES.hypertrophy.minReps}–${ZONES.hypertrophy.maxReps} for size, marked down the side of the grid. They overlap at six on purpose. Six reps is genuinely both, and a clean line between them would be a precision that does not exist.` }),
+      el('p', { text: 'Size is then measured in hard sets, not in tonnage. Tonnage cannot tell a single at 300 kg from thirty reps at 10 kg — the two multiply out the same — so it is a poor judge of something that depends almost entirely on how many reps you did and how close to failure you took them. A set counts fully inside the rep range and taken within a couple of reps of failure, and counts for less the further outside that it falls. Your weekly budget in Setup is what it counts against.' }),
+      el('p', { text: `The third pick, Both, splits the session instead of choosing: one top set of ${ZONES.strength.minReps}–${ZONES.strength.maxReps} reps solved against your target as a single set, then back-off sets of ${TOPSET.backoffReps} at ${Math.round(TOPSET.backoffFraction * 100)}% of it. The top set is where strength is chased, so it is the number the colour judges; the back-offs are where the hard sets come from. Those are the defaults: while it is the pick, Adjust sets the top set’s reps from a row of options, and the back-offs’ count, reps (${TOPSET.backoffRepRange.min}–${TOPSET.backoffRepRange.max}) and load (${TOPSET.backoffFractions.map((f) => Math.round(f * 100)).join(', ')}% of the top set) directly.` }),
+      el('p', { text: 'None of the picks is the app’s recommendation. All are on every card, and taking one is a tap; nothing is stored against the lift and nothing is hidden behind a setting.' }),
+      disclose('Show the maths', [
+        el('p', { text: `A set is worth its rep credit times its failure credit. Rep credit is 1 from ${ZONES.hypertrophy.minReps} to ${ZONES.hypertrophy.maxReps} reps, ramping up from zero over the three reps below that and tapering back to zero over the ten above — so a triple is worth nothing, five reps about two thirds, and a set of twenty-five about half. Failure credit is 1 at nought to two reps in reserve and falls away past that.` }),
+        el('p', { text: 'A set logged with no RIR is assumed to have been a normal hard one, so not recording it costs you nothing. Where the per-set log has RIR, each set is credited on its own: a block keeps the lowest RIR of the sets counted onto it, and using that for all of them would credit five sets as though they had all started at the hardest one.' }),
+        el('p', { text: 'Both numbers are heuristics, like the set bonus. The edges of the rep range are genuinely fuzzy and the falloff past two reps in reserve is a judgement, not a measurement. What is not a judgement is that a heavy single is not hypertrophy work, and tonnage said it was.' }),
+      ], { open: ctx.numbersOpen }),
+    ]),
+  ];
+}
+
+/**
+ * The order lifts are offered in, everywhere a lift is picked: ready first,
+ * stalest at the top; then still recovering, freshest last; then never logged;
+ * then whatever is done for today.
+ */
+export function liftOrder(stats) {
+  const trained = stats.filter((s) => s.entryCount > 0);
+  const outstanding = trained.filter((s) => !s.doneToday);
+  return {
+    ready: outstanding.filter(isReady).sort((a, b) => (b.daysSince ?? 0) - (a.daysSince ?? 0)),
+    resting: outstanding.filter((s) => !isReady(s)).sort((a, b) => (a.daysSince ?? 0) - (b.daysSince ?? 0)),
+    unlogged: stats.filter((s) => !s.entryCount && !s.doneToday),
+    finished: stats.filter((s) => s.doneToday),
+  };
+}
