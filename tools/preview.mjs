@@ -110,7 +110,7 @@ const screens = [];
   select.invalidate();
   const c = ctx();
   const trained = c.stats.find((s) => s.entryCount > 0);
-  openCard(trained.exercise.id);
+  openCard(trained.exercise.id, { adjust: true });
   screens.push(await screen('Next', renderPlan(ctx()),
     'The card is open, so this shows the prescription, the verdict, the readiness note, both disclosures and the full trade-off grid. Press-ups near the bottom is a lift with nothing to load: it is prescribed in reps, and its trade-off is one row of set counts rather than a grid.'));
 }

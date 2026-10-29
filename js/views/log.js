@@ -17,6 +17,7 @@
 
 import {
   el,
+  disclose,
   stepper,
   chipGroup,
   segmented,
@@ -65,12 +66,16 @@ import * as ui from "../core/uistate.js";
 import { bind } from "../core/bind.js";
 import { countUp } from "../core/motion.js";
 import { bodyweightOn } from "../measure.js";
+import { liftOrder } from "./plan.js";
 
 const FORM = "log.form";
 const NOTES_OPEN = "log.showNotes";
 const LAST_SET = "log.lastSetId"; // the entry the last set landed on, so undo is exact
 const SCORE_FROM = "log.scoreFrom"; // the session score before the set just logged
 const PR_FLASH = "log.prFlash"; // a PR was crossed by the set just logged
+const PICKER_OPEN = "log.pickerOpen"; // the lift list, unfolded while a lift is chosen
+const PICKER_SEARCH = "log.pickerSearch";
+const SEARCH_FROM = 8; // lifts before the picker grows a search box
 
 let form = null; // { exerciseId, date, weight, reps, sets, rir, notes, mode }
 
@@ -153,18 +158,9 @@ export function renderLog(ctx) {
   if (form.exerciseId && !store.getExercise(form.exerciseId))
     form.exerciseId = null;
 
-  root.append(
-    el("header", { class: "view-head" }, [
-      el("h1", { text: "Log" }),
-      el("p", {
-        class: "view-sub",
-        text: "Log each set as you do it, or write the whole session up at once. Identical sets are stored as one row: 3×5 at 100 kg.",
-      }),
-    ]),
-  );
-
   const exercises = store.exercisesByRecency();
   if (!exercises.length) {
+    root.append(el("header", { class: "view-head" }, [el("h1", { text: "Log" })]));
     root.append(
       emptyState(
         "No lifts set up",
@@ -177,6 +173,7 @@ export function renderLog(ctx) {
   }
 
   // ---- date ----
+  // In the header, not a section of its own: it is almost always today.
   const setDate = (iso) => {
     form.date = iso;
     // Changing the day changes which situation you are in.
@@ -189,14 +186,15 @@ export function renderLog(ctx) {
     class: "date-input",
     value: form.date,
     max: isoAddDays(isoToday(), 1),
+    "aria-label": "Session date",
   });
   dateInput.addEventListener("change", () => {
     if (dateInput.value) setDate(dateInput.value);
   });
   root.append(
-    el("div", { class: "field-block" }, [
-      el("span", { class: "field-label", text: "Session date" }),
-      el("div", { class: "date-row" }, [
+    el("header", { class: "view-head log-head" }, [
+      el("h1", { text: "Log" }),
+      el("div", { class: "date-row", role: "group", "aria-label": "Session date" }, [
         quickDate("Today", isoToday(), form.date, setDate),
         quickDate("Yesterday", isoAddDays(isoToday(), -1), form.date, setDate),
         dateInput,
@@ -211,49 +209,12 @@ export function renderLog(ctx) {
   root.append(dayCheckIn(form.date, ctx));
 
   // ---- exercise ----
-  const picker = el("div", {
-    class: "chips chips-wrap",
-    role: "radiogroup",
-    "aria-label": "Exercise",
-  });
-  for (const ex of exercises) {
-    const selected = ex.id === form.exerciseId;
-    const done = store
-      .entriesOn(ex.id, form.date)
-      .reduce((n, e) => n + setCount(e), 0);
-    picker.append(
-      el(
-        "button",
-        {
-          type: "button",
-          class: `chip chip-lift${selected ? " is-selected" : ""}`,
-          role: "radio",
-          "aria-checked": selected ? "true" : "false",
-          onclick: () => {
-            tap();
-            setPrefill({ exerciseId: ex.id, date: form.date, mode: form.mode });
-            ctx.refresh();
-          },
-        },
-        [
-          accentDot(ex.id),
-          el("span", { text: ex.name }),
-          // What you have already done today, so the picker doubles as a checklist.
-          done ? el("span", { class: "chip-done", text: `${done}` }) : null,
-        ],
-      ),
-    );
-  }
-  root.append(
-    el("div", { class: "field-block" }, [
-      el("span", { class: "field-label", text: "Exercise" }),
-      picker,
-    ]),
-  );
-
-  const rail = sessionRail(ctx);
+  // Once a lift is chosen the picker folds away into the session rail — the
+  // form is what you need on screen between sets, not every lift you own.
+  const pickerOpen = !form.exerciseId || ui.get(PICKER_OPEN, false);
+  const rail = sessionRail(ctx, pickerOpen);
   if (rail) root.append(rail);
-
+  if (pickerOpen) root.append(liftPicker(ctx, exercises));
   if (form.exerciseId) {
     const st =
       stats.find((s) => s.exercise.id === form.exerciseId) ||
@@ -263,8 +224,6 @@ export function renderLog(ctx) {
         settings,
       );
     root.append(entryForm(st, ctx, settings));
-  } else {
-    root.append(el("p", { class: "card-note", text: "Pick a lift to log." }));
   }
 
   root.append(history(ctx, settings));
@@ -284,7 +243,7 @@ function setCount(entry) {
  * the per-set log, since merging a repeat set leaves the entry's own ordering
  * where the block started.
  */
-function sessionRail(ctx) {
+function sessionRail(ctx, pickerOpen = false) {
   const date = form.date;
   const byLift = new Map();
   for (const e of store.getEntries()) {
@@ -313,6 +272,7 @@ function sessionRail(ctx) {
       ex,
       done,
       target,
+      finished: store.isDone(id, date),
       startedAt: started ? started.at : Infinity,
       seq: entries.length
         ? Math.min(...entries.map((e) => e.seq || 0))
@@ -352,7 +312,7 @@ function sessionRail(ctx) {
         {
           type: "button",
           role: "tab",
-          class: `rail-seg${isCurrent ? " is-current" : ""}${r.target && r.done >= r.target ? " is-complete" : ""}`,
+          class: `rail-seg${isCurrent ? " is-current" : ""}${r.finished || (r.target && r.done >= r.target) ? " is-complete" : ""}`,
           "aria-selected": isCurrent ? "true" : "false",
           onclick: () => {
             tap();
@@ -379,6 +339,25 @@ function sessionRail(ctx) {
     );
   }
 
+  // The way to the next lift: the whole list, unfolded on demand.
+  if (form.exerciseId)
+    track.append(
+      el(
+        "button",
+        {
+          type: "button",
+          class: `rail-add${pickerOpen ? " is-open" : ""}`,
+          "aria-expanded": pickerOpen ? "true" : "false",
+          onclick: () => {
+            tap();
+            ui.set(PICKER_OPEN, !pickerOpen);
+            ctx.refresh({ transition: true });
+          },
+        },
+        [pickerOpen ? "Close" : "+ Lift"],
+      ),
+    );
+
   const sets = sessionSets(store.getEntries().filter((e) => e.date === date));
   const mins = sessionDuration(sets);
   const facts = [];
@@ -389,7 +368,7 @@ function sessionRail(ctx) {
       `${Math.floor(rest / 60)}:${String(rest % 60).padStart(2, "0")} rest`,
     );
 
-  return el("section", { class: "rail", "aria-label": "This session" }, [
+  const railNode = el("section", { class: "rail", "aria-label": "This session" }, [
     el("div", { class: "rail-head" }, [
       el("span", {
         class: "rail-title",
@@ -399,7 +378,10 @@ function sessionRail(ctx) {
         ? el("span", { class: "rail-sub", text: facts.join(" · ") })
         : null,
     ]),
-    totalTarget > 0
+    track,
+  ]);
+  // The total sits in the head row: one line, not a row of its own.
+  const total = totalTarget > 0
       ? el("div", { class: `rail-total${complete ? " is-complete" : ""}` }, [
           el(
             "div",
@@ -425,8 +407,98 @@ function sessionRail(ctx) {
               : `${totalDone} of ${totalTarget} sets`,
           }),
         ])
-      : null,
-    track,
+      : null;
+  if (total) railNode.firstChild.insertBefore(total, railNode.firstChild.children[1] || null);
+  return railNode;
+}
+
+/**
+ * Every lift, in the order you are most likely to want them: ready first and
+ * stalest at the top, the same order Next uses, with what is done for today
+ * at the end. A long list grows a search box, and the groups are labelled so
+ * the eye can skip straight to the part that matters.
+ */
+function liftPicker(ctx, exercises) {
+  const { ready, resting, unlogged, finished } = liftOrder(ctx.stats);
+  const seen = new Set();
+  const take = (rows) => rows.map((s) => s.exercise).filter((ex) => !seen.has(ex.id) && seen.add(ex.id));
+  const groups = [
+    { title: "Ready", lifts: take(ready) },
+    { title: "Recovering", lifts: take(resting) },
+    { title: "Not logged yet", lifts: take(unlogged) },
+    { title: "Done today", lifts: take(finished) },
+  ];
+  // Anything the stats have not caught up with yet still has to be pickable.
+  const rest = exercises.filter((ex) => !seen.has(ex.id));
+  if (rest.length) groups.push({ title: "Other", lifts: rest });
+
+  const chip = (ex) => {
+    const selected = ex.id === form.exerciseId;
+    const done = store
+      .entriesOn(ex.id, form.date)
+      .reduce((n, e) => n + setCount(e), 0);
+    return el(
+      "button",
+      {
+        type: "button",
+        class: `chip chip-lift${selected ? " is-selected" : ""}`,
+        role: "radio",
+        "aria-checked": selected ? "true" : "false",
+        onclick: () => {
+          tap();
+          setPrefill({ exerciseId: ex.id, date: form.date, mode: form.mode });
+          ui.set(PICKER_OPEN, false);
+          ui.set(PICKER_SEARCH, undefined);
+          ctx.refresh({ transition: true });
+        },
+      },
+      [
+        accentDot(ex.id),
+        el("span", { text: ex.name }),
+        // What you have already done today, so the picker doubles as a checklist.
+        done ? el("span", { class: "chip-done", text: `${done}` }) : null,
+      ],
+    );
+  };
+
+  const host = el("div", { class: "picker-groups" });
+  const paint = () => {
+    const q = String(ui.get(PICKER_SEARCH, "") || "").trim().toLowerCase();
+    const nodes = [];
+    for (const g of groups) {
+      const lifts = g.lifts.filter((ex) => !q || ex.name.toLowerCase().includes(q));
+      if (!lifts.length) continue;
+      nodes.push(
+        el("div", { class: "picker-group" }, [
+          el("span", { class: "picker-group-title", text: g.title }),
+          el("div", { class: "chips chips-wrap", role: "radiogroup", "aria-label": g.title }, lifts.map(chip)),
+        ]),
+      );
+    }
+    if (!nodes.length) nodes.push(el("p", { class: "card-note", text: "No lifts match." }));
+    host.replaceChildren(...nodes);
+  };
+
+  let search = null;
+  if (exercises.length > SEARCH_FROM) {
+    // Filters in place: a refresh would rebuild the input and drop the keyboard.
+    search = el("input", {
+      type: "search",
+      class: "text-input",
+      placeholder: "Find a lift…",
+      "aria-label": "Find a lift",
+      value: ui.get(PICKER_SEARCH, "") || "",
+    });
+    search.addEventListener("input", () => {
+      ui.set(PICKER_SEARCH, search.value);
+      paint();
+    });
+  }
+  paint();
+  return el("div", { class: "field-block lift-picker", "aria-label": "Exercise" }, [
+    form.exerciseId ? null : el("span", { class: "field-label", text: "Pick a lift" }),
+    search,
+    host,
   ]);
 }
 
@@ -694,18 +766,14 @@ function entryForm(st, ctx, settings) {
     },
   });
 
+  // What each answer means is in Setup → How this works; at the rack the
+  // question is enough.
   const rirBlock = el("div", { class: "field-block rir-block" }, [
     el("span", {
       class: "field-label",
-      text: live
-        ? "RIR — how many more you could have done on this set"
-        : "RIR — how many more you could have done",
+      text: live ? "Reps left in the tank (RIR)" : "Reps left in the tank (RIR) — hardest set",
     }),
     rir,
-    el("p", {
-      class: "field-hint rir-hint",
-      text: "0 — nothing left. 1–2 — a grinder you could just about repeat. 3 — clean, could have pushed on. 4+ — comfortable.",
-    }),
   ]);
 
   const notesArea = el("textarea", {
@@ -754,7 +822,6 @@ function entryForm(st, ctx, settings) {
   };
 
   const body = el("div", { class: "form-body" }, [
-    el("div", { class: "mode-row" }, [modeSwitch]),
     // While the top set is still to come, say what follows it — otherwise the
     // form reads as a one-set session.
     form.backoff && !repsOnly
@@ -797,8 +864,7 @@ function entryForm(st, ctx, settings) {
         ])
       : null,
     warmups.length
-      ? el("div", { class: "warmup-strip" }, [
-          el("span", { class: "warmup-strip-label", text: "Warm-up" }),
+      ? disclose(`Warm-up · ${warmups.length} set${warmups.length === 1 ? "" : "s"}`, [
           el(
             "div",
             { class: "warmup-steps" },
@@ -828,12 +894,16 @@ function entryForm(st, ctx, settings) {
               ]),
             ),
           ),
-        ])
+        ], { open: false })
       : null,
     repsOnly
       ? null
       : el("div", { class: "lever-row lever-row-wide" }, [weightStep]),
     el("div", { class: "lever-row" }, [repsStep, setsStep]),
+    preview,
+    // The two things every set needs, kept under the thumb: they stick to the
+    // bottom of the screen while the rest of the form scrolls past.
+    el("div", { class: `log-dock${finished ? " is-finished" : ""}` }, [rirBlock, primary]),
     live
       ? tracker(traceFig, doneSoFar, target, finished, ex, ctx)
       : doneSoFar
@@ -842,8 +912,6 @@ function entryForm(st, ctx, settings) {
             doneControl(finished, ex, ctx),
           ])
         : null,
-    preview,
-    rirBlock,
     el(
       "button",
       {
@@ -861,7 +929,8 @@ function entryForm(st, ctx, settings) {
     el("div", { class: "notes-wrap", hidden: !ui.get(NOTES_OPEN, false) }, [
       notesArea,
     ]),
-    primary,
+    // Chosen for you by the date; switching is rare, so it sits last.
+    el("div", { class: "mode-row" }, [modeSwitch]),
   ]);
   // The preview and the button label follow the levers without re-rendering.
   // Rebuilding the view would take the caret out of whichever field is being
@@ -1040,10 +1109,41 @@ function summary(doneSoFar, ex, ctx) {
       { class: "summary-facts" },
       facts.map((f) => el("li", { text: f })),
     ),
-    el("p", {
-      class: "summary-note",
-      text: "Log another if you have one in you, or pick the next lift above.",
-    }),
+    nextUp(ex, ctx),
+  ]);
+}
+
+/**
+ * Where to go once a lift is done: the next few in readiness order, one tap
+ * each, so finishing a lift never means hunting through the list for the next.
+ */
+function nextUp(ex, ctx) {
+  const { ready, resting, unlogged } = liftOrder(ctx.stats);
+  const next = [...ready, ...resting, ...unlogged]
+    .map((s) => s.exercise)
+    .filter((x) => x.id !== ex.id && !store.isDone(x.id, form.date))
+    .slice(0, 3);
+  if (!next.length)
+    return el("p", { class: "summary-note", text: "Log another if you have one in you." });
+  return el("div", { class: "next-up" }, [
+    el("span", { class: "next-up-label", text: "Next lift" }),
+    ...next.map((x, i) =>
+      el(
+        "button",
+        {
+          type: "button",
+          class: `btn ${i === 0 ? "btn-primary" : "btn-ghost"} btn-sm next-up-btn`,
+          onclick: () => {
+            tap();
+            setPrefill({ exerciseId: x.id, date: form.date, mode: form.mode });
+            ui.set(PICKER_OPEN, false);
+            ctx.refresh({ transition: true });
+            window.scrollTo?.({ top: 0, behavior: "smooth" });
+          },
+        },
+        [accentDot(x.id), el("span", { text: x.name })],
+      ),
+    ),
   ]);
 }
 
@@ -1173,7 +1273,7 @@ function dayCheckIn(date, ctx) {
   const mine = draft && draft.date === date ? draft : { date, sleepHours: null, energy: null };
   const save = (patch) => { Object.assign(mine, patch); ui.set("log.dayDraft", { ...mine }); };
   const sleep = stepper({
-    label: "Hours slept last night", value: mine.sleepHours ?? "", step: 0.5, min: 0, max: 16, dp: 1,
+    label: "Hours slept", value: mine.sleepHours ?? "", step: 0.5, min: 0, max: 16, dp: 1,
     placeholder: "—", suffix: "h", id: "day-sleep", onChange: (v) => save({ sleepHours: v }),
   });
   const energy = chipGroup({
@@ -1186,11 +1286,19 @@ function dayCheckIn(date, ctx) {
       { value: 4, label: "4" },
       { value: 5, label: "5", sub: "great" },
     ],
-    onChange: (v) => save({ energy: v }),
+    onChange: (v) => {
+      save({ energy: v });
+      // Energy is the second answer: with sleep already in, it is the last tap.
+      if (sleepValue() !== null) done();
+    },
   });
-  const done = () => {
+  const sleepValue = () => {
     const h = sleep.input.value.trim() === "" ? null : sleep.getValue();
-    if (!(h >= 0) || h === null || !(mine.energy >= 1)) {
+    return h !== null && h >= 0 ? h : null;
+  };
+  const done = () => {
+    const h = sleepValue();
+    if (h === null || !(mine.energy >= 1)) {
       toast("Both, please — hours slept and how your energy is.");
       return;
     }
@@ -1200,10 +1308,11 @@ function dayCheckIn(date, ctx) {
     ctx.refresh({ transition: true });
   };
   return el("div", { class: "card card-pad day-check" }, [
-    el("h2", { class: "section-title", text: isToday ? "Before your first set today" : `Before logging ${formatDate(date)}` }),
-    el("p", { class: "card-note", text: "Two answers, once a day. Over a few months this is what tells a bad session from a bad night." }),
-    el("div", { class: "lever-row lever-row-half" }, [sleep]),
-    el("div", { class: "field-block" }, [el("span", { class: "field-label", text: "Energy right now" }), energy]),
+    el("h2", { class: "section-title", text: isToday ? "Check in for today" : `Check in for ${formatDate(date)}` }),
+    el("div", { class: "day-check-row" }, [
+      sleep,
+      el("div", { class: "field-block" }, [el("span", { class: "stepper-label", text: "Energy" }), energy]),
+    ]),
     el("div", { class: "card-actions" }, [
       el("button", { type: "button", class: "btn btn-primary", onclick: done }, ["Save"]),
       isToday ? null : el("button", {

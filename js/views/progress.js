@@ -94,10 +94,6 @@ export function renderProgress(ctx) {
       el("div", {}, [
         el("header", { class: "view-head" }, [
           el("h1", { text: "Measurements" }),
-          el("p", {
-            class: "view-sub",
-            text: "Strength shows up on the bar. Size shows up on a tape measure — check in every couple of weeks and watch the change since you started.",
-          }),
         ]),
         viewSwitch(ctx),
       ]),
@@ -130,10 +126,6 @@ function listView(ctx) {
   root.append(
     el("header", { class: "view-head" }, [
       el("h1", { text: "Progress" }),
-      el("p", {
-        class: "view-sub",
-        text: "One number per lift, and which way it is going. Tap a lift for its chart and history.",
-      }),
     ]),
   );
 
@@ -269,10 +261,6 @@ function bodyView(ctx) {
   root.append(
     el("header", { class: "view-head" }, [
       el("h1", { text: "Everything" }),
-      el("p", {
-        class: "view-sub",
-        text: "Your whole log at once: how much work you are doing, how often, where it is going, and what you have beaten.",
-      }),
     ]),
   );
   root.append(viewSwitch(ctx));

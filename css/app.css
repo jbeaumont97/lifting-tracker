@@ -1667,3 +1667,113 @@ h1 .accent-dot { width: 11px; height: 11px; margin-right: 9px; vertical-align: m
 /* Fixed trailing columns so every track starts and ends in the same place. */
 .muscle-bars .balance-row { grid-template-columns: minmax(78px, 1fr) 2fr 30px 92px; }
 .muscle-bars .status-chip { justify-content: center; }
+
+/* ------------------------------------------------------- fewer taps, less to read */
+
+/* Sized for a 440 pt wide phone (iPhone 16 Pro Max) first: a 16 pt gutter, every
+   target at least 44 pt, and the things a set needs inside the thumb's reach. */
+main {
+  padding-left: max(16px, env(safe-area-inset-left));
+  padding-right: max(16px, env(safe-area-inset-right));
+}
+.view { gap: var(--space-5); }
+.view-head { display: flex; flex-direction: column; gap: var(--space-1); }
+
+/* Next: the day's facts are a line under the title, not a card of their own. */
+.view-head .day-strip { padding: 0; background: none; font-size: var(--text-xs); gap: var(--space-1); }
+
+/* Log: title and date share one row. */
+.log-head { flex-direction: row; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.log-head .date-row { gap: var(--space-2); flex: 0 1 auto; min-width: 0; }
+.log-head .chip { min-height: 36px; padding: 0 var(--space-4); font-size: var(--text-sm); }
+.log-head .date-input { flex: 0 1 132px; min-height: 36px; padding: var(--space-2) var(--space-3); font-size: var(--text-sm); }
+
+/* A check-in prompt is one row with its two buttons. */
+.measure-prompt { padding: var(--space-4) var(--space-5); gap: var(--space-3); align-items: center; flex-wrap: nowrap; }
+.measure-prompt-text { flex: 1 1 auto; gap: 0; }
+.measure-prompt-text strong { font-size: var(--text-sm); }
+.measure-prompt-text span { font-size: var(--text-xs); }
+
+/* Next: a closed card is one row — the plan, and a button that logs it. */
+.card-head-row { display: flex; align-items: center; }
+.card-head-row > .card-head { flex: 1; min-width: 0; }
+.card-quick { flex: none; margin-right: var(--space-5); min-width: 64px; min-height: 40px; }
+.card-plan { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; margin-top: var(--space-1); }
+.card-plan-value { font-size: var(--text-md); font-weight: var(--fw-semi); color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.card-meta.done-line { display: flex; gap: var(--space-2); align-items: baseline; }
+.card-head-row .card-chevron { display: none; }
+.card.is-open .card-head-row .card-chevron,
+.card-head-row:not(:has(.card-quick)) .card-chevron { display: block; }
+
+/* Log: the check-in is two answers on one row. */
+.day-check { gap: var(--space-3); padding: var(--space-5); }
+.day-check-row { display: grid; grid-template-columns: minmax(132px, 0.8fr) 1.2fr; gap: var(--space-4); align-items: end; }
+.day-check-row .stepper-btn { width: 34px; }
+.day-check-row .chips { gap: var(--space-1); flex-wrap: nowrap; }
+.day-check-row .chip { flex: 1; min-width: 0; justify-content: center; padding: 0; flex-direction: column; gap: 0; min-height: var(--tap); }
+.day-check-row .chip small { font-size: var(--text-3xs); line-height: 1; }
+
+/* Log: the lift list, grouped by readiness. */
+.lift-picker { gap: var(--space-3); }
+.picker-groups { display: flex; flex-direction: column; gap: var(--space-4); }
+.picker-group { display: flex; flex-direction: column; gap: var(--space-2); }
+.picker-group-title { font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: var(--fw-semi); }
+
+/* The rail is the lift switcher once a lift is chosen. */
+.rail { margin-bottom: 0; padding: var(--space-3) var(--space-4); }
+.rail-seg { min-height: var(--tap); }
+.rail-add {
+  flex: none; align-self: stretch; min-width: 72px; min-height: var(--tap);
+  border: 1px dashed var(--border-strong); border-radius: var(--radius-sm);
+  background: none; color: var(--series-1); font-size: var(--text-sm); font-weight: var(--fw-semi);
+  cursor: pointer; touch-action: manipulation;
+}
+.rail-add.is-open { border-style: solid; color: var(--text-secondary); }
+
+/* The form: RIR and the log button stay under the thumb. */
+.card-form { overflow: visible; }
+.log-dock {
+  position: sticky; z-index: 5;
+  bottom: calc(70px + env(safe-area-inset-bottom) + var(--dock-h, 0px));
+  display: flex; flex-direction: column; gap: var(--space-3);
+  margin: 0 calc(-1 * var(--space-6)); padding: var(--space-4) var(--space-6);
+  background: var(--surface-1);
+  border-top: 1px solid var(--border);
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+.rir-block .chips { gap: var(--space-2); }
+.rir-block .chip { flex: 1; justify-content: center; min-height: var(--tap); padding: 0; font-weight: var(--fw-semi); }
+.rir-block .field-label { font-size: var(--text-2xs); }
+.btn-save { min-height: 52px; font-size: var(--text-md); }
+.preview { padding-top: var(--space-3); }
+.preview-value { font-size: var(--text-2xl); }
+.form-body .disclose { margin-top: 0; }
+.mode-row { padding-top: var(--space-2); }
+
+/* Once a lift is done: the next one, one tap away. */
+.next-up { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.next-up-label { width: 100%; font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: var(--fw-semi); }
+.next-up-btn { min-height: var(--tap); }
+
+/* Setup: the name is the first thing in an open lift. */
+.name-input { font-size: var(--text-md); font-weight: var(--fw-semi); }
+
+.measure-prompt, .day-check { margin-bottom: 0; }
+.card.is-open .card-head-row .card-chevron { transform: rotate(180deg); color: var(--text-primary); }
+.log-dock.is-finished { position: static; }
+.rail-head { align-items: center; }
+.rail-head .rail-total { flex: 1; min-width: 0; }
+
+/* Adjusting a top set + back-offs: the top set's options, one row. */
+.topset-options { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-2); }
+.topset-option {
+  display: flex; flex-direction: column; align-items: center; gap: var(--space-0);
+  min-height: 64px; padding: var(--space-3) var(--space-1); border: 0; border-radius: var(--radius-sm);
+  background: var(--band-tint, var(--neutral-tint)); color: var(--band-ink, var(--text-primary));
+  cursor: pointer; touch-action: manipulation; font-variant-numeric: tabular-nums;
+}
+.topset-option.is-pick { box-shadow: inset 0 0 0 2px var(--series-1); }
+.topset-option-reps { font-size: var(--text-xs); font-weight: var(--fw-semi); color: var(--text-secondary); }
+.topset-option-weight { font-size: var(--text-md); font-weight: var(--fw-bold); color: var(--text-primary); }
+.topset-backoff-now { font-size: var(--text-sm); font-weight: var(--fw-semi); font-variant-numeric: tabular-nums; }
+.topset-pcts .chip { flex: 1; justify-content: center; min-height: var(--tap); padding: 0; }

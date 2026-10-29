@@ -155,7 +155,8 @@ function paintTabs() {
 
 /** One always-available primary action: log a set, from wherever you are. */
 function paintFab() {
-  if (route === 'log' || !store.getExercises().length) { fabHost.replaceChildren(); return; }
+  // Next has a Log button on every row, so the floating one would only cover them.
+  if (route === 'log' || route === 'plan' || !store.getExercises().length) { fabHost.replaceChildren(); return; }
   fabHost.replaceChildren(el('button', {
     type: 'button', class: 'fab', 'aria-label': 'Log a set',
     onclick: () => goTo('log', {}),
