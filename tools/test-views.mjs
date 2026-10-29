@@ -3592,6 +3592,54 @@ const measure = await import("../js/measure.js");
   ok("and the rename can be undone", store.getExercise(ex.id).name === ex.name);
 }
 
+/* -------------------------------------------------- 8. pop, and making it yours */
+
+// --- the look is a choice: accent and style, applied and remembered ---
+{
+  reset();
+  const root = globalThis.document.documentElement;
+  store.applyTheme();
+  ok("Bold is the default style", store.getStyle() === "bold" && root.getAttribute("data-style") === "bold");
+  ok("blue is the default accent", store.getAccent() === "blue" && root.getAttribute("data-accent") === "blue");
+
+  uistate.set("setup.openExerciseId", null);
+  const view = renderSetup(ctx({ route: "setup" }));
+  const swatches = view.querySelectorAll(".swatch");
+  ok("Setup offers every accent", swatches.length === store.ACCENTS.length);
+  swatches.find((b) => b.textContent === "Pink").click();
+  ok("tapping one applies it straight away", root.getAttribute("data-accent") === "pink");
+  ok("and remembers it", store.getAccent() === "pink");
+  const clean = view.querySelectorAll(".seg").find((b) => b.textContent === "Clean");
+  clean.click();
+  ok("Clean switches the style off", root.getAttribute("data-style") === "clean" && store.getStyle() === "clean");
+  globalThis.localStorage.setItem("liftingTracker.accent", "chartreuse");
+  ok("an unknown accent falls back to blue", store.getAccent() === "blue");
+  ok("the look stays out of backups", !/pink|clean/.test(store.exportJSON().match(/"settings":\{[^}]*\}/)?.[0] || ""));
+}
+
+// --- a PR takes the screen, then gives it back ---
+{
+  reset();
+  checkIn();
+  const c = ctx({ route: "log" });
+  const st = c.stats.find((s) => s.entryCount > 0);
+  setPrefill({ exerciseId: st.exercise.id, date: TODAY, weight: 300, reps: 5, sets: 3 });
+  const view = renderLog(c);
+  pickRir(view);
+  view.querySelector(".btn-save").click();
+  const burst = globalThis.document.body.querySelector(".pr-burst");
+  ok("crossing your best brings up the PR burst", !!burst);
+  ok("naming the lift", !!burst && burst.textContent.includes(st.exercise.name));
+  ok("and how far past the old best it went", !!burst && /\+[\d.]+ on your best of/.test(burst.textContent), burst?.textContent);
+  burst.click();
+  ok("a tap dismisses it", !globalThis.document.body.querySelector(".pr-burst"));
+
+  select.invalidate();
+  const next = renderLog(ctx({ route: "log" }));
+  ok("the button gives a bounce for the set that landed", next.querySelector(".btn-save").classList.contains("is-landed"));
+  ok("only once", !renderLog(ctx({ route: "log" })).querySelector(".btn-save").classList.contains("is-landed"));
+}
+
 // --- nothing anywhere prints a stray "null" ---
 // append(null) writes the text "null" in a real browser; every optional piece
 // of a view has to be skipped, not appended.

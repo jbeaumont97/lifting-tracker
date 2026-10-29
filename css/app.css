@@ -22,6 +22,8 @@
   --series-1:       #2a78d6;   /* the one data hue */
   --series-1-deep:  #256abf;
   --series-wash:    rgba(42, 120, 214, 0.10);
+  --pop-2:          #7c4ddb;   /* the accent's gradient partner, Bold style only */
+  --on-accent:      #fff;
 
   --good:      #0ca30c;  --good-ink: #006300;  --good-tint: rgba(12, 163, 12, 0.20);
   --warning:   #fab219;  --warn-ink: #8a5c00;  --warn-tint: rgba(250, 178, 25, 0.34);
@@ -124,6 +126,7 @@
     --series-1:       #3987e5;
     --series-1-deep:  #86b6ef;
     --series-wash:    rgba(57, 135, 229, 0.14);
+    --pop-2:          #9b74ef;
 
     --good: #0ca30c;   --good-ink: #0ca30c;   --good-tint: rgba(12, 163, 12, 0.24);
     --warning: #fab219; --warn-ink: #fab219;  --warn-tint: rgba(250, 178, 25, 0.20);
@@ -150,6 +153,7 @@
   --series-1:       #3987e5;
   --series-1-deep:  #86b6ef;
   --series-wash:    rgba(57, 135, 229, 0.14);
+  --pop-2:          #9b74ef;
 
   --good: #0ca30c;   --good-ink: #0ca30c;   --good-tint: rgba(12, 163, 12, 0.24);
   --warning: #fab219; --warn-ink: #fab219;  --warn-tint: rgba(250, 178, 25, 0.20);
@@ -330,7 +334,7 @@ button { font: inherit; color: inherit; }
 }
 .btn:active { transform: scale(0.985); }
 .btn:disabled { opacity: 0.4; cursor: default; }
-.btn-primary { background: var(--series-1); border-color: var(--series-1); color: #fff; }
+.btn-primary { background: var(--series-1); border-color: var(--series-1); color: var(--on-accent); }
 .btn-ghost { background: var(--surface-2); border-color: transparent; }
 .btn-danger { background: var(--crit-tint); border-color: transparent; color: var(--crit-ink); }
 .btn-block { width: 100%; }
@@ -416,7 +420,7 @@ button { font: inherit; color: inherit; }
   touch-action: manipulation;
 }
 .chip.is-selected {
-  background: var(--series-1); border-color: var(--series-1); color: #fff; font-weight: var(--fw-semi);
+  background: var(--series-1); border-color: var(--series-1); color: var(--on-accent); font-weight: var(--fw-semi);
 }
 .chip small { font-size: var(--text-2xs); opacity: 0.75; }
 .chip-lift { min-height: var(--tap); }
@@ -1065,7 +1069,7 @@ h1 .accent-dot { width: 11px; height: 11px; margin-right: 9px; vertical-align: m
 .fab {
   display: inline-flex; align-items: center; gap: var(--space-2);
   min-height: 48px; padding: 0 17px 0 var(--space-6); border: 0; border-radius: var(--radius-pill);
-  background: var(--series-1); color: #fff; font-size: var(--text-md); font-weight: var(--fw-bold);
+  background: var(--series-1); color: var(--on-accent); font-size: var(--text-md); font-weight: var(--fw-bold);
   box-shadow: 0 6px 18px color-mix(in srgb, var(--series-1) 34%, transparent);
   cursor: pointer; touch-action: manipulation;
   transition: transform 0.1s ease;
@@ -1160,7 +1164,7 @@ h1 .accent-dot { width: 11px; height: 11px; margin-right: 9px; vertical-align: m
   background: var(--good-tint); color: var(--good-ink);
   font-size: var(--text-3xs); font-weight: var(--fw-bold); font-variant-numeric: tabular-nums;
 }
-.chip.is-selected .chip-done { background: rgba(255, 255, 255, 0.24); color: #fff; }
+.chip.is-selected .chip-done { background: rgba(255, 255, 255, 0.24); color: var(--on-accent); }
 
 .set-track {
   display: flex; flex-direction: column; gap: var(--space-3);
@@ -1190,7 +1194,7 @@ h1 .accent-dot { width: 11px; height: 11px; margin-right: 9px; vertical-align: m
 }
 .set-pill.is-done {
   border-style: solid; border-color: transparent;
-  background: var(--series-1); color: #fff;
+  background: var(--series-1); color: var(--on-accent);
   animation: mark-in 220ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
 }
 .set-pill.is-next {
@@ -1777,3 +1781,200 @@ main {
 .topset-option-weight { font-size: var(--text-md); font-weight: var(--fw-bold); color: var(--text-primary); }
 .topset-backoff-now { font-size: var(--text-sm); font-weight: var(--fw-semi); font-variant-numeric: tabular-nums; }
 .topset-pcts .chip { flex: 1; justify-content: center; min-height: var(--tap); padding: 0; }
+
+
+/* ---------------------------------------------------------------- accents
+
+   The accent is a choice, made in Setup → Appearance and stored with the
+   theme. Only the accent moves: the verdict colours (green, amber, red) and
+   each lift's identity dot never do, because they carry meaning. Blue is the
+   palette above and needs no block. Each accent declares its light values
+   here and its dark values twice, the same way the base palette does. */
+
+:root[data-accent="violet"] {
+  --series-1: #7444d6; --series-1-deep: #6338bd; --series-wash: rgba(116, 68, 214, 0.1);
+  --pop-2: #d63384; --on-accent: #fff;
+}
+:root[data-accent="pink"] {
+  --series-1: #d02f7d; --series-1-deep: #b5246a; --series-wash: rgba(208, 47, 125, 0.1);
+  --pop-2: #e0661b; --on-accent: #fff;
+}
+:root[data-accent="orange"] {
+  --series-1: #d4580f; --series-1-deep: #b94a0a; --series-wash: rgba(212, 88, 15, 0.1);
+  --pop-2: #d02f7d; --on-accent: #fff;
+}
+:root[data-accent="teal"] {
+  --series-1: #0e857f; --series-1-deep: #0a6f6a; --series-wash: rgba(14, 133, 127, 0.1);
+  --pop-2: #2a78d6; --on-accent: #fff;
+}
+:root[data-accent="graphite"] {
+  --series-1: #2f3238; --series-1-deep: #1f2125; --series-wash: rgba(47, 50, 56, 0.1);
+  --pop-2: #6b7280; --on-accent: #fff;
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-accent="violet"]:not([data-theme="light"]) {
+    --series-1: #9b74ef; --series-1-deep: #c6b0f7; --series-wash: rgba(155, 116, 239, 0.16);
+  --pop-2: #ec5fa3; --on-accent: #fff;
+  }
+  :root[data-accent="pink"]:not([data-theme="light"]) {
+    --series-1: #ec5fa3; --series-1-deep: #f5a3c9; --series-wash: rgba(236, 95, 163, 0.16);
+  --pop-2: #f2803a; --on-accent: #fff;
+  }
+  :root[data-accent="orange"]:not([data-theme="light"]) {
+    --series-1: #f2803a; --series-1-deep: #f8b98e; --series-wash: rgba(242, 128, 58, 0.16);
+  --pop-2: #ec5fa3; --on-accent: #1a0d04;
+  }
+  :root[data-accent="teal"]:not([data-theme="light"]) {
+    --series-1: #22b3ac; --series-1-deep: #8fdcd7; --series-wash: rgba(34, 179, 172, 0.16);
+  --pop-2: #3987e5; --on-accent: #03201e;
+  }
+  :root[data-accent="graphite"]:not([data-theme="light"]) {
+    --series-1: #e4e5e8; --series-1-deep: #ffffff; --series-wash: rgba(228, 229, 232, 0.16);
+  --pop-2: #9ca3af; --on-accent: #111214;
+  }
+}
+:root[data-theme="dark"][data-accent="violet"] {
+  --series-1: #9b74ef; --series-1-deep: #c6b0f7; --series-wash: rgba(155, 116, 239, 0.16);
+  --pop-2: #ec5fa3; --on-accent: #fff;
+}
+:root[data-theme="dark"][data-accent="pink"] {
+  --series-1: #ec5fa3; --series-1-deep: #f5a3c9; --series-wash: rgba(236, 95, 163, 0.16);
+  --pop-2: #f2803a; --on-accent: #fff;
+}
+:root[data-theme="dark"][data-accent="orange"] {
+  --series-1: #f2803a; --series-1-deep: #f8b98e; --series-wash: rgba(242, 128, 58, 0.16);
+  --pop-2: #ec5fa3; --on-accent: #1a0d04;
+}
+:root[data-theme="dark"][data-accent="teal"] {
+  --series-1: #22b3ac; --series-1-deep: #8fdcd7; --series-wash: rgba(34, 179, 172, 0.16);
+  --pop-2: #3987e5; --on-accent: #03201e;
+}
+:root[data-theme="dark"][data-accent="graphite"] {
+  --series-1: #e4e5e8; --series-1-deep: #ffffff; --series-wash: rgba(228, 229, 232, 0.16);
+  --pop-2: #9ca3af; --on-accent: #111214;
+}
+
+/* ------------------------------------------------------------- Bold style
+
+   The default look. Same layout, same tokens, more energy: the accent runs
+   as a gradient into its partner colour, the headline numbers carry it, and
+   things that are pressed or land spring rather than fade. "Clean" in Setup
+   switches all of this off and leaves the original, quieter design. */
+:root[data-style="bold"] {
+  --radius: 18px;
+  --radius-sm: 12px;
+  --pop: linear-gradient(135deg, var(--series-1) 0%, var(--pop-2) 100%);
+  --glow: 0 8px 20px -8px color-mix(in srgb, var(--series-1) 70%, transparent);
+}
+
+[data-style="bold"] .view-head h1 { font-size: 2rem; font-weight: 800; letter-spacing: -0.035em; }
+
+[data-style="bold"] .btn-primary,
+[data-style="bold"] .fab,
+[data-style="bold"] .chip.is-selected {
+  background: var(--pop); border-color: transparent; box-shadow: var(--glow);
+}
+[data-style="bold"] .btn-primary { font-weight: var(--fw-bold); }
+[data-style="bold"] .btn-primary.is-blocked,
+[data-style="bold"] .btn-primary[aria-disabled="true"] { background: var(--surface-2); box-shadow: none; }
+[data-style="bold"] .btn,
+[data-style="bold"] .chip,
+[data-style="bold"] .seg,
+[data-style="bold"] .topset-option,
+[data-style="bold"] .pick { transition: transform var(--dur-fast) var(--ease-spring), background var(--dur-fast) ease; }
+[data-style="bold"] .btn:active,
+[data-style="bold"] .chip:active,
+[data-style="bold"] .topset-option:active,
+[data-style="bold"] .pick:active { transform: scale(0.94); }
+
+/* The numbers that matter wear the accent. */
+[data-style="bold"] .presc-hero .presc-weight,
+[data-style="bold"] .hero-value,
+[data-style="bold"] .preview-value .preview-num {
+  background: var(--pop); -webkit-background-clip: text; background-clip: text; color: transparent;
+  font-weight: 800;
+}
+[data-style="bold"] .card-plan-value { font-weight: var(--fw-bold); }
+
+/* Progress you can see fills with the gradient too. */
+[data-style="bold"] .rail-seg-fill,
+[data-style="bold"] .rail-total-fill { background: var(--pop); }
+[data-style="bold"] .rail-seg.is-complete .rail-seg-fill,
+[data-style="bold"] .rail-total.is-complete .rail-total-fill { background: var(--good); }
+
+/* The current tab sits on a pill of its accent. */
+[data-style="bold"] .tab.is-active { background: var(--series-wash); }
+[data-style="bold"] .tab.is-active .tab-icon { stroke-width: 2.4; }
+
+/* An open card lifts off the page a little. */
+[data-style="bold"] .card.is-open { box-shadow: var(--glow), var(--shadow); border-color: color-mix(in srgb, var(--series-1) 35%, var(--border)); }
+
+/* A set landing: the button gives a little bounce. */
+.btn-save.is-landed { animation: landed var(--dur-slow) var(--ease-spring) both; }
+@keyframes landed {
+  0% { transform: scale(1); }
+  35% { transform: scale(0.95); }
+  100% { transform: scale(1); }
+}
+
+/* ------------------------------------------------------------ the PR moment */
+
+.pr-burst {
+  position: fixed; inset: 0; z-index: 70;
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+  background: color-mix(in srgb, var(--plane) 55%, transparent);
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+  animation: pr-fade 2600ms ease both;
+}
+.pr-burst-card {
+  position: relative; overflow: hidden; text-align: center;
+  display: flex; flex-direction: column; align-items: center; gap: var(--space-2);
+  width: min(360px, 100%); padding: 28px 22px 24px; border-radius: 28px;
+  background: linear-gradient(140deg, var(--series-1), var(--pop-2));
+  color: var(--on-accent);
+  box-shadow: 0 24px 60px -18px color-mix(in srgb, var(--series-1) 80%, transparent);
+  animation: pr-pop 700ms var(--ease-spring) both;
+}
+/* Rays turning slowly behind the trophy. */
+.pr-burst-card::before {
+  content: ""; position: absolute; inset: -60%;
+  background: repeating-conic-gradient(from 0deg, rgba(255, 255, 255, 0.16) 0deg 10deg, transparent 10deg 30deg);
+  animation: pr-spin 6s linear infinite;
+}
+.pr-burst-card > * { position: relative; }
+.pr-burst-trophy { font-size: 64px; line-height: 1; animation: pr-trophy 900ms var(--ease-spring) 120ms both; }
+.pr-burst-kicker { font-size: var(--text-sm); font-weight: 800; letter-spacing: 0.24em; text-transform: uppercase; opacity: 0.9; }
+.pr-burst-lift { font-size: 1.6rem; font-weight: 800; letter-spacing: -0.02em; }
+.pr-burst-value { font-size: 3.4rem; font-weight: 800; letter-spacing: -0.03em; line-height: 1; font-variant-numeric: tabular-nums; }
+.pr-burst-sub { font-size: var(--text-sm); font-weight: 600; opacity: 0.9; }
+.pr-burst-hint { margin-top: var(--space-3); font-size: var(--text-2xs); opacity: 0.75; }
+
+@keyframes pr-fade { 0% { opacity: 0; } 8% { opacity: 1; } 85% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes pr-pop { 0% { transform: scale(0.4) rotate(-6deg); opacity: 0; } 60% { transform: scale(1.06) rotate(1deg); opacity: 1; } 100% { transform: scale(1) rotate(0); } }
+@keyframes pr-trophy { 0% { transform: translateY(30px) scale(0.3); } 100% { transform: none; } }
+@keyframes pr-spin { to { transform: rotate(360deg); } }
+
+/* Confetti in the accent's own colours, beside the verdict ones. */
+.confetti-4 { background: var(--pop-2); width: 8px; height: 8px; border-radius: 50%; }
+.confetti-5 { background: linear-gradient(var(--series-1), var(--pop-2)); width: 5px; height: 16px; }
+
+/* Setup: the accent swatches. */
+.swatches { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+.swatch {
+  display: flex; flex-direction: column; align-items: center; gap: var(--space-1);
+  min-width: 56px; padding: var(--space-2) var(--space-1); border: 0; background: none;
+  font-size: var(--text-2xs); font-weight: var(--fw-semi); color: var(--text-secondary);
+  cursor: pointer; touch-action: manipulation;
+}
+.swatch-dot {
+  width: 36px; height: 36px; border-radius: 50%;
+  background: linear-gradient(135deg, var(--sw-1), var(--sw-2));
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+  transition: transform var(--dur-fast) var(--ease-spring);
+}
+.swatch.is-selected { color: var(--text-primary); }
+.swatch.is-selected .swatch-dot { box-shadow: 0 0 0 2px var(--plane), 0 0 0 4px var(--sw-1); transform: scale(1.06); }
+
+@media (prefers-reduced-motion: reduce) {
+  .pr-burst, .pr-burst-card, .pr-burst-trophy, .pr-burst-card::before, .btn-save.is-landed { animation: none !important; }
+}

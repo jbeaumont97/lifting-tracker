@@ -26,6 +26,7 @@ import {
   confirmSheet,
   emptyState,
   celebrate,
+  prBurst,
   prBadge,
   accentDot,
   tap,
@@ -73,6 +74,7 @@ const NOTES_OPEN = "log.showNotes";
 const LAST_SET = "log.lastSetId"; // the entry the last set landed on, so undo is exact
 const SCORE_FROM = "log.scoreFrom"; // the session score before the set just logged
 const PR_FLASH = "log.prFlash"; // a PR was crossed by the set just logged
+const LANDED = "log.landed"; // a set just landed: the button gives a bounce
 const PICKER_OPEN = "log.pickerOpen"; // the lift list, unfolded while a lift is chosen
 const PICKER_SEARCH = "log.pickerSearch";
 const SEARCH_FROM = 8; // lifts before the picker grows a search box
@@ -796,6 +798,11 @@ function entryForm(st, ctx, settings) {
     ["…"],
   );
 
+  if (ui.get(LANDED, false)) {
+    ui.set(LANDED, undefined);
+    primary.classList.add("is-landed");
+  }
+
   const relabel = () => {
     const w = fmtWeight(form.weight),
       r = Math.round(Number(form.reps)) || "",
@@ -1049,7 +1056,16 @@ function doneControl(finished, ex, ctx) {
       onclick: () => {
         const nowDone = store.toggleDone(ex.id, form.date);
         tap();
-        if (nowDone) stopRest();
+        if (nowDone) {
+          stopRest();
+          // A finished lift is worth a little noise; a finished session more.
+          const started = new Set(
+            store.getEntries().filter((e) => e.date === form.date).map((e) => e.exerciseId),
+          );
+          const all = [...started].every((id) => store.isDone(id, form.date));
+          celebrate({ count: all ? 48 : 16 });
+          if (all) tap([20, 40, 20, 40, 60]);
+        }
         ctx.refresh({ transition: true });
         toast(
           nowDone
@@ -1389,12 +1405,15 @@ function logOneSet(st, ctx, settings) {
     bestBefore > -Infinity &&
     adj > bestBefore + 1e-9 &&
     !(adjBefore > bestBefore + 1e-9);
+  ui.set(LANDED, true);
   if (crossed) {
     ui.set(PR_FLASH, true);
-    celebrate();
-    tap([30, 60, 30]);
-    toast(`🏆 New best for ${st.exercise.name} — ${fmt(adj, 1)}`);
-  }
+    prBurst({
+      lift: st.exercise.name,
+      value: fmt(adj, 1),
+      sub: `+${fmt(adj - bestBefore, 1)} on your best of ${fmt(bestBefore, 1)}`,
+    });
+  } else tap(12);
 
   // Only the set that finishes the plan ends the session. Carrying on past it
   // is a decision to keep training, so the clock comes back.
@@ -1460,10 +1479,13 @@ function save(st, ctx) {
   const adj = adjE1rm(w, r, s, ctx.settings, st.exercise.kind);
   const beatBest = bestBefore > -Infinity && adj > bestBefore + 1e-9;
   // A personal best is the moment the whole app exists for — mark it.
-  if (beatBest) {
-    celebrate();
-    tap([30, 60, 30]);
-  }
+  if (beatBest)
+    prBurst({
+      lift: st.exercise.name,
+      value: fmt(adj, 1),
+      sub: `+${fmt(adj - bestBefore, 1)} on your best of ${fmt(bestBefore, 1)}`,
+    });
+  ui.set(LANDED, true);
   toast(
     beatBest
       ? `🏆 New best for ${st.exercise.name} — ${fmt(adj, 1)}`

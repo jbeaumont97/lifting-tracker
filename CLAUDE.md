@@ -66,7 +66,8 @@ One JSON document in `localStorage['liftingTracker.v1']`. The key says v1 though
 - **New or renamed band in `metrics.BANDS`:** add the matching `[data-band="…"]` rules in `css/app.css`; there are no per-band `.is-*` classes. *Tested.*
 - **New setting:** add it to `DEFAULT_SETTINGS` (`updateSettings` silently drops unknown keys), to `STRING_SETTINGS` or `BOOL_SETTINGS` if it isn't a number (everything else is coerced to one), and — if it reaches the maths — to `STATS_KEYS` (read by `exerciseStats`) or `PLAN_KEYS` (read by `bandFor`/`planFor`) in `core/select.js`, or the memo serves stale figures.
 - **New collection in the document:** `blank()`, `normalise()`, both branches of `importJSON()` (replace and merge), the clear/reset functions as appropriate, and `export.js`.
-- **Dark palette:** declared twice in `app.css`, under `@media (prefers-color-scheme: dark)` and under `:root[data-theme="dark"]`, with identical tokens. Change both.
+- **Dark palette:** declared twice in `app.css`, under `@media (prefers-color-scheme: dark)` and under `:root[data-theme="dark"]`, with identical tokens. Change both. Each accent preset (`[data-accent="…"]`, at the end of `app.css`) follows the same pattern: its light values once and its dark values twice.
+- **New accent:** add it to `ACCENTS` in `store.js`, write its three CSS blocks (`--series-1`, `--series-1-deep`, `--series-wash`, `--pop-2`, `--on-accent`), and add its swatch pair to `SWATCHES` in `views/setup.js`. Text on the accent uses `var(--on-accent)`, never `#fff`; a light accent in dark mode (Graphite) needs dark text.
 
 ## Tests and the DOM shim
 
@@ -97,6 +98,8 @@ The design target is an iPhone 16 Pro Max (440×956 pt) used one-handed mid-sess
 - **Keep what a set needs under the thumb.** In the log form, RIR and the save button sit in `.log-dock`, which sticks above the tab bar and rest timer. `.card-form` must keep `overflow: visible`, or the sticky positioning stops working. When the lift is finished the dock is no longer sticky.
 - **Fold away what isn't in use.** Once a lift is chosen, the Log picker collapses into the session rail (`log.pickerOpen`). The check-in folds to one line once answered, and the warm-ups sit in a disclosure.
 - **Search appears only for long lists.** Next, the Log picker and Setup show a search box past 8 lifts. It filters in place without a `refresh()`, so the keyboard stays open.
+- **Bold is the default look, Clean the quiet one.** Appearance (light/dark, accent, style) is a device preference in `localStorage` (`liftingTracker.theme`, `.accent` and `.style`), applied as `data-theme`, `data-accent` and `data-style` on `<html>` by `store.applyTheme()`. It is not a document setting and stays out of backups. Everything Bold adds lives under `[data-style="bold"]`, so Clean is simply its absence. Colour with tokens (`--series-1`, `--pop-2`, `--pop`, `--glow`), never fixed hues, so every accent works.
+- **Celebrate the moments that matter, proportionately.** A personal best gets `prBurst()` (full screen, confetti, haptics; it clears itself and a tap dismisses it). A finished lift gets a little confetti, a finished session more, and a logged set gets the button's `is-landed` bounce. Nothing else celebrates, and everything decorative stands down under reduced motion.
 - **Every tap target is at least 44 pt** (`--tap`). The page gutter is 16 pt.
 - **Rendering is not proof of usability.** For layout work, screenshot the real app at 440×956 (headless Chromium via Playwright, outside the repo, so the no-dependencies rule still holds), not just `npm run preview`.
 
