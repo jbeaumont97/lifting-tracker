@@ -273,18 +273,50 @@ export function isBodyweight(exercise) {
   return exercise.kind === "bodyweight" || exercise.kind === "reps";
 }
 
-/** What one set is worth, on whichever scale its lift is measured in. */
-export function setScore(weight, reps, settings, kind) {
-  if (isBodyweight({ kind })) {
-    const r = Math.round(Number(reps));
-    return r > 0 ? r : NaN;
-  }
-  return e1rm(weight, reps, settings.formula);
+/**
+ * How many reps in reserve the planner leaves in every prescription — and, the
+ * other half of the same decision, whether a logged set's RIR counts towards
+ * what it proves. 0 is the spreadsheet: sets scored as done, plans solved to
+ * failure. The app defaults to 1 (see store.js); a settings object without the
+ * key — the seed's, which the Excel fixture is checked against — reads as 0.
+ *
+ * The two halves cannot be separated. A plan that leaves a rep in hand, scored
+ * as though the set went to failure, logs every session a rep short of its own
+ * target; the next target is built on that, and the plans walk downhill.
+ */
+export function planRirOf(settings) {
+  const v = Math.round(Number(settings?.planRir));
+  return Number.isFinite(v) && v > 0 ? Math.min(v, 3) : 0;
 }
 
-export function adjE1rm(weight, reps, sets, settings, kind) {
+// Past three in reserve a guess is a guess: "4+" is credited as three.
+const RIR_CREDIT_MAX = 3;
+
+/** The reps a set's RIR adds to what it proves, under these settings. */
+export function rirCredit(rir, settings) {
+  if (!planRirOf(settings)) return 0;
+  if (rir === null || rir === undefined || rir === "") return 0;
+  const v = Number(rir);
+  return Number.isFinite(v) ? clamp(v, 0, RIR_CREDIT_MAX) : 0;
+}
+
+/**
+ * What one set is worth, on whichever scale its lift is measured in. With a
+ * reps-in-reserve plan, `rir` counts: five reps with one left proves what six
+ * to failure would. Unknown RIR credits nothing — unknown is not "had more".
+ */
+export function setScore(weight, reps, settings, kind, rir = null) {
+  const extra = rirCredit(rir, settings);
+  if (isBodyweight({ kind })) {
+    const r = Math.round(Number(reps));
+    return r > 0 ? r + extra : NaN;
+  }
+  return e1rm(weight, Number(reps) + extra, settings.formula);
+}
+
+export function adjE1rm(weight, reps, sets, settings, kind, rir = null) {
   return (
-    setScore(weight, reps, settings, kind) * setBonus(sets, settings.setBonusK)
+    setScore(weight, reps, settings, kind, rir) * setBonus(sets, settings.setBonusK)
   );
 }
 
@@ -345,24 +377,30 @@ export function sessionAdjWith(entries, extra, settings, kind) {
     weight: Number(e.weight),
     reps: Number(e.reps),
     sets: Number(e.sets) > 0 ? Number(e.sets) : 1,
+    rir: e.rir ?? null,
     key: setKey(e),
   }));
   if (extra) {
     const key = setKey(extra);
     const hit = list.find((e) => e.key === key);
-    if (hit) hit.sets += 1;
-    else
+    if (hit) {
+      hit.sets += 1;
+      // The block keeps its lowest RIR, exactly as logSet() will store it.
+      if (extra.rir !== null && extra.rir !== undefined)
+        hit.rir = hit.rir === null ? Number(extra.rir) : Math.min(hit.rir, Number(extra.rir));
+    } else
       list.push({
         weight: Number(extra.weight),
         reps: Number(extra.reps),
         sets: 1,
+        rir: extra.rir ?? null,
         key,
       });
   }
   let bestRaw = NaN;
   let totalSets = 0;
   for (const e of list) {
-    const raw = setScore(e.weight, e.reps, settings, kind);
+    const raw = setScore(e.weight, e.reps, settings, kind, e.rir);
     totalSets += e.sets;
     if (Number.isFinite(raw) && !(raw <= bestRaw)) bestRaw = raw;
   }
@@ -373,7 +411,9 @@ export function sessionAdjWith(entries, extra, settings, kind) {
 
 /** What one logged entry is worth on each scale. */
 export function scoreEntry(entry, settings, kind) {
-  const one = setScore(entry.weight, entry.reps, settings, kind);
+  // A block keeps the lowest RIR of its sets, so its credit is the hardest
+  // set's — the conservative reading of what the block proves.
+  const one = setScore(entry.weight, entry.reps, settings, kind, entry.rir);
   return {
     e1rm: one,
     adj: one * setBonus(entry.sets, settings.setBonusK),
@@ -421,19 +461,49 @@ export function nearestStep(value, step, base = 0) {
 }
 
 /**
+ * Round onto the ladder for a prescription that should be about right rather
+ * than at least the target. Up, normally — but where one step is a big share
+ * of the load (a 4 kg jump on a 30 kg pressdown is 13%) rounding up overshoots
+ * by more than any plan should ask, so the nearer rung wins instead.
+ */
+export function prescribeStep(exact, step, base = 0) {
+  const up = ceilToStep(exact, step, base);
+  if (!Number.isFinite(up) || !(exact > 0)) return up;
+  return up / exact - 1 > COARSE_OVERSHOOT ? nearestStep(exact, step, base) : up;
+}
+const COARSE_OVERSHOOT = 0.04;
+
+/**
  * Top set and back-offs for one lift, off one target.
  *
+ * The target is an adjusted e1RM: the last session's best set credited for
+ * every set done that session. A top set is ONE set, so it is solved against
+ * the target with that credit taken back out (`opts.lastSets`) — solving a
+ * single set against a multi-set score asked for 5–8% more than the lifter had
+ * ever done, every session. With a reps-in-reserve plan the top set is solved
+ * for its reps plus that buffer, so the prescription leaves it in hand.
+ *
+ * The back-offs come from what the last back-offs actually were, when there
+ * were some (`opts.backoffCapacity`, see backoffCapacity()): a fixed fraction
+ * of the top set ignores how much a hard top set takes out of the sets after
+ * it, which is the whole reason back-off reps collapse. Without that history
+ * they are solved for their reps plus the buffer plus a set's worth of fatigue.
+ * A fraction chosen by hand (`opts.backoffFraction`) still wins over both.
+ *
  * `topReps` is held inside the strength range — a top set of twelve is not a
- * top set. Returns null where there is no weight to split —
- * on a bodyweight lift the only lever is reps, and "a lighter set" means
- * nothing.
+ * top set. Returns null where there is no weight to split — on a bodyweight
+ * lift the only lever is reps, and "a lighter set" means nothing.
  */
 export function topSetPlan(target, topReps, backoffSets, settings, step, base = 0, opts = {}) {
   const asked = Math.round(Number(topReps));
   const r = Number.isFinite(asked) && asked > 0
     ? clamp(asked, ZONES.strength.minReps, ZONES.strength.maxReps)
     : TOPSET.topReps;
-  const top = weightForTarget(target, r, 1, settings, step, base);
+  const buf = planRirOf(settings);
+  const bonus = setBonus(Math.max(1, Number(opts.lastSets) || 1), settings.setBonusK);
+  const targetRaw = target / bonus;
+  const exactTop = targetRaw / repFactor(r + buf, settings.formula);
+  const top = buf ? prescribeStep(exactTop, step, base) : ceilToStep(exactTop, step, base);
   if (!Number.isFinite(top)) return null;
   const n = Math.max(
     TOPSET.minBackoffSets,
@@ -444,21 +514,95 @@ export function topSetPlan(target, topReps, backoffSets, settings, step, base = 
     ? clamp(askedReps, TOPSET.backoffRepRange.min, TOPSET.backoffRepRange.max)
     : TOPSET.backoffReps;
   const askedFrac = Number(opts.backoffFraction);
-  const fraction = Number.isFinite(askedFrac) && askedFrac > 0
-    ? clamp(askedFrac, TOPSET.backoffFractions[0], TOPSET.backoffFractions[TOPSET.backoffFractions.length - 1])
-    : TOPSET.backoffFraction;
-  const backWeight = Math.min(
-    nearestStep(top * fraction, step, base),
-    top,
-  );
-  const topScore = top * repFactor(r, settings.formula);
+  const fractions = TOPSET.backoffFractions;
+  let backWeight;
+  let source;
+  // The percentage the back-offs were set at, for the card's levers: what was
+  // chosen, or the default fraction. Null when they were solved instead.
+  let fraction = null;
+  if (Number.isFinite(askedFrac) && askedFrac > 0) {
+    fraction = clamp(askedFrac, fractions[0], fractions[fractions.length - 1]);
+    backWeight = nearestStep(top * fraction, step, base);
+    source = "chosen";
+  } else if (Number(opts.backoffCapacity) > 0) {
+    // One more in reserve than the top set: these are for the dose.
+    backWeight = nearestStep(opts.backoffCapacity / repFactor(backReps + buf + 1, settings.formula), step, base);
+    source = "history";
+  } else if (buf) {
+    backWeight = nearestStep(targetRaw / repFactor(backReps + buf + 1 + BACKOFF_FATIGUE_REPS, settings.formula), step, base);
+    source = "estimate";
+  } else {
+    fraction = TOPSET.backoffFraction;
+    backWeight = nearestStep(top * fraction, step, base);
+    source = "fraction";
+  }
+  backWeight = Math.min(backWeight, top);
+  // What the top set proves if done as prescribed, on the same scale as the
+  // target it is judged against: a single set, credited the way its session was.
+  const topScore = top * repFactor(r + buf, settings.formula) * bonus;
   return {
     top: { weight: top, reps: r, sets: 1, score: topScore },
-    backoff: { weight: backWeight, reps: backReps, sets: n, fraction },
+    backoff: { weight: backWeight, reps: backReps, sets: n, fraction, source },
     score: topScore,
     hardSets: repCredit(r) + n * repCredit(backReps),
     totalSets: 1 + n,
   };
+}
+
+// A set's worth of fatigue: back-offs after a hard top set lose about this
+// many reps against what the same weight would allow fresh.
+const BACKOFF_FATIGUE_REPS = 2;
+
+/**
+ * What this lift's back-offs have shown they can do: the mean, over every
+ * back-off set of the most recent top set + back-offs session, of what each
+ * set proves (its weight at its reps plus any RIR credited). Measured under the
+ * fatigue a top set leaves, which is the point — an estimate from fresh sets
+ * is exactly what made the back-offs too heavy. Null without such a session.
+ */
+export function backoffCapacity(entries, settings) {
+  const backs = (entries || []).filter((e) => e.plan?.zone === TOPSET.key && e.plan.role === "backoff");
+  if (!backs.length) return null;
+  const last = backs.reduce((m, e) => (e.date > m ? e.date : m), "");
+  let sum = 0, n = 0;
+  for (const e of backs) {
+    if (e.date !== last) continue;
+    const k = Number(e.sets) > 0 ? Math.round(Number(e.sets)) : 1;
+    const log = Array.isArray(e.log) && e.log.length === k ? e.log : null;
+    for (let i = 0; i < k; i++) {
+      const rir = log && log[i].rir !== null && log[i].rir !== undefined ? log[i].rir : e.rir;
+      const v = e1rm(e.weight, Number(e.reps) + rirCredit(rir, settings), settings.formula);
+      if (Number.isFinite(v)) { sum += v; n++; }
+    }
+  }
+  return n ? { value: sum / n, date: last, sets: n } : null;
+}
+
+/**
+ * How a rep range compares with the lift's best set: what the sets in `zone`
+ * of the most recent session that had any showed on average (with RIR
+ * credit), over the last session's best, capped at 1. An e1RM from heavy
+ * triples predicts far more twelves than most people can do, and the best of
+ * three straight sets predicts what the third will manage no better — so the
+ * mean, set by set, is what a straight-sets pick is scaled to. 1 when there is
+ * nothing in range to go on.
+ */
+export function zoneRatio(stats, zone, lookbackDays = 42) {
+  const last = stats.sessions && stats.sessions.length ? stats.sessions[stats.sessions.length - 1] : null;
+  if (!last || !Number.isFinite(last.best.e1rm) || !(last.best.e1rm > 0)) return 1;
+  const inZone_ = (stats.entries || []).filter(
+    (e) => e.day >= last.day - lookbackDays && e.reps >= zone.minReps && e.reps <= zone.maxReps && Number.isFinite(e.e1rm),
+  );
+  if (!inZone_.length) return 1;
+  const day = inZone_.reduce((m, e) => Math.max(m, e.day), -Infinity);
+  let sum = 0, n = 0;
+  for (const e of inZone_) {
+    if (e.day !== day) continue;
+    const k = Number(e.sets) > 0 ? Math.round(Number(e.sets)) : 1;
+    sum += e.e1rm * k;
+    n += k;
+  }
+  return clamp(sum / n / last.best.e1rm, 0.6, 1);
 }
 
 /** The lightest loadable weight whose adj e1RM meets `target` at reps x sets. */
@@ -1135,6 +1279,19 @@ export function bandFor(score, target, bestAdj, settings) {
   );
 }
 
+/**
+ * The plan the most recent session followed, if it recorded one: the top set's
+ * for a top set + back-offs session (that is the half the card prescribes),
+ * otherwise the first planned entry's. Null for sessions logged without plans.
+ */
+export function lastSessionPlan(stats) {
+  const last = stats.sessions && stats.sessions.length ? stats.sessions[stats.sessions.length - 1] : null;
+  if (!last) return null;
+  const planned = (stats.entries || []).filter((e) => e.date === last.date && e.plan && e.plan.zone);
+  if (!planned.length) return null;
+  return (planned.find((e) => e.plan.role === "top") || planned[0]).plan;
+}
+
 /** The weight behind the best set of the most recent session. */
 export function lastSessionWeight(stats) {
   const last =
@@ -1214,12 +1371,21 @@ export function planFor(stats, settings, override = {}) {
       ? BANDS.return
       : bandFor(score, target, bestNow, settings);
 
+  // With no pick taken on the card, a reps-in-reserve plan carries on with the
+  // pick the last session followed — the view state that remembers a pick is
+  // per tab, but every logged set records its plan. Without this a top set +
+  // back-offs lift reopened as straight sets at the top single's reps, solved
+  // against a score credited for the whole session: 3 × 2 at a weight managed
+  // once, to failure.
+  const carried = !override.zone && planRirOf(settings) ? lastSessionPlan(stats) : null;
   const reps =
     Number(override.reps) > 0
       ? Math.round(Number(override.reps))
-      : Number(stats.lastReps) > 0
-        ? Math.round(Number(stats.lastReps))
-        : 5;
+      : carried && Number(carried.reps) > 0
+        ? Math.round(Number(carried.reps))
+        : Number(stats.lastReps) > 0
+          ? Math.round(Number(stats.lastReps))
+          : 5;
   const sets =
     Number(override.sets) > 0
       ? Math.round(Number(override.sets))
@@ -1237,7 +1403,10 @@ export function planFor(stats, settings, override = {}) {
   const zone =
     override.zone === "hypertrophy" || override.zone === TOPSET.key
       ? override.zone
-      : "strength";
+      : carried && (carried.zone === "hypertrophy" || carried.zone === TOPSET.key)
+        ? carried.zone
+        : "strength";
+  const buf = planRirOf(settings);
   const plan = {
     ready: Number.isFinite(target) && target > 0,
     zone,
@@ -1284,8 +1453,10 @@ export function planFor(stats, settings, override = {}) {
     plan.weight = null;
     plan.atBase = false;
     plan.lastWeight = null;
-    plan.reps = repsForTarget(target, sets, settings);
-    plan.score = plan.reps * setBonus(sets, settings.setBonusK);
+    // The buffer comes off the rep count: the reps that meet the target, less
+    // the ones meant to stay in hand.
+    plan.reps = Math.max(1, repsForTarget(target, sets, settings) - buf);
+    plan.score = (plan.reps + buf) * setBonus(sets, settings.setBonusK);
     plan.work = plan.reps * sets;
     plan.hardSets = sets * repCredit(plan.reps);
     plan.overshoot = plan.score - target;
@@ -1293,8 +1464,8 @@ export function planFor(stats, settings, override = {}) {
     // No rep-scheme axis to trade against: the only choice is how many sets,
     // and each answer is the reps that gets you there. One row, not a grid.
     plan.options = SET_COLUMNS.map((sn) => {
-      const r = repsForTarget(target, sn, settings);
-      const score = r * setBonus(sn, settings.setBonusK);
+      const r = Math.max(1, repsForTarget(target, sn, settings) - buf);
+      const score = (r + buf) * setBonus(sn, settings.setBonusK);
       return {
         reps: r,
         sets: sn,
@@ -1318,12 +1489,15 @@ export function planFor(stats, settings, override = {}) {
     return plan;
   }
 
-  plan.weight = weightForTarget(target, reps, sets, settings, step, base);
+  // Every prescription leaves `buf` reps in reserve: the weight is solved for
+  // the reps plus the buffer, and what it proves is scored the same way, so a
+  // set done exactly as planned and logged with that RIR meets the target.
+  plan.weight = weightForTarget(target, reps + buf, sets, settings, step, base);
   // True when the bar alone is already heavier than the target needs.
   plan.atBase = base > 0 && Math.abs(plan.weight - base) < 1e-9;
   plan.score =
     plan.weight *
-    repFactor(reps, settings.formula) *
+    repFactor(reps + buf, settings.formula) *
     setBonus(sets, settings.setBonusK);
   plan.work = work(plan.weight, reps, sets, stats.exercise.kind);
   plan.hardSets = sets * repCredit(reps);
@@ -1335,10 +1509,31 @@ export function planFor(stats, settings, override = {}) {
       : null;
 
   /** One cell of the trade-off grid: the lightest loadable weight at reps x sets. */
+  // With a buffer, each row is also solved against what its own rep range has
+  // shown (zoneRatio) and rounded to the nearer rung on a coarse ladder — the
+  // same rules as the picks, so the card, the grid and the picks agree. At 0
+  // it is the spreadsheet's cell, exactly.
+  let sizeRatio;
+  const ratioFor = (r) => {
+    if (!buf || r <= ZONES.strength.maxReps) return 1;
+    if (sizeRatio === undefined) sizeRatio = zoneRatio(stats, ZONES.hypertrophy);
+    return sizeRatio;
+  };
   const cell = (r, s) => {
-    const w = weightForTarget(target, r, s, settings, step, base);
+    if (!buf) return cellAt(weightForTarget(target, r, s, settings, step, base), r, s);
+    const ratio = ratioFor(r);
+    const exact = (target * ratio) / (repFactor(r + buf, settings.formula) * setBonus(s, settings.setBonusK));
+    const c = cellAt(prescribeStep(exact, step, base), r, s);
+    if (ratio < 1) {
+      c.score = c.score / ratio;
+      c.band = bandOf(c.score, c.weight);
+    }
+    return c;
+  };
+  /** A cell at a given weight: what r reps × s sets there proves, with the buffer. */
+  const cellAt = (w, r, s) => {
     const score =
-      w * repFactor(r, settings.formula) * setBonus(s, settings.setBonusK);
+      w * repFactor(r + buf, settings.formula) * setBonus(s, settings.setBonusK);
     return {
       reps: r,
       sets: s,
@@ -1393,7 +1588,64 @@ export function planFor(stats, settings, override = {}) {
    * not need telling that five is the canonical strength scheme.
    */
   let picks;
-  const backoffOpts = { backoffReps: override.backoffReps, backoffFraction: override.backoffPct };
+  const capacity = backoffCapacity(stats.entries, settings);
+  // How far the target has moved since the last session (gain, fatigue,
+  // layoff), applied to the back-offs' own history as well.
+  const progress = Number(stats.lastAdj) > 0 ? clamp(target / stats.lastAdj, 0.85, 1.05) : 1;
+  const backoffOpts = {
+    backoffReps: override.backoffReps,
+    backoffFraction: override.backoffPct,
+    // Every set of the last session, not only the best block's: that is what
+    // lastAdj credited, so it is what has to come back out for a single set.
+    lastSets: stats.sessions && stats.sessions.length ? stats.sessions[stats.sessions.length - 1].sets : stats.lastSets,
+    backoffCapacity: capacity ? capacity.value * progress : null,
+  };
+
+  /**
+   * A zone's pick with a reps-in-reserve plan. Two things the plain grid cell
+   * gets wrong are put right here, and only here — the grid stays the
+   * spreadsheet's capability map:
+   *
+   *  - The target is scaled by zoneRatio(): what sets in this rep range have
+   *    actually shown, rather than an extrapolation from the heaviest set.
+   *  - On a coarse ladder, rounding up can overshoot by 10–30%. The rung below
+   *    and the rung above are both tried, each at the fewest reps that meet the
+   *    target, and the one whose reps sit closest to the zone's own scheme wins
+   *    — double progression: the same weight for more reps until the next rung
+   *    is honest.
+   *
+   * Judged against the plain target, with the ratio taken back out, so the
+   * band says what it always says about a plan.
+   */
+  const realisticPick = (zoneDef, r0, s) => {
+    const ratio = zoneRatio(stats, zoneDef);
+    const zt = target * ratio;
+    const bonusS = setBonus(s, settings.setBonusK);
+    const w0 = prescribeStep(zt / (repFactor(r0 + buf, settings.formula) * bonusS), step, base);
+    if (!Number.isFinite(w0)) return cell(r0, s);
+    const rungs = [w0 - step, w0, w0 + step].filter((w) => w >= (base || 0) - 1e-9 && w > 0);
+    let best = null;
+    for (const w of rungs) {
+      let r = null;
+      for (let k = 1; k <= zoneDef.maxReps; k++) {
+        if (w * repFactor(k + buf, settings.formula) * bonusS >= zt - 1e-9) { r = k; break; }
+      }
+      if (r === null || r < zoneDef.minReps) continue;
+      const over = (w * repFactor(r + buf, settings.formula) * bonusS) / zt - 1;
+      const cand = { w, r, d: Math.abs(r - r0), mid: Math.abs(r - zoneDef.pickReps), over };
+      // Closest to the reps asked for; on a tie, the one nearer the middle of
+      // the zone (six curls is barely size work); then the heavier rung.
+      if (!best || cand.d < best.d
+        || (cand.d === best.d && (cand.mid < best.mid || (cand.mid === best.mid && cand.w > best.w)))) best = cand;
+    }
+    const c = best ? cellAt(best.w, best.r, s) : cellAt(w0, r0, s);
+    if (ratio < 1) {
+      c.score = c.score / ratio;
+      c.band = bandOf(c.score, c.weight);
+    }
+    c.ratio = ratio;
+    return c;
+  };
   Object.defineProperty(plan, "picks", {
     enumerable: true,
     configurable: true,
@@ -1409,8 +1661,8 @@ export function planFor(stats, settings, override = {}) {
         sets, settings, step, base, backoffOpts,
       );
       picks = {
-        strength: cell(repsFor(ZONES.strength), sets),
-        hypertrophy: cell(repsFor(ZONES.hypertrophy), sets),
+        strength: buf ? realisticPick(ZONES.strength, repsFor(ZONES.strength), sets) : cell(repsFor(ZONES.strength), sets),
+        hypertrophy: buf ? realisticPick(ZONES.hypertrophy, repsFor(ZONES.hypertrophy), sets) : cell(repsFor(ZONES.hypertrophy), sets),
         topset: ts
           ? {
               ...ts,
@@ -1455,6 +1707,42 @@ export function planFor(stats, settings, override = {}) {
       return topsetOptions;
     },
   });
+
+  // With a buffer the card's straight-sets prescription is its grid cell,
+  // solved the same way as the picks — and a pick that has been taken (or that
+  // the last session followed) is the prescription outright: its weight and
+  // reps, whatever the ladder made of them.
+  // Reps you set on the lever are kept and only the weight is solved. Reps the
+  // card chose itself are free to move on a coarse ladder: at a fixed 14 reps a
+  // cable stack in 2.3 kg plates offers nothing honest, and seven at the next
+  // plate is the real prescription.
+  if (buf && zone !== TOPSET.key) {
+    const zdef = reps > ZONES.strength.maxReps ? ZONES.hypertrophy : ZONES.strength;
+    const c = Number(override.reps) > 0 || !inZone(reps, zdef)
+      ? cell(reps, sets)
+      : realisticPick(zdef, reps, sets);
+    plan.weight = c.weight;
+    plan.reps = c.reps;
+    plan.score = c.score;
+    plan.overshoot = c.score - target;
+    plan.band = c.band;
+    plan.atBase = c.atBase;
+    plan.hardSets = c.hardSets;
+    plan.work = c.work;
+  }
+  const followed = override.zone || (carried && carried.zone);
+  if (buf && (followed === "strength" || followed === "hypertrophy")) {
+    const p = plan.picks[followed];
+    if (p && p.reps === plan.reps && p.sets === sets) {
+      plan.weight = p.weight;
+      plan.score = p.score;
+      plan.overshoot = p.score - target;
+      plan.band = p.band;
+      plan.work = p.work;
+      plan.hardSets = p.hardSets;
+      plan.atBase = p.atBase;
+    }
+  }
 
   if (zone === TOPSET.key) {
     const ts = plan.picks.topset;

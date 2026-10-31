@@ -20,6 +20,9 @@ const STATS_KEYS = [
   'formula', 'setBonusK', 'lookbackDays', 'defaultStep', 'defaultGainPerWeek',
   'readiness', 'fatiguePeak', 'fatigueTau', 'productiveDays', 'graceDays',
   'detrainHalfLife', 'retainedFloor',
+  // Scoring credits a set's RIR under a reps-in-reserve plan, so this moves
+  // every e1RM, not only the prescriptions.
+  'planRir',
 ];
 
 // The bands live in bandFor(), which planFor() calls and exerciseStats() does

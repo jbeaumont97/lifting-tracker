@@ -2959,6 +2959,60 @@ function givePressUps({ reps = [10, 11, 12], from = -11, step = 4 } = {}) {
   ok("and clears the back-off levers too", cleared.backoffPct == null && cleared.backoffReps == null, JSON.stringify(cleared));
 }
 
+// --- the back-off load is Auto until a percentage is chosen ---
+{
+  reset();
+  const ex = store.getExercises()[0];
+  // A top set + back-offs session already in the log, so Auto has history.
+  store.addEntry({ exerciseId: ex.id, date: "2026-08-15", weight: 90, reps: 3, sets: 1, rir: 0, plan: { zone: "topset", role: "top" } });
+  store.addEntry({ exerciseId: ex.id, date: "2026-08-15", weight: 80, reps: 4, sets: 3, rir: 0, plan: { zone: "topset", role: "backoff" } });
+  uistate.setForExercise("plan.overrides", ex.id, { zone: "topset" });
+  uistate.set("plan.openId", ex.id);
+  uistate.set("plan.adjustId", ex.id);
+  select.invalidate();
+  const view = renderPlan(ctx({ route: "plan" }));
+  const chips = view.querySelector(".topset-pcts").querySelectorAll(".chip");
+  const auto = chips.find((c) => c.textContent === "Auto");
+  ok("Auto is offered", !!auto);
+  ok("and selected by default", /is-selected/.test(auto.className));
+  ok("and nothing else is", chips.filter((c) => /is-selected/.test(c.className)).length === 1);
+  ok("it says where the load came from", /last back-offs/.test(auto.getAttribute("aria-label")));
+  const now = view.querySelector(".topset-backoff-now").textContent;
+  ok("the back-offs come in under the 80 kg that went 4 reps", Number(now.match(/@ ([\d.]+) kg/)[1]) < 80, now);
+  chips.find((c) => c.textContent === "75%").click();
+  ok("choosing a percentage overrides it", uistate.forExercise("plan.overrides", ex.id, {}).backoffPct === 0.75);
+  const again = renderPlan(ctx({ route: "plan" })).querySelector(".topset-pcts").querySelectorAll(".chip");
+  ok("and Auto stands down", !/is-selected/.test(again.find((c) => c.textContent === "Auto").className));
+  again.find((c) => c.textContent === "Auto").click();
+  ok("tapping Auto hands it back", uistate.forExercise("plan.overrides", ex.id, {}).backoffPct == null);
+}
+
+// --- the live score follows RIR, because a reps-in-reserve plan credits it ---
+{
+  reset();
+  checkIn();
+  const ex = store.getExercises()[0];
+  setPrefill({ exerciseId: ex.id, date: TODAY, weight: 100, reps: 5, sets: 3, mode: "bulk" });
+  const view = renderLog(ctx({ route: "log" }));
+  const before = view.querySelector(".preview").textContent;
+  pickRir(view, 2);
+  await settle();
+  const after = view.querySelector(".preview").textContent;
+  ok("picking an RIR moves the score", before !== after, `${before} | ${after}`);
+}
+
+// --- Setup: the buffer is a setting, and 0 is the spreadsheet ---
+{
+  reset();
+  const { renderSetup } = await import("../js/views/setup.js");
+  const view = renderSetup(ctx({ route: "setup" }));
+  const block = view.querySelectorAll(".field-block").find((b) => /Reps in reserve to plan for/.test(b.textContent));
+  ok("Setup offers the reps-in-reserve buffer", !!block);
+  ok("it defaults to 1", store.getSettings().planRir === 1);
+  block.querySelectorAll(".chip").find((c) => /^0/.test(c.textContent.trim())).click();
+  ok("and 0 can be chosen", store.getSettings().planRir === 0);
+}
+
 // --- logging it: the form starts on the top set and moves to the back-offs ---
 {
   reset();

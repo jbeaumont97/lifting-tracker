@@ -52,6 +52,11 @@ export const DEFAULT_SETTINGS = {
   // Body measurements: how often to prompt for a check-in, and whether to
   // remind about photos while you are at it. See measure.js.
   ...MEASURE_DEFAULTS,
+
+  // Reps in reserve the planner leaves in every prescription, and the cap on
+  // how much a logged set's RIR counts towards what it proves. 0 is the
+  // spreadsheet's maths exactly. See planRirOf() in metrics.js.
+  planRir: 1,
 };
 
 const STRING_SETTINGS = new Set(['formula', 'unit', 'readiness']);

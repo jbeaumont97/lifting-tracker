@@ -55,6 +55,7 @@ One JSON document in `localStorage['liftingTracker.v1']`. The key says v1 though
 `tools/xlsx-fixture.json` holds values Excel calculated and is ground truth: when a check fails, fix the code, not the fixture. `test.mjs` recomputes them from `js/seed.js` with `TODAY` pinned to `2026-08-18` and must match to the decimal — every Dashboard row (`lastAdj`, `bestAdj`, `trendPerWeek`, `baseTarget`, `volume7`, `sets7`…) and both planner grids (with `readiness: 'off'`) over the first `SHEET_REP_SCHEMES` entries of `REP_SCHEMES` and five set columns. So:
 
 - `baseTarget` is the sheet's flat target and `nextTarget` is that after the readiness model. Keep them separate.
+- `settings.planRir` (reps in reserve, default 1 in the app) changes scoring as well as plans: logged RIR is credited in `setScore()`. The parity checks use `SEED.settings`, which has no `planRir`, and `planRirOf()` reads that as 0 — the sheet. Keep it that way: any new departure in the planner belongs behind `planRirOf(settings) > 0`.
 - New rep schemes go after the sheet's seven, which keep their order.
 - `js/seed.js` is generated, is every new install's first-run data, *and* is the input the fixture is checked against. Regenerating it (especially with `--no-log`) changes what `npm test` measures.
 - A new intentional departure from the sheet belongs in README §5.

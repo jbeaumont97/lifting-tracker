@@ -135,12 +135,18 @@ it, and **Reset to automatic** puts it back.
 
 **Both** solves the top set against your target as a single set of 3–6 reps, so
 it is the heaviest thing on the card and the number the colour judges. The
-back-offs are, by default, sets of eight at 80% of it, rounded to the nearest
-loadable weight — there for the hard sets, not chased. While Both is the pick,
+target is a session score — the best set, credited for every set that day — so
+that credit is taken back out first: a single set is asked for what your last
+session's best set showed, plus the step, not for the whole session's score.
+The back-offs default to **Auto**: eight reps at the load your last back-offs
+showed they could do with two in reserve, measured set by set — after a hard top
+set, not fresh, which is why a fixed share of the top set kept asking for more
+than you had. Without a previous session they are estimated from the target.
+They are there for the hard sets, not chased. While Both is the pick,
 **Adjust** speaks in those terms rather than in straight sets: a **Top set** row
 offers 1 × 3, 4, 5 and 6, each with its weight and colour band, one tap to take;
 and **Back-offs** sets their count (never fewer than two), their reps (5–15) and
-their load (70, 75, 80 or 85% of the top set) directly, with the result and the
+their load (Auto, or 70, 75, 80 or 85% of the top set) directly, with the result and the
 session's hard sets shown as you go. **Reset to automatic** clears all of it.
 **Log this** opens the form on the top set and moves it onto the back-off
 weight and reps as soon as the top set is in, set by set or all at once.
@@ -455,13 +461,61 @@ off and every target falls back to the flat one above):
 
 - e1RM formulas drift above roughly 10–12 reps and will overestimate. Keep
   comparisons inside 1–10 reps where you can.
-- A set to failure and a set with 3 reps left produce the same e1RM but are not the
-  same session. That is what RIR is for.
+- A set to failure and a set with 3 reps left are not the same session, and with
+  a reps-in-reserve plan (below) they do not score the same either.
 - The set bonus is a heuristic. There is no agreed formula for folding sets into
   one strength number, so treat k as a dial you tune, not a constant to trust.
 - Projections are straight lines. Real progress is roughly linear for a few months
   and then flattens, so +12 weeks is a ceiling, not a forecast. The trend is only
   honest if your set count is reasonably stable.
+
+### Plans you can actually do: reps in reserve
+
+Every plan leaves **1 rep in reserve** by default (Setup → The maths → _Reps in
+reserve to plan for_: 0, 1 or 2). Two things change together, and neither works
+without the other:
+
+- **Prescriptions** are solved for their reps plus the buffer. `3 × 5` at a
+  1-rep buffer is the weight you could do `3 × 6` with.
+- **A logged set's RIR counts** towards what it proves: `5 reps, RIR 2` scores
+  what `7 to failure` would. "4+" counts as three; an unknown RIR counts nothing.
+
+Without the second half, a plan that leaves a rep in hand logs every session a
+rep short of its own target, the next target is built on that, and the plans walk
+downhill. With it, a set done exactly as planned and logged honestly meets the
+target, and the app's figures describe what you could do rather than what you
+happened to stop at.
+
+The **strength and size picks** are also made honest, without touching the grid:
+
+- **Rep range.** An e1RM from heavy triples predicts far more twelves than most
+  people manage. The size pick is scaled to what your sets of 6–20 reps have
+  actually shown — the average over the most recent session that had some,
+  because three straight sets fade — never above the e1RM's own prediction.
+- **Coarse ladders.** Where one step is a big share of the load (4 kg on a 30 kg
+  pressdown), rounding up overshoots by 10–30%. The rung below and the rung above
+  are both tried, each at the fewest reps that meet the target, and the one whose
+  reps sit closest to the zone's scheme wins: the same weight for more reps until
+  the next rung is honest. Prescriptions everywhere round to the nearer rung when
+  rounding up would overshoot by more than 4%.
+
+Taking a pick makes it the prescription, weight and reps both. The card's own
+straight-sets prescription follows the same rules, and on a coarse ladder its
+reps may move — 3 × 7 at the next plate rather than 3 × 14 at a weight that
+cannot be made — unless you set the reps yourself on the lever, which keeps them.
+
+With no pick taken, **a card carries on with the pick your last session
+followed**, which every logged set records. The pick itself is view state and is
+forgotten with the tab; without this a top set + back-offs lift reopened as
+straight sets at the top single's reps.
+
+One known limit: the set credit assumes extra sets at the same load cost little,
+so a straight-sets option with many sets (5 × 12, say) is still optimistic.
+Three sets is where the size pick is most honest.
+
+**0 is the spreadsheet**: plans solved to failure, RIR ignored, picks read off
+the grid. `npm test` checks the app against Excel at 0, which is what a settings
+object without the key means.
 
 ---
 
@@ -469,7 +523,7 @@ off and every target falls back to the flat one above):
 
 Everything the workbook publishes, the app reproduces to the decimal —
 `npm test` checks each Dashboard row and every cell of both planner grids against
-the values Excel itself calculated. Nine things are intentionally different:
+the values Excel itself calculated. Ten things are intentionally different:
 
 1. **Projections are withheld until the fit earns them.** The sheet will happily
    extrapolate two sessions three days apart to +12 weeks; on your August data that
@@ -515,6 +569,11 @@ the values Excel itself calculated. Nine things are intentionally different:
    instead — in range, near enough to failure — so the budget measures the thing
    it was always a budget for (section 4). The rep axis runs to twenty for the
    same reason, and every card names a strength option and a size one.
+10. **Plans leave reps in reserve, and RIR counts.** The sheet solves every plan
+   to failure and ignores the RIR column, so a plan done with a rep in hand reads
+   as falling short. The app leaves one rep in reserve by default, credits logged
+   RIR in scoring, and scales size picks to your own sets in that rep range
+   (section 4). At 0 in Setup it is the sheet again, to the decimal.
 
 ---
 

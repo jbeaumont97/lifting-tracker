@@ -3268,6 +3268,135 @@ const fakeStats = {
   );
 }
 
+/* ------------------------------------------ 9. a plan you can actually do */
+
+// --- reps in reserve: absent is the spreadsheet, and the setting caps itself ---
+{
+  ok("no planRir reads as the spreadsheet's 0", M.planRirOf({}) === 0 && M.planRirOf(SEED.settings) === 0);
+  ok("1 is 1", M.planRirOf({ planRir: 1 }) === 1);
+  ok("and it never asks for more than 3", M.planRirOf({ planRir: 9 }) === 3);
+}
+
+// --- a logged RIR counts towards what a set proves, but only under a buffer ---
+{
+  const on = { formula: "epley", setBonusK: 0.05, planRir: 1 };
+  const off = { formula: "epley", setBonusK: 0.05 };
+  close("five with two left proves what seven to failure would", M.setScore(100, 5, on, "weight", 2), M.e1rm(100, 7));
+  close("with no buffer the RIR is ignored, as in the sheet", M.setScore(100, 5, off, "weight", 2), M.e1rm(100, 5));
+  close("unknown RIR credits nothing", M.setScore(100, 5, on, "weight", null), M.e1rm(100, 5));
+  close("'4+' is credited as three", M.setScore(100, 5, on, "weight", 4), M.e1rm(100, 8));
+  close("on a reps lift the credit is reps", M.setScore(0, 10, on, "bodyweight", 2), 12);
+  close("a session preview credits the set being added",
+    M.sessionAdjWith([], { weight: 100, reps: 5, rir: 1 }, on, "weight"), M.e1rm(100, 6));
+}
+
+// --- the plan leaves the buffer in hand, and doing it as planned meets the target ---
+// The trap this guards: plans that leave a rep in reserve, scored as if they did
+// not, log every session short of target, and the targets walk downhill.
+{
+  const base = { ...settings, readiness: "off" };
+  const on = { ...base, planRir: 1 };
+  const st0 = M.allStats(SEED.exercises, SEED.entries, base, TODAY).find((s) => s.entryCount);
+  const st1 = M.allStats(SEED.exercises, SEED.entries, on, TODAY).find((s) => s.exercise.id === st0.exercise.id);
+  const p0 = M.planFor(st0, base, {});
+  const p1 = M.planFor(st1, on, {});
+  ok("a buffer never asks for more weight", p1.weight <= p0.weight + 1e-9, `${p1.weight} vs ${p0.weight}`);
+  ok("the plan done exactly, logged with that RIR, meets its target",
+    M.adjE1rm(p1.weight, p1.reps, p1.sets, on, st1.exercise.kind, 1) >= p1.target - 1e-9,
+    `${M.adjE1rm(p1.weight, p1.reps, p1.sets, on, st1.exercise.kind, 1)} vs ${p1.target}`);
+  ok("and the plan's own score says so", Math.abs(p1.score - M.adjE1rm(p1.weight, p1.reps, p1.sets, on, st1.exercise.kind, 1)) < 1e-9);
+  const cells = p1.grid.flat();
+  ok("strength rows are solved with the buffer and meet the target",
+    cells.filter((c) => c.reps <= 6).every((c) => c.score >= p1.target - 1e-9
+      && Math.abs(c.score - c.weight * M.repFactor(c.reps + 1) * M.setBonus(c.sets, on.setBonusK)) < 1e-9));
+  ok("size rows never ask for more than the plain solve would",
+    cells.filter((c) => c.reps > 6).every((c) => c.weight <= M.weightForTarget(p1.target, c.reps + 1, c.sets, on, st1.step, st1.base) + 1e-9));
+  ok("and the card's prescription is its own grid cell",
+    cells.some((c) => c.reps === p1.reps && c.sets === p1.sets && c.weight === p1.weight) || !M.REP_SCHEMES.includes(p1.reps));
+}
+
+// --- the top set is one set: the session's multi-set credit comes back out ---
+{
+  const s = { formula: "epley", setBonusK: 0.05, planRir: 1 };
+  const one = M.topSetPlan(107.2, 3, 3, s, 2.5, 0, { lastSets: 1 });
+  const five = M.topSetPlan(107.2, 3, 3, s, 2.5, 0, { lastSets: 5 });
+  ok("a target earned over five sets asks less of one set", five.top.weight < one.top.weight, `${five.top.weight} vs ${one.top.weight}`);
+  close("it is solved against the target with that credit removed",
+    five.top.weight, M.ceilToStep(107.2 / M.setBonus(5, 0.05) / M.repFactor(3 + 1), 2.5, 0));
+  ok("and is judged on the target's own scale", Math.abs(five.score - five.top.weight * M.repFactor(4) * M.setBonus(5, 0.05)) < 1e-9);
+}
+
+// --- back-offs come from what the last back-offs did ---
+{
+  const s = { formula: "epley", setBonusK: 0.05, planRir: 1 };
+  const plan = (role) => ({ zone: "topset", role });
+  const entries = [
+    { date: "2026-10-24", weight: 70, reps: 8, sets: 2, rir: 1, plan: plan("backoff"), log: [{ rir: 1 }, { rir: 1 }] },
+    { date: "2026-10-31", weight: 80, reps: 4, sets: 2, rir: 0, plan: plan("backoff"), log: [{ rir: 0 }, { rir: 0 }] },
+    { date: "2026-10-31", weight: 80, reps: 3, sets: 1, rir: 1, plan: plan("backoff"), log: [{ rir: 1 }] },
+    { date: "2026-10-31", weight: 97.5, reps: 1, sets: 1, rir: 0, plan: plan("top"), log: [{ rir: 0 }] },
+  ];
+  const cap = M.backoffCapacity(entries, s);
+  close("only the latest session's back-offs, set by set", cap.value, (2 * M.e1rm(80, 4) + M.e1rm(80, 4)) / 3);
+  ok("never the top set", cap.sets === 3);
+  const ts = M.topSetPlan(107, 3, 3, s, 2.5, 0, { lastSets: 5, backoffCapacity: cap.value });
+  close("8 reps leaving two in reserve at what they showed", ts.backoff.weight, M.nearestStep(cap.value / M.repFactor(10), 2.5, 0));
+  ok("which is lighter than the 80 kg that went 4, 4, 3", ts.backoff.weight < 80);
+  ok("and marked as worked out, not a percentage", ts.backoff.source === "history" && ts.backoff.fraction === null);
+  const chosen = M.topSetPlan(107, 3, 3, s, 2.5, 0, { lastSets: 5, backoffCapacity: cap.value, backoffFraction: 0.75 });
+  ok("a percentage chosen by hand still wins", chosen.backoff.source === "chosen" && chosen.backoff.fraction === 0.75);
+  ok("with no history and no buffer it is the old 80%",
+    M.topSetPlan(95, 5, 3, { formula: "epley", setBonusK: 0.05 }, 2.5, 20).backoff.fraction === 0.8);
+}
+
+// --- a coarse ladder rounds to the nearer rung rather than always up ---
+{
+  ok("a 2.5 kg step on 87.6 still rounds up", M.prescribeStep(87.6, 2.5, 0) === 90);
+  ok("a 4 kg step on 25 does not jump 12% to 28", M.prescribeStep(25, 4, 0) === 24);
+}
+
+// --- the size pick: real rep-range evidence, honest rungs, and the hero follows it ---
+{
+  const s = { formula: "epley", setBonusK: 0.05, lookbackDays: 84, defaultStep: 2.5, defaultGainPerWeek: 0.0075,
+    idealBand: 0.01, stretchBand: 0.03, readiness: "off", planRir: 1 };
+  const ex = { id: "tp", name: "Tricep Press", kind: "weight", step: 4, base: 0, gainPerWeek: 0.0075, setsPerSession: 3, setsPerWeek: 10 };
+  const mk = (date, weight, reps, sets, rir) => ({ id: `${date}-${weight}-${reps}`, date, exerciseId: "tp", weight, reps, sets, rir, notes: "", seq: 1 });
+  const entries = [mk("2026-10-27", 24, 8, 1, 2), mk("2026-10-27", 24, 7, 1, 0), mk("2026-10-31", 40, 1, 1, 0)];
+  const st = M.allStats([ex], entries, s, "2026-11-02")[0];
+  const ratio = M.zoneRatio(st, M.ZONES.hypertrophy);
+  close("size reps are scaled to the sets in that range, on average", ratio,
+    ((M.e1rm(24, 8 + 2) + M.e1rm(24, 7)) / 2) / M.e1rm(40, 1));
+  const p = M.planFor(st, s, {});
+  const size = p.picks.hypertrophy;
+  ok("the size pick sits on a real rung", size.weight % 4 === 0, String(size.weight));
+  ok("inside the size range", M.inZone(size.reps, M.ZONES.hypertrophy), String(size.reps));
+  ok("and meets the scaled target with a rep in hand",
+    size.weight * M.repFactor(size.reps + 1) * M.setBonus(size.sets, 0.05) >= p.target * ratio - 1e-9);
+  ok("which is lighter than extrapolating from the single", size.weight <= M.planFor(st, { ...s, planRir: 0 }, {}).picks.hypertrophy.weight);
+  const taken = M.planFor(st, s, { zone: "hypertrophy", reps: size.reps, sets: size.sets });
+  ok("taking it makes it the prescription", taken.weight === size.weight && taken.reps === size.reps);
+}
+
+// --- with no pick taken, the card carries on with the last session's pick ---
+{
+  const s = { formula: "epley", setBonusK: 0.05, lookbackDays: 84, defaultStep: 2.5, defaultGainPerWeek: 0.0075,
+    idealBand: 0.01, stretchBand: 0.03, readiness: "off", planRir: 1 };
+  const ex = { id: "sq", name: "Squat", kind: "weight", step: 2.5, base: 20, gainPerWeek: 0.0075, setsPerSession: 3, setsPerWeek: 10 };
+  const top = { zone: "topset", role: "top", weight: 120, reps: 4, sets: 1 };
+  const back = { zone: "topset", role: "backoff", weight: 95, reps: 8, sets: 3 };
+  const entries = [
+    { id: "a", date: "2026-10-28", exerciseId: "sq", weight: 120, reps: 2, sets: 1, rir: 0, seq: 1, plan: top },
+    { id: "b", date: "2026-10-28", exerciseId: "sq", weight: 100, reps: 5, sets: 3, rir: 0, seq: 2, plan: back },
+  ];
+  const st = M.allStats([ex], entries, s, "2026-11-02")[0];
+  ok("the last session's top set is the plan it followed", M.lastSessionPlan(st)?.role === "top");
+  const p = M.planFor(st, s, {});
+  ok("a top set + back-offs lift reopens as one", p.zone === "topset" && !!p.topset, p.zone);
+  ok("at the top set's planned reps, not the two it managed", p.topset.top.reps === 4, String(p.topset?.top.reps));
+  ok("a pick chosen on the card still wins", M.planFor(st, s, { zone: "strength" }).zone === "strength");
+  ok("and with no buffer the sheet's behaviour stands", M.planFor(st, { ...s, planRir: 0 }, {}).zone === "strength");
+}
+
 /* ------------------------------------------------------------------ report */
 
 console.log(`\n${pass} checks passed`);
