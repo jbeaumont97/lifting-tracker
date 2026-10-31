@@ -294,6 +294,26 @@ export function renderSetup(ctx) {
   const s = settings;
   const mathsCard = el("div", { class: "card card-pad" }, [
     el("div", { class: "field-block" }, [
+      el("span", { class: "field-label", text: "Reps in reserve to plan for" }),
+      chipGroup({
+        label: "Reps in reserve to plan for",
+        value: String(Math.round(Number(s.planRir) || 0)),
+        options: [
+          { value: "0", label: "0", sub: "spreadsheet" },
+          { value: "1", label: "1" },
+          { value: "2", label: "2" },
+        ],
+        onChange: (v) => {
+          store.updateSettings({ planRir: Number(v) });
+          ctx.refresh();
+        },
+      }),
+      el("p", {
+        class: "field-hint",
+        text: "Every plan leaves this many in hand, and a set's logged RIR counts towards what it proves. 0 is the spreadsheet's maths: plans to failure, RIR ignored.",
+      }),
+    ]),
+    el("div", { class: "field-block" }, [
       el("span", { class: "field-label", text: "e1RM formula" }),
       chipGroup({
         label: "Formula",

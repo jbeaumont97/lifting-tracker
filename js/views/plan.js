@@ -715,11 +715,16 @@ function topsetDetail(stats, plan, ctx) {
         el('span', { class: 'topset-option-weight', text: `${fmtWeight(opt.weight)} kg` }),
         el('span', { class: 'cell-glyph', 'aria-hidden': 'true', text: opt.band.glyph }),
       ]))),
-    el('p', { class: 'grid-note', text: 'Each one meets the same target as a single set. The colour judges the top set; the back-offs are not chased.' }),
+    el('p', { class: 'grid-note', text: ctx.settings.planRir
+      ? `Each one meets the same target as a single set, with ${ctx.settings.planRir} in reserve. The colour judges the top set.`
+      : 'Each one meets the same target as a single set. The colour judges the top set; the back-offs are not chased.' }),
   ]));
 
   // --- the back-offs: a dose, set directly ---
-  const pct = ts.backoff.fraction ?? TOPSET.backoffFraction;
+  // Auto: solved from the last back-offs (or estimated without any), rather
+  // than a fixed share of the top set. Choosing a percentage overrides it.
+  const auto = ts.backoff.source === 'history' || ts.backoff.source === 'estimate';
+  const pct = auto ? null : ts.backoff.fraction ?? TOPSET.backoffFraction;
   wrap.append(el('div', { class: 'grid-block' }, [
     el('div', { class: 'grid-head' }, [
       el('h3', { text: 'Back-offs' }),
@@ -738,15 +743,21 @@ function topsetDetail(stats, plan, ctx) {
     ]),
     el('div', { class: 'field-block' }, [
       el('span', { class: 'stepper-label', text: 'Load, % of the top set' }),
-      el('div', { class: 'chips topset-pcts', role: 'radiogroup', 'aria-label': 'Back-off load' },
-        TOPSET.backoffFractions.map((f) => {
-          const on = Math.abs(f - pct) < 1e-9;
+      el('div', { class: 'chips topset-pcts', role: 'radiogroup', 'aria-label': 'Back-off load' }, [
+        el('button', {
+          type: 'button', role: 'radio', class: `chip${auto ? ' is-selected' : ''}`,
+          'aria-checked': auto ? 'true' : 'false',
+          'aria-label': ts.backoff.source === 'history' ? 'Auto: from your last back-offs' : 'Auto: estimated',
+          onclick: () => { tap(); set({ backoffPct: null }); },
+        }, ['Auto']),
+        ...TOPSET.backoffFractions.map((f) => {
+          const on = pct !== null && Math.abs(f - pct) < 1e-9;
           return el('button', {
             type: 'button', role: 'radio', class: `chip${on ? ' is-selected' : ''}`,
             'aria-checked': on ? 'true' : 'false',
             onclick: () => { tap(); set({ backoffPct: f }); },
           }, [`${Math.round(f * 100)}%`]);
-        })),
+        })]),
     ]),
     el('p', { class: 'grid-note', text: `${fmt(ts.hardSets, 1)} hard sets across the session.` }),
   ]));

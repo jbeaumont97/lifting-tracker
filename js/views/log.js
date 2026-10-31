@@ -633,8 +633,8 @@ function entryForm(st, ctx, settings) {
     // In live mode the number that matters is what the SESSION will be worth
     // once this set is in — not what one set on its own scores.
     const adj = live
-      ? sessionAdjWith(todays, { weight: w, reps: r }, settings, ex.kind)
-      : adjE1rm(w, r, s, settings, ex.kind);
+      ? sessionAdjWith(todays, { weight: w, reps: r, rir: form.rir }, settings, ex.kind)
+      : adjE1rm(w, r, s, settings, ex.kind, form.rir);
     const target1rm = plan?.ready ? plan.target : null;
     const band = target1rm
       ? bandFor(
@@ -942,10 +942,11 @@ function entryForm(st, ctx, settings) {
   // The preview and the button label follow the levers without re-rendering.
   // Rebuilding the view would take the caret out of whichever field is being
   // typed into, which is why this screen used to repaint itself by hand; bind()
-  // is that same idea, minus the bookkeeping. The key is the three numbers the
-  // preview actually depends on, so moving RIR or typing a note writes nothing.
+  // is that same idea, minus the bookkeeping. The key is what the preview
+  // actually depends on — the levers, and RIR, which a reps-in-reserve plan
+  // credits — so typing a note writes nothing.
   const levers = () => `${form.weight}|${form.reps}|${form.sets}`;
-  bind(preview, levers, paint);
+  bind(preview, () => `${levers()}|${form.rir}`, paint);
   bind(primary, () => `${levers()}|${form.rir}|${store.getDay(form.date) ? 1 : 0}`, relabel);
 
   // Steppers that are typed into rather than nudged still have to be heard.
@@ -1476,7 +1477,7 @@ function save(st, ctx) {
     notes: form.notes,
     plan,
   });
-  const adj = adjE1rm(w, r, s, ctx.settings, st.exercise.kind);
+  const adj = adjE1rm(w, r, s, ctx.settings, st.exercise.kind, form.rir);
   const beatBest = bestBefore > -Infinity && adj > bestBefore + 1e-9;
   // A personal best is the moment the whole app exists for — mark it.
   if (beatBest)
@@ -1643,7 +1644,7 @@ function historyRow(entry, name, isPR, ctx, settings) {
       el("span", {
         class: "row-adj",
         text: fmt(
-          adjE1rm(entry.weight, entry.reps, entry.sets, ctx.settings, kind),
+          adjE1rm(entry.weight, entry.reps, entry.sets, ctx.settings, kind, entry.rir),
           1,
         ),
       }),
